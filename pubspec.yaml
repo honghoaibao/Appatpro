@@ -1,0 +1,48 @@
+name: atpro
+description: AT PRO — TikTok Farm Automation
+publish_to: 'none'
+version: 1.4.7+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+  flutter: '>=3.19.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management
+  flutter_riverpod: ^2.4.9
+
+  # Navigation
+  go_router: ^12.1.3
+
+  # Charts
+  fl_chart: ^0.66.2
+
+  # WebSocket client (LAN multi-device)
+  web_socket_channel: ^2.4.0
+
+  # UI
+  google_fonts: ^6.1.0
+  timeago: ^3.6.0
+  intl: ^0.19.0
+
+  # SVG rendering
+  flutter_svg: ^2.0.9
+
+  # Export / Share
+  path_provider: ^2.1.2
+  share_plus: ^7.2.2        # v9 không tồn tại — pin v7 stable
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1     # v4 yêu cầu Dart 3.3+ — pin v3
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/icons/
+    - assets/images/
+    - assets/fonts/

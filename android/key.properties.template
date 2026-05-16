@@ -1,0 +1,8 @@
+# key.properties — AT PRO Android signing config
+# ⚠️  KHÔNG commit file này lên git — đã thêm vào .gitignore
+# Copy file này thành key.properties và điền thông tin thật
+
+storePassword=YOUR_KEYSTORE_PASSWORD
+keyPassword=YOUR_KEY_PASSWORD
+keyAlias=atpro
+storeFile=../keystore/atpro-release.jks

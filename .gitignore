@@ -1,0 +1,54 @@
+# ═══════════════════════════════════════════════════════════════
+#  .gitignore — AT PRO Android
+# ═══════════════════════════════════════════════════════════════
+
+# ── SECRETS (KHÔNG BAO GIỜ COMMIT) ───────────────────────────
+android/key.properties
+android/keystore/
+*.jks
+*.keystore
+*.p12
+
+# ── Flutter ───────────────────────────────────────────────────
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+dist/
+
+# ── Dart ──────────────────────────────────────────────────────
+*.dart_tool/
+doc/api/
+.dart_tool/
+pubspec.lock    # Uncomment nếu là app (không phải lib)
+
+# ── Android ───────────────────────────────────────────────────
+**/android/**/gradle-wrapper.jar
+**/android/.gradle
+**/android/captures/
+**/android/gradlew
+**/android/gradlew.bat
+**/android/local.properties
+**/android/**/GeneratedPluginRegistrant.java
+**/.cxx/
+**/android/app/debug/
+**/android/app/profile/
+**/android/app/release/
+
+# ── IDE ───────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.DS_Store
+Thumbs.db
+
+# ── Debug symbols ─────────────────────────────────────────────
+dist/debug_symbols/
+
+# ── Logs ──────────────────────────────────────────────────────
+*.log

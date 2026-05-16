@@ -1,0 +1,177 @@
+name: AT PRO — Build APK
+
+on:
+  push:
+    branches: [ main, release/* ]
+    tags:     [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (vd: 1.4.7)'
+        required: true
+        default:  '1.4.7'
+      build:
+        description: 'Build number'
+        required: true
+        default:  '1'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      # Dùng env var để check secrets — secrets context không available trong step if
+      HAS_KEYSTORE: ${{ secrets.KEYSTORE_BASE64 != '' && secrets.KEYSTORE_PASSWORD != '' && secrets.KEY_PASSWORD != '' && secrets.KEY_ALIAS != '' }}
+
+    steps:
+
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: Set up Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.22.0'
+        channel: 'stable'
+        cache: true
+
+    - name: Cache Gradle
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: gradle-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+        restore-keys: gradle-
+
+    - name: Cache pub
+      uses: actions/cache@v4
+      with:
+        path: ${{ env.PUB_CACHE }}
+        key: pub-${{ hashFiles('pubspec.lock') }}
+        restore-keys: pub-
+
+    - name: Create local.properties
+      run: |
+        # flutter.sdk must point to Flutter SDK root (parent of bin/)
+        FLUTTER_BIN=$(which flutter)
+        FLUTTER_SDK=$(dirname $(dirname "$FLUTTER_BIN"))
+        ANDROID_SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+
+        printf "sdk.dir=%s\nflutter.sdk=%s\n" "$ANDROID_SDK" "$FLUTTER_SDK" > android/local.properties
+        echo "✅ local.properties:"
+        cat android/local.properties
+
+    - name: Flutter pub get
+      run: flutter pub get
+
+    # ── Signing (tuỳ chọn) ─────────────────────────────────────
+    # Nếu chưa có keystore: bỏ qua, build dùng debug signing tự động
+    # Nếu đã có: thêm 4 secrets vào repo Settings → Secrets and variables → Actions:
+    #   KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_PASSWORD, KEY_ALIAS
+    - name: Setup signing (nếu có keystore)
+      if: env.HAS_KEYSTORE == 'true'
+      env:
+        KEYSTORE_BASE64:  ${{ secrets.KEYSTORE_BASE64 }}
+        STORE_PASSWORD:   ${{ secrets.KEYSTORE_PASSWORD }}
+        KEY_PASSWORD:     ${{ secrets.KEY_PASSWORD }}
+        KEY_ALIAS:        ${{ secrets.KEY_ALIAS }}
+      run: |
+        mkdir -p android/keystore
+        echo "$KEYSTORE_BASE64" | base64 --decode > android/keystore/atpro-release.jks
+        cat > android/key.properties << PROPS
+        storePassword=$STORE_PASSWORD
+        keyPassword=$KEY_PASSWORD
+        keyAlias=$KEY_ALIAS
+        storeFile=../keystore/atpro-release.jks
+        PROPS
+        echo "✅ Release signing configured"
+
+    # ── Version ────────────────────────────────────────────────
+    - name: Determine version
+      id: ver
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          VER="${{ github.event.inputs.version }}"
+          BLD="${{ github.event.inputs.build }}"
+        elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+          VER="${{ github.ref_name }}"; VER="${VER#v}"
+          BLD="${{ github.run_number }}"
+        else
+          VER="1.4.7"
+          BLD="${{ github.run_number }}"
+        fi
+        echo "version=$VER"  >> $GITHUB_OUTPUT
+        echo "build=$BLD"    >> $GITHUB_OUTPUT
+        echo "apk=att_v${VER}_fix${BLD}.apk" >> $GITHUB_OUTPUT
+
+    - name: Update pubspec version
+      run: |
+        sed -i "s/^version: .*/version: ${{ steps.ver.outputs.version }}+${{ steps.ver.outputs.build }}/" pubspec.yaml
+
+    # ── Analyze ────────────────────────────────────────────────
+    - name: Flutter analyze
+      run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+    # ── Build ──────────────────────────────────────────────────
+    - name: Build APK
+      run: |
+        flutter build apk \
+          --release \
+          --obfuscate \
+          --split-debug-info=dist/debug_symbols \
+          --dart-define=APP_VERSION="${{ steps.ver.outputs.version }}" \
+          --dart-define=BUILD_NUMBER="${{ steps.ver.outputs.build }}"
+
+    - name: Rename APK
+      run: |
+        mkdir -p dist
+        cp build/app/outputs/flutter-apk/app-release.apk dist/${{ steps.ver.outputs.apk }}
+        echo "APK: $(du -sh dist/${{ steps.ver.outputs.apk }} | cut -f1)"
+
+    # ── Upload artifact ────────────────────────────────────────
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.ver.outputs.apk }}
+        path: dist/${{ steps.ver.outputs.apk }}
+        retention-days: 30
+
+    # ── GitHub Release (chỉ khi push tag) ─────────────────────
+    - name: Create GitHub Release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+        name: AT PRO v${{ steps.ver.outputs.version }}
+        body: |
+          ## AT PRO v${{ steps.ver.outputs.version }}
+          Build: ${{ steps.ver.outputs.build }} | Commit: ${{ github.sha }}
+
+          ### Cài đặt
+          1. Download APK bên dưới
+          2. Cài → Settings → Accessibility → AT PRO Automation → Bật ON
+        files: dist/${{ steps.ver.outputs.apk }}
+
+    # ── Summary ────────────────────────────────────────────────
+    - name: Summary
+      run: |
+        SIGNED=$([[ -f android/key.properties ]] && echo "Release (keystore)" || echo "Debug (tạm thời)")
+        echo "## ✅ Build xong" >> $GITHUB_STEP_SUMMARY
+        echo "| | |" >> $GITHUB_STEP_SUMMARY
+        echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+        echo "| APK | \`${{ steps.ver.outputs.apk }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| Signing | $SIGNED |" >> $GITHUB_STEP_SUMMARY
+        echo "| Size | $(du -sh dist/${{ steps.ver.outputs.apk }} | cut -f1) |" >> $GITHUB_STEP_SUMMARY
