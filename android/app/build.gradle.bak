@@ -1,0 +1,143 @@
+plugins {
+    id "com.android.application"
+    id "org.jetbrains.kotlin.android"
+    id "org.jetbrains.kotlin.kapt"
+    id "org.jetbrains.kotlin.plugin.serialization"
+}
+
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withReader('UTF-8') { reader ->
+        localProperties.load(reader)
+    }
+}
+
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('key.properties')
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+android {
+    namespace "com.atpro"
+    compileSdk 34
+    ndkVersion "25.1.8937393"
+
+    compileOptions {
+        coreLibraryDesugaringEnabled true
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    buildFeatures {
+        compose true
+    }
+
+    // Compose compiler version must match Kotlin version.
+    // Kotlin 1.9.25 → Compose Compiler 1.5.15
+    composeOptions {
+        kotlinCompilerExtensionVersion '1.5.15'
+    }
+
+    defaultConfig {
+        applicationId "com.atpro"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "v1.0.1 (thử nghiệm #1)"
+        multiDexEnabled true
+    }
+
+    signingConfigs {
+        release {
+            if (keystorePropertiesFile.exists()) {
+                def storeFilePath = keystoreProperties['storeFile']
+                // Guard: only apply signing if all 4 required values are present.
+                // A null storeFile in an applied signingConfig causes AGP 8.x build failure.
+                if (storeFilePath) {
+                    storeFile     file(storeFilePath)
+                    storePassword keystoreProperties['storePassword']
+                    keyAlias      keystoreProperties['keyAlias']
+                    keyPassword   keystoreProperties['keyPassword']
+                }
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            debuggable true
+        }
+        release {
+            // Use release keystore when key.properties is present AND storeFile is set.
+            // Fall back to debug keystore otherwise (local/CI builds without keystore).
+            // NOTE: debug keystore varies per machine — install will fail with
+            // "App not installed" if device has a prior build from a different machine.
+            // Fix: uninstall old APK before installing, or configure key.properties.
+            signingConfig keystorePropertiesFile.exists() && keystoreProperties['storeFile']
+                ? signingConfigs.release
+                : signingConfigs.debug
+            minifyEnabled false
+            shrinkResources false
+        }
+    }
+}
+
+dependencies {
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
+
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.9.25'
+
+    // AppCompat — required by MainActivity (AppCompatActivity) and Theme.AppCompat.NoActionBar in styles.xml
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+
+    // Room DB
+    def room_version = "2.6.1"
+    implementation "androidx.room:room-runtime:$room_version"
+    implementation "androidx.room:room-ktx:$room_version"
+    kapt "androidx.room:room-compiler:$room_version"
+
+    // WorkManager
+    implementation 'androidx.work:work-runtime-ktx:2.9.0'
+
+    // DataStore
+    implementation 'androidx.datastore:datastore-preferences:1.0.0'
+
+    // Lifecycle
+    implementation 'androidx.lifecycle:lifecycle-service:2.8.0'
+    implementation 'androidx.multidex:multidex:2.0.1'
+
+    // HTTP client for notifications (Telegram/Discord)
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+
+    // NanoHTTPD WebSocket server
+    implementation 'org.nanohttpd:nanohttpd-websocket:2.3.1'
+
+    // JSON
+    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3'
+
+    // ── Jetpack Compose (native dashboard — TASK-007) ───────────
+    implementation(platform('androidx.compose:compose-bom:2024.05.00'))
+    implementation 'androidx.compose.material3:material3'
+    implementation 'androidx.compose.material:material-icons-extended'
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.ui:ui-graphics'
+    implementation 'androidx.compose.ui:ui-tooling-preview'
+    implementation 'androidx.activity:activity-compose:1.9.0'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.8.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.8.0'
+    debugImplementation 'androidx.compose.ui:ui-tooling'
+
+    // ── Unit test deps ────────────────────────────────────────
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'io.mockk:mockk:1.13.10'
+    testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3'
+    testImplementation 'androidx.test:core-ktx:1.5.0'
+}
