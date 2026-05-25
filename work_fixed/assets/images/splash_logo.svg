@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400">
+  <defs>
+    <linearGradient id="logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6C63FF"/>
+      <stop offset="100%" style="stop-color:#EC4899"/>
+    </linearGradient>
+    <linearGradient id="ring1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6C63FF" stop-opacity="0.3"/>
+      <stop offset="100%" style="stop-color:#6C63FF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="ring2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#EC4899" stop-opacity="0.2"/>
+      <stop offset="100%" style="stop-color:#EC4899" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Pulse rings -->
+  <circle cx="200" cy="200" r="170" fill="none" stroke="url(#ring1)" stroke-width="1"/>
+  <circle cx="200" cy="200" r="140" fill="none" stroke="url(#ring2)" stroke-width="1"/>
+
+  <!-- Background card -->
+  <rect x="100" y="100" width="200" height="200" rx="40"
+        fill="#1A1A2E" stroke="#6C63FF" stroke-width="1.5" stroke-opacity="0.5"/>
+
+  <!-- Gradient card layer -->
+  <rect x="100" y="100" width="200" height="90" rx="40" fill="url(#logo-grad)" fill-opacity="0.15"/>
+
+  <!-- A -->
+  <polygon points="155,270 175,200 185,170 195,200 215,270" fill="none"
+           stroke="url(#logo-grad)" stroke-width="10" stroke-linejoin="round" stroke-linecap="round"/>
+  <line x1="165" y1="240" x2="205" y2="240" stroke="url(#logo-grad)" stroke-width="10" stroke-linecap="round"/>
+
+  <!-- T -->
+  <line x1="230" y1="170" x2="290" y2="170" stroke="white" stroke-width="10" stroke-linecap="round" stroke-opacity="0.9"/>
+  <line x1="260" y1="170" x2="260" y2="270" stroke="white" stroke-width="10" stroke-linecap="round" stroke-opacity="0.9"/>
+
+  <!-- Accent dot -->
+  <circle cx="285" cy="268" r="10" fill="#EC4899"/>
+
+  <!-- Bottom label -->
+  <text x="200" y="335" text-anchor="middle"
+        font-family="system-ui, -apple-system, sans-serif"
+        font-size="13" font-weight="600" fill="#6B7280" letter-spacing="4">
+    AT PRO
+  </text>
+  <text x="200" y="355" text-anchor="middle"
+        font-family="system-ui, -apple-system, sans-serif"
+        font-size="10" fill="#4B5563" letter-spacing="2">
+    AUTOMATION
+  </text>
+</svg>
