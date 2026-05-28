@@ -1,0 +1,133 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+        Android 11+ (API 30) package visibility: khai báo các package/scheme cần tương tác.
+        Nếu thiếu block này: resolveActivity() và getLaunchIntentForPackage() luôn trả về null
+        → TikTokDeepLinks.openTikTok() không thể launch TikTok → farm silent-fail ngay lập tức.
+        Fix cho: BUG-FARM-001 (2026-05-25)
+    -->
+    <queries>
+        <!-- TikTok VN (trill) -->
+        <package android:name="com.ss.android.ugc.trill" />
+        <!-- TikTok global (musically) -->
+        <package android:name="com.zhiliaoapp.musically" />
+        <!-- TikTok aweme variant -->
+        <package android:name="com.ss.android.ugc.aweme" />
+        <!-- Deeplink schemes -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="snssdk1180" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="tiktok" />
+        </intent>
+    </queries>
+
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+    <!-- Overlay: floating farm monitor popup -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <!-- Push notifications (Android 13+) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+
+    <application
+        android:label="AT PRO"
+        android:name=".AtProApplication"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:theme="@style/AppTheme"
+        android:allowBackup="false"
+        android:hardwareAccelerated="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/AppTheme"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".accessibility.TikTokAccessibilityService"
+            android:exported="true"
+            android:label="AT PRO Automation"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config"/>
+        </service>
+
+        <service
+            android:name=".data.FarmForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"/>
+
+        <receiver
+            android:name=".data.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".scheduler.FarmAlarmReceiver"
+            android:exported="false"/>
+
+        <!-- Native Compose dashboard — TASK-007 -->
+        <activity
+            android:name=".ui.dashboard.DashboardActivity"
+            android:exported="false"
+            android:hardwareAccelerated="true"
+            android:theme="@style/AppTheme"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- Native Compose accounts — TASK-009 -->
+        <activity
+            android:name=".ui.accounts.AccountsActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- Native Compose logs — TASK-010 -->
+        <activity
+            android:name=".ui.logs.LogsActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme" />
+
+        <!-- Native Compose stats — TASK-012 -->
+        <activity
+            android:name=".ui.stats.StatsActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme" />
+
+        <!-- Native Compose config — TASK-015 -->
+        <activity
+            android:name=".ui.config.ConfigActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- Native Compose schedule — TASK-016 -->
+        <activity
+            android:name=".ui.schedule.ScheduleActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme" />
+
+    </application>
+</manifest>
