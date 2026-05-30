@@ -422,16 +422,21 @@ object NodeTraverser {
     }
 
     /**
-     * Detect Live stream — v1.1.3 cải tiến 3 tầng.
+     * Detect Live stream — v1.1.4 cải tiến 4 tầng.
      * Tương đương: TikTokAutomation.detect_live()
      *
-     * Tier 1 — Resource-ID (nhanh, chính xác, offline):
-     *   Mở rộng danh sách ID so với v1.1.2: thêm live_duration, live_viewer,
-     *   live_anchor, live_host, live_close — bắt được nhiều biến thể TikTok APK hơn.
+     * Tier 1 — Resource-ID partial match (nhanh, chính xác, offline):
+     *   v1.1.4: Dùng contains() thay vì exact match — bắt được ID dạng
+     *   "com.zhiliaoapp.musically:id/live_room_container" (full resource-id).
+     *   Mở rộng thêm: live_stream, live_badge, broadcast.
+     *
+     * Tier 1b — Node resource-id full-path scan:
+     *   Quét toàn bộ node, kiểm tra viewIdResourceName chứa fragment "live".
+     *   Bắt được các biến thể TikTok APK mà exact-list bỏ sót.
      *
      * Tier 2 — Strict text signals (single-signal đủ để kết luận):
      *   "đang trực tiếp" / "đang phát trực tiếp" là chữ TikTok hiển thị DUY NHẤT
-     *   trong live room → một tín hiệu đã đủ kết luận, không cần đếm 2+.
+     *   trong live room → một tín hiệu đã đủ kết luận.
      *
      * Tier 3 — Soft signal count (phải >= 2 để tránh false positive):
      *   "tặng quà", "người xem", "bình luận trực tiếp" có thể xuất hiện lẻ trong
@@ -440,52 +445,69 @@ object NodeTraverser {
     fun detectLive(root: AccessibilityNodeInfo?): Boolean {
         root ?: return false
 
-        // Tier 1: Resource-ID — mở rộng so với v1.1.2
-        val LIVE_IDS = listOf(
+        // Tier 1: Resource-ID partial match — bắt cả short-id và full path
+        val LIVE_ID_FRAGMENTS = listOf(
             "liveroom", "live_room", "live_gift", "live_rank", "live_chat",
             "live_duration", "live_viewer", "live_viewers", "live_anchor",
             "live_host", "live_close", "live_exit", "live_countdown",
             "live_button", "btn_exit_live", "exit_live",
+            "live_stream", "live_badge", "live_comment", "broadcast",
+            "live_panel", "live_info", "live_title",
         )
-        if (LIVE_IDS.any { findByResourceId(root, it) != null }) return true
+        if (LIVE_ID_FRAGMENTS.any { findByResourceId(root, it) != null }) return true
+
+        // Tier 1b: Full-path resource-id scan — quét toàn bộ node tree
+        // TikTok APK đặt full path dạng "com.zhiliaoapp.musically:id/live_room_xxx"
+        val hasLiveId = traverseAll(root).any { node ->
+            val resId = node.viewIdResourceName?.lowercase() ?: return@any false
+            resId.contains("/live") || resId.contains("liveroom") || resId.contains("broadcast")
+        }
+        if (hasLiveId) return true
 
         val text = getAllText(root).lowercase()
 
         // Tier 2: Strict signals — một tín hiệu đủ để kết luận
         val STRICT_SIGNALS = listOf(
-            "đang trực tiếp",       // badge TikTok VN
-            "đang phát trực tiếp",  // toast khi vào live
-            "liveroom",             // TikTok internal class name
-            ":id/live",             // resource-id fragment
+            "đang trực tiếp",        // badge TikTok VN
+            "đang phát trực tiếp",   // toast khi vào live
+            "đang live",             // variant ngắn
+            "liveroom",              // TikTok internal class name
+            ":id/live",              // resource-id fragment trong text dump
         )
         if (STRICT_SIGNALS.any { it in text }) return true
 
         // Tier 3: Soft signals — cần >= 2 để tránh false positive từ caption video
         val SOFT_SIGNALS = listOf(
-            "tặng quà",             // nút gửi gift trong live
-            "người xem",            // viewer count badge
-            "bình luận trực tiếp",  // live comment stream
-            "kết thúc phát sóng",   // end-live button
+            "tặng quà",              // nút gửi gift trong live
+            "người xem",             // viewer count badge
+            "bình luận trực tiếp",   // live comment stream
+            "kết thúc phát sóng",    // end-live button
             "live now",
             "viewers",
+            "tặng tim",              // heart gift trong live VN
         )
         return SOFT_SIGNALS.count { it in text } >= 2
     }
 
     /**
-     * Detect quảng cáo trong feed TikTok — v1.1.3.
-     * Tương đương: XMLParser.detect_ad() (Python backend).
+     * Detect quảng cáo trong feed TikTok — v1.1.4.
+     * Tương đương: XMLParser.detect_ad() (Python backend).\
      *
      * Tier 1 — Resource-ID: nhanh, chính xác.
      *   TikTok gắn ID rõ ràng cho các element quảng cáo (skip button, badge, CTA).
+     *   v1.1.4: Thêm partial-scan toàn bộ node tree qua viewIdResourceName.
      *
      * Tier 2 — Exact text node: "Quảng cáo" / "Sponsored" là badge dán DUY NHẤT
      *   trong feed — dùng exact match để tránh bắt nhầm caption có chứa từ này.
+     *
+     * Tier 3 — Soft CTA signals (>= 2): "Tìm hiểu thêm", "Cài đặt ngay",
+     *   "Mua ngay" là các nút CTA phổ biến trong quảng cáo TikTok VN.
+     *   Một tín hiệu đơn lẻ có thể xuất hiện trong video thường → cần >= 2.
      */
     fun detectAd(root: AccessibilityNodeInfo?): Boolean {
         root ?: return false
 
-        // Tier 1: Resource-ID của các element TikTok ads
+        // Tier 1: Resource-ID exact list
         val AD_IDS = listOf(
             // Skip / close button
             "ad_skip", "skip_ad", "btn_skip_ad", "ad_skip_btn", "adSkipButton",
@@ -500,6 +522,13 @@ object NodeTraverser {
         )
         if (AD_IDS.any { findByResourceId(root, it) != null }) return true
 
+        // Tier 1b: Full-path resource-id scan cho AD
+        val hasAdId = traverseAll(root).any { node ->
+            val resId = node.viewIdResourceName?.lowercase() ?: return@any false
+            resId.contains("/ad_") || resId.contains("_ad/") || resId.contains("feed_ad")
+        }
+        if (hasAdId) return true
+
         // Tier 2: Exact text badge — tránh false positive từ caption/hashtag
         val AD_EXACT = listOf(
             "quảng cáo",            // TikTok VN badge
@@ -510,7 +539,23 @@ object NodeTraverser {
         )
         if (AD_EXACT.any { findByText(root, it, exact = true) != null }) return true
 
-        return false
+        // Tier 3: Soft CTA signals — >= 2 để tránh false positive
+        // Các nút này xuất hiện ĐỘC QUYỀN trong quảng cáo nhưng
+        // từng nút riêng lẻ có thể bắt nhầm video thông thường.
+        val text = getAllText(root).lowercase()
+        val AD_SOFT_SIGNALS = listOf(
+            "tìm hiểu thêm",        // "Learn more" CTA — rất phổ biến trong ads VN
+            "cài đặt ngay",         // App install ad
+            "mua ngay",             // Shopping ad
+            "đặt hàng ngay",        // Order now
+            "đăng ký ngay",         // Sign up ad
+            "xem thêm",             // See more — thường đi kèm badge quảng cáo
+            "shop now",
+            "download now",
+            "install now",
+            "learn more",
+        )
+        return AD_SOFT_SIGNALS.count { it in text } >= 2
     }
 
     /**
@@ -527,6 +572,63 @@ object NodeTraverser {
         )
         val text = getAllText(root).lowercase()
         return CHECKPOINT_KEYWORDS.any { it in text }
+    }
+
+    /**
+     * Detect màn hình Digital Wellbeing / Nghỉ ngơi của TikTok — v1.1.4.
+     *
+     * TikTok hiển thị màn hình này sau khi user xem video quá lâu liên tục.
+     * Màn hình toàn phần che phủ feed, hiển thị bài tập thở hoặc lời nhắc
+     * nghỉ ngơi, kèm nút "Quay lại ngay bây giờ" để tiếp tục xem.
+     *
+     * Ví dụ thực tế đã gặp (screenshot 2026-05-30):
+     *   - Header: "Hít vào" (breathing exercise)
+     *   - Button: "Quay lại ngay bây giờ"
+     *   - Footer: "Khám phá các công cụ chăm sóc sức khỏe"
+     *
+     * Detection 2 tầng:
+     *   Tier 1: Tìm trực tiếp nút "Quay lại ngay bây giờ" (chính xác nhất).
+     *   Tier 2: Quét text wellbeing đặc trưng để bắt các biến thể màn hình khác.
+     */
+    fun detectWellbeingScreen(root: AccessibilityNodeInfo?): Boolean {
+        root ?: return false
+
+        // Tier 1: Tìm nút "Quay lại" đặc trưng — tín hiệu mạnh nhất
+        if (findReturnFromWellbeingButton(root) != null) return true
+
+        // Tier 2: Text signals đặc trưng của wellbeing screen
+        val text = getAllText(root).lowercase()
+        val WELLBEING_SIGNALS = listOf(
+            "khám phá các công cụ chăm sóc sức khỏe",  // footer cố định
+            "sức khỏe kỹ thuật số",                     // "Digital Wellbeing" VN
+            "digital wellbeing",                         // EN variant
+            "screen time",                               // EN screen time
+            "thời gian sử dụng màn hình",               // VN screen time
+            "take a break",                              // EN break screen
+        )
+        return WELLBEING_SIGNALS.any { it in text }
+    }
+
+    /**
+     * Tìm nút "Quay lại ngay bây giờ" trên màn hình Wellbeing TikTok.
+     *
+     * Tìm theo text theo thứ tự ưu tiên — text chính xác trước, fallback sau.
+     * Trả về null nếu không tìm thấy nút nào.
+     */
+    fun findReturnFromWellbeingButton(root: AccessibilityNodeInfo?): NodeResult? {
+        root ?: return null
+        val RETURN_TEXTS = listOf(
+            "quay lại ngay bây giờ",   // text chính xác nhất (screenshot 2026-05-30)
+            "return now",               // EN variant
+            "tiếp tục xem",            // "Continue watching" VN
+            "continue watching",        // EN variant
+            "xem tiếp",                // short VN variant
+        )
+        for (text in RETURN_TEXTS) {
+            val node = findByText(root, text, ignoreCase = true)
+            if (node != null) return node
+        }
+        return null
     }
 
     /**

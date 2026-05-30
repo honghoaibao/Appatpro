@@ -700,8 +700,22 @@ class AutomationEngine(
             // ── [2] Popup ─────────────────────────────────────────────────
             val popupResult = popup.handleIfPresent()
             if (popupResult.handled) {
+
                 lostStreak = 0
                 delay(500)
+                continue
+            }
+
+            // ── [2b] Wellbeing screen (màn hình nghỉ ngơi TikTok) ────────
+            // [v1.1.4] TikTok hiển thị màn hình toàn phần yêu cầu nghỉ ngơi
+            // sau khi xem quá lâu → che phủ feed → app bị stuck.
+            // Click "Quay lại ngay bây giờ" để tiếp tục farm.
+            val wellbeingBtn = NodeTraverser.findReturnFromWellbeingButton(host.getRootNode())
+            if (wellbeingBtn != null) {
+                log("WELLBEING: Màn hình nghỉ ngơi TikTok — click 'Quay lại ngay bây giờ'")
+                host.clickNode(wellbeingBtn.node)
+                delay(1_500)
+                lostStreak = 0
                 continue
             }
 
@@ -1043,13 +1057,24 @@ class AutomationEngine(
     }
 
     /**
-     * Phục hồi về feed — 3 chiến lược theo thứ tự leo thang:
+     * Phục hồi về feed — 4 chiến lược theo thứ tự leo thang:
      *
+     *   Tier 0: (v1.1.4) Click "Quay lại ngay bây giờ" nếu đang ở Wellbeing screen
      *   Tier 1: pressBack nhiều lần (config.maxBackAttempts)
      *   Tier 2: Click Home tab nếu nav bar đang hiển thị
      *   Tier 3: Kill + relaunch TikTok (nuclear option)
      */
     private suspend fun recoverToFeed(): Boolean {
+        // Tier 0: [v1.1.4] Wellbeing screen — click nút trở về trước khi pressBack
+        // pressBack KHÔNG hoạt động trên màn hình này; phải click button.
+        val wellbeingBtn = NodeTraverser.findReturnFromWellbeingButton(host.getRootNode())
+        if (wellbeingBtn != null) {
+            log("RECOVER: Wellbeing screen — click 'Quay lại ngay bây giờ'")
+            host.clickNode(wellbeingBtn.node)
+            delay(2_000)
+            if (NodeTraverser.isOnFeedTab(host.getRootNode())) return true
+        }
+
         // Tier 1: pressBack
         repeat(config.maxBackAttempts) {
             host.pressBack()

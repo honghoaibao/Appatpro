@@ -2,10 +2,10 @@ name: AT PRO — Build APK
 
 on:
   push:
-    branches: [ main, release/* ]
+    branches: [ main, dev, release/* ]
     tags:     [ 'v*' ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, dev ]
   workflow_dispatch:
     inputs:
       version:
@@ -101,7 +101,7 @@ jobs:
           VER="${{ github.ref_name }}"; VER="${VER#v}"
           BLD="${{ github.run_number }}"
         else
-          VER="1.1.3"
+          VER="1.1.4"
           BLD="${{ github.run_number }}"
         fi
         echo "version=$VER"  >> $GITHUB_OUTPUT

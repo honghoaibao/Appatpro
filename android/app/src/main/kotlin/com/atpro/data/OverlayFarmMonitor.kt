@@ -332,7 +332,9 @@ object OverlayFarmMonitor {
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val lp = (overlayView?.layoutParams as? WindowManager.LayoutParams) ?: return@setOnTouchListener false
-                    lp.x = initialX + (event.rawX - touchX).toInt()
+                    // [v1.1.4 FIX] Gravity.END đảo ngược trục X: tăng lp.x = di chuyển sang TRÁI.
+                    // Phải phủ nhận delta X để drag sang phải → popup di chuyển sang phải.
+                    lp.x = initialX - (event.rawX - touchX).toInt()
                     lp.y = initialY + (event.rawY - touchY).toInt()
                     windowManager?.updateViewLayout(overlayView, lp); true
                 }

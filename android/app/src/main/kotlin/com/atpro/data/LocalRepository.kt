@@ -102,7 +102,7 @@ class LocalRepository(context: Context) : IFarmRepository {
         val started = sessionStartMap.remove(sessionId) ?: now
         val durationSecs = ((now - started) / 1000).toInt().coerceAtLeast(0)
 
-        sessions.close(sessionId, now, durationSecs)
+        sessions.close(sessionId, now, durationSecs, likes, follows, comments, videos)  // [v1.1.4 FIX]
         accounts.addStats(accountId, likes, follows, videos)  // dùng accountId được truyền vào
 
         Log.i(TAG, "Session $sessionId @$accountId closed — " +

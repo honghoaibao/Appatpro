@@ -20,9 +20,30 @@ interface SessionDao {
     @Insert
     suspend fun insert(session: SessionEntity): Long
 
-    /** Đóng session: ghi endedAt và tính durationSecs. */
-    @Query("UPDATE sessions SET endedAt = :endedAt, durationSecs = :duration WHERE id = :id")
-    suspend fun close(id: Long, endedAt: Long = System.currentTimeMillis(), duration: Int)
+    /**
+     * Đóng session: ghi endedAt, tính durationSecs và lưu stats.
+     * [v1.1.4 FIX] Thêm likes/follows/comments/videosWatched — trước đây
+     * các trường này không được update → session record luôn giữ giá trị 0.
+     */
+    @Query("""
+        UPDATE sessions SET
+            endedAt       = :endedAt,
+            durationSecs  = :duration,
+            likes         = :likes,
+            follows       = :follows,
+            comments      = :comments,
+            videosWatched = :videosWatched
+        WHERE id = :id
+    """)
+    suspend fun close(
+        id:            Long,
+        endedAt:       Long = System.currentTimeMillis(),
+        duration:      Int,
+        likes:         Int,
+        follows:       Int,
+        comments:      Int,
+        videosWatched: Int,
+    )
 
     /**
      * Tổng hợp theo ngày + account trong khoảng [since] → hiện tại.
