@@ -2,10 +2,10 @@ name: AT PRO — Build APK
 
 on:
   push:
-    branches: [ main, release/* ]
+    branches: [ main, dev, release/* ]
     tags:     [ 'v*' ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, dev ]
   workflow_dispatch:
     inputs:
       version:
