@@ -43,7 +43,7 @@ private val TextMuted = Color(0xFF6B7280)
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-fun StatsScreen(vm: StatsViewModel) {
+fun StatsScreen(vm: StatsViewModel, onNavigateUp: (() -> Unit)? = null) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     val range by vm.range.collectAsStateWithLifecycle()
     val activity = LocalContext.current as? Activity
@@ -61,7 +61,7 @@ fun StatsScreen(vm: StatsViewModel) {
                 .padding(horizontal = 4.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = { activity?.finish() }) {
+            IconButton(onClick = { onNavigateUp?.invoke() ?: activity?.finish() }) {
                 Icon(Icons.Rounded.ArrowBackIosNew, contentDescription = "Quay lại", tint = Color.White, modifier = Modifier.size(20.dp))
             }
             Column(Modifier.weight(1f)) {

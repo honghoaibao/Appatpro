@@ -48,8 +48,8 @@ android {
         applicationId "com.atpro"
         minSdk 24
         targetSdk 34
-        versionCode 14
-        versionName "v1.1.4"
+        versionCode 18
+        versionName "v1.1.6"
         multiDexEnabled true
     }
 

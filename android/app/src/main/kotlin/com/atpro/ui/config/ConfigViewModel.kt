@@ -48,7 +48,17 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
                 verifyAccount            = repo.getConfigBool  ("verify_account",      true),
                 enableSystemNotifications = repo.getConfigBool ("enable_system_notifications", true),
             )
-            _state.value = s
+            // [v1.1.4.1 FIX] Dùng update thay vì assignment trực tiếp để giữ lại
+            // trạng thái quyền đã được refreshPermissions() cập nhật. Nếu dùng
+            // _state.value = s (với permissions mặc định = false), load() sẽ ghi đè
+            // kết quả của refreshPermissions() nếu nó chạy trước khi load() hoàn tất.
+            _state.update { prev ->
+                s.copy(
+                    accessibilityGranted = prev.accessibilityGranted,
+                    overlayGranted       = prev.overlayGranted,
+                    notificationGranted  = prev.notificationGranted,
+                )
+            }
         }
     }
 

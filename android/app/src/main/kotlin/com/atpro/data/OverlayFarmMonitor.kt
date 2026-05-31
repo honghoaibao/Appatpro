@@ -200,10 +200,13 @@ object OverlayFarmMonitor {
     private fun startTicker() {
         val r = object : Runnable {
             override fun run() {
-                if (tickSessionSecs > 0) tickSessionSecs--
-                if (tickTotalSecs > 0) tickTotalSecs--
-                tvSessionTime?.text = formatTime(tickSessionSecs)
-                tvTotalTime?.text   = formatTime(tickTotalSecs)
+                // [v1.1.4.1 FIX] Không đếm ngược khi đang tạm dừng.
+                if (!isPaused) {
+                    if (tickSessionSecs > 0) tickSessionSecs--
+                    if (tickTotalSecs > 0) tickTotalSecs--
+                    tvSessionTime?.text = formatTime(tickSessionSecs)
+                    tvTotalTime?.text   = formatTime(tickTotalSecs)
+                }
                 handler.postDelayed(this, 1_000)
             }
         }

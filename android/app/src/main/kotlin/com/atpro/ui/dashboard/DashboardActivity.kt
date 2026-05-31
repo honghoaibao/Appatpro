@@ -7,24 +7,38 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.ui.graphics.Color
+import com.atpro.ui.MainScreen
+import com.atpro.ui.accounts.AccountsViewModel
+import com.atpro.ui.logs.LogsViewModel
+import com.atpro.ui.stats.StatsViewModel
 
 /**
- * DashboardActivity — host Activity cho native Compose dashboard.
- * Dashboard chinh cua AT PRO — native Compose (TASK-007, Flutter removed TASK-017).
+ * DashboardActivity — single-Activity host cho toàn bộ app kể từ v1.1.5.
  *
- * Extends AppCompatActivity (khong phai ComponentActivity) vi manifest dung
- * @style/AppTheme (parent: Theme.AppCompat.NoActionBar). AppCompatActivity la
- * superclass cua ComponentActivity nen Compose setContent/viewModels van hoat dong.
+ * v1.1.5 Chuyển sang tab navigation: Dashboard · Thống kê · Tài khoản · Nhật ký
+ * đều nằm trong MainScreen. Các Activity riêng (StatsActivity, AccountsActivity,
+ * LogsActivity) vẫn giữ nguyên cho backward compat nhưng không còn được dùng
+ * trong luồng điều hướng chính.
  *
- * FIX (crash startup): private fun enableEdgeToEdge() bi xoa vi cung JVM signature
- * voi ComponentActivity.enableEdgeToEdge() (@JvmOverloads). ART resolve invokevirtual
- * qua vtable -> goi parent's version thay vi local private method -> crash.
- * Window colors dat inline giong cac Activity khac.
+ * Mọi ViewModel được khởi tạo ở đây để sống cùng vòng đời Activity,
+ * không bị huỷ khi switch tab.
+ *
+ * FIX (crash startup): private fun enableEdgeToEdge() bị xóa vì cùng JVM signature
+ * với ComponentActivity.enableEdgeToEdge(). Window colors đặt inline.
  */
 class DashboardActivity : AppCompatActivity() {
 
-    private val vm: DashboardViewModel by viewModels {
+    private val dashboardVm: DashboardViewModel by viewModels {
         DashboardViewModel.Factory(applicationContext)
+    }
+    private val statsVm: StatsViewModel by viewModels {
+        StatsViewModel.Factory(applicationContext)
+    }
+    private val accountsVm: AccountsViewModel by viewModels {
+        AccountsViewModel.Factory(applicationContext)
+    }
+    private val logsVm: LogsViewModel by viewModels {
+        LogsViewModel.Factory(applicationContext)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,7 +52,12 @@ class DashboardActivity : AppCompatActivity() {
                     surface    = Color(0xFF1A1A2E),
                 )
             ) {
-                DashboardScreen(vm = vm)
+                MainScreen(
+                    dashboardVm = dashboardVm,
+                    statsVm     = statsVm,
+                    accountsVm  = accountsVm,
+                    logsVm      = logsVm,
+                )
             }
         }
     }

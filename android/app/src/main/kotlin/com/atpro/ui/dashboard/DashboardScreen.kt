@@ -11,6 +11,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -34,6 +36,10 @@ import com.atpro.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -68,6 +74,12 @@ fun DashboardScreen(vm: DashboardViewModel) {
     val state   by vm.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
+    // [v1.1.5] Trạng thái thu nhỏ popup — reset mỗi khi farm kết thúc
+    var isMinimized by remember { mutableStateOf(false) }
+    LaunchedEffect(state.isStartingUp) {
+        if (!state.isStartingUp) isMinimized = false
+    }
+
     // [v1.0.5] Kiểm tra phiên bản mới khi mở Dashboard — chạy 1 lần
     LaunchedEffect(Unit) { vm.checkForUpdate() }
 
@@ -95,14 +107,30 @@ fun DashboardScreen(vm: DashboardViewModel) {
             else         IdleView(state, vm)
         }
 
-        // ── Startup status popup ──────────────────────────────────────────────
-        if (state.isStartingUp) {
+        // ── [v1.1.5] Startup status popup — có nút thu nhỏ ──────────────────
+        if (state.isStartingUp && !isMinimized) {
             StartupStatusDialog(
-                status    = state.startupStatus,
+                status     = state.startupStatus,
+                isPaused   = state.isPaused,
+                onPause    = vm::pause,
+                onResume   = vm::resume,
+                onStop     = vm::stop,
+                onMinimize = { isMinimized = true },
+            )
+        }
+
+        // ── [v1.1.5] Bubble thu nhỏ — hiện khi popup bị minimize ────────────
+        AnimatedVisibility(
+            visible = state.isStartingUp && isMinimized,
+            enter   = fadeIn(tween(200)) + scaleIn(tween(220), initialScale = 0.6f),
+            exit    = fadeOut(tween(150)) + scaleOut(tween(150)),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 20.dp, bottom = 20.dp),
+        ) {
+            MinimizedBubble(
                 isPaused  = state.isPaused,
-                onPause   = vm::pause,
-                onResume  = vm::resume,
-                onStop    = vm::stop,
+                onExpand  = { isMinimized = false },
             )
         }
 
@@ -125,11 +153,12 @@ fun DashboardScreen(vm: DashboardViewModel) {
 
 @Composable
 private fun StartupStatusDialog(
-    status:   String,
-    isPaused: Boolean,
-    onPause:  () -> Unit,
-    onResume: () -> Unit,
-    onStop:   () -> Unit,
+    status:    String,
+    isPaused:  Boolean,
+    onPause:   () -> Unit,
+    onResume:  () -> Unit,
+    onStop:    () -> Unit,
+    onMinimize: () -> Unit,                          // [v1.1.5] thu nhỏ thành bubble
 ) {
     Dialog(
         onDismissRequest = { /* không dismiss khi tap ngoài */ },
@@ -157,7 +186,7 @@ private fun StartupStatusDialog(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 24.dp),
                 ) {
-                    // ── Spinner + tiêu đề trên cùng 1 hàng ──
+                    // ── Spinner + tiêu đề + nút thu nhỏ ──
                     Row(
                         verticalAlignment     = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -177,6 +206,19 @@ private fun StartupStatusDialog(
                                 color      = if (paused) Amber else Color.White,
                                 fontSize   = 14.sp,
                                 fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                        Spacer(Modifier.weight(1f))
+                        // [v1.1.5] Nút thu nhỏ — collapse popup thành bubble tròn
+                        IconButton(
+                            onClick  = onMinimize,
+                            modifier = Modifier.size(28.dp),
+                        ) {
+                            Icon(
+                                Icons.Rounded.KeyboardArrowDown,
+                                contentDescription = "Thu nhỏ",
+                                tint     = TextMuted,
+                                modifier = Modifier.size(18.dp),
                             )
                         }
                     }
@@ -374,7 +416,7 @@ private fun UpdateAvailableDialog(
                         }
                     }
 
-                    // ── Changelog (truncated) ──
+                    // ── Changelog (scrollable markdown) ──
                     if (info.body.isNotBlank()) {
                         Spacer(Modifier.height(12.dp))
                         Text(
@@ -387,19 +429,18 @@ private fun UpdateAvailableDialog(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .heightIn(max = 220.dp)
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(BgDark)
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                                .background(BgDark),
                         ) {
-                            Text(
-                                text = if (info.body.length > 300)
-                                    info.body.take(300).trimEnd() + "…"
-                                else
-                                    info.body,
-                                color      = TextSec,
-                                fontSize   = 11.sp,
-                                lineHeight = 17.sp,
-                            )
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                            ) {
+                                MarkdownChangelogText(markdown = info.body)
+                            }
                         }
                     }
 
@@ -635,8 +676,7 @@ private fun IdleView(state: DashboardUiState, vm: DashboardViewModel) {
 
             Spacer(Modifier.weight(1f))
 
-            // ── Shortcuts ──
-            ShortcutRow()
+            // [v1.1.5] ShortcutRow đã được chuyển sang bottom NavigationBar — không cần ở đây nữa.
 
             Spacer(Modifier.height(32.dp))
         }
@@ -844,6 +884,81 @@ private fun AppLogo() {
             .size(32.dp)
             .clip(RoundedCornerShape(8.dp)),
     )
+}
+
+// ─────────────────────────────────────────────────────────────
+//  [v1.1.5] MinimizedBubble — bubble tròn khi popup được thu nhỏ
+//  Hiển thị logo app + pulse ring để báo farm vẫn đang chạy.
+//  Tap để mở lại popup StartupStatusDialog.
+// ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun MinimizedBubble(
+    isPaused: Boolean,
+    onExpand: () -> Unit,
+) {
+    val inf    = rememberInfiniteTransition(label = "bubble_pulse")
+    val pulse  by inf.animateFloat(
+        initialValue  = 0.85f,
+        targetValue   = 1.15f,
+        animationSpec = infiniteRepeatable(
+            tween(900, easing = EaseInOut),
+            RepeatMode.Reverse,
+        ),
+        label = "bubble_scale",
+    )
+    val ringAlpha by inf.animateFloat(
+        initialValue  = 0.55f,
+        targetValue   = 0f,
+        animationSpec = infiniteRepeatable(
+            tween(900, easing = EaseInOut),
+            RepeatMode.Reverse,
+        ),
+        label = "ring_alpha",
+    )
+
+    Box(contentAlignment = Alignment.Center) {
+        // Pulse ring
+        Box(
+            modifier = Modifier
+                .size(70.dp)
+                .scale(pulse)
+                .clip(CircleShape)
+                .background(
+                    (if (isPaused) Amber else Purple).copy(alpha = ringAlpha * 0.35f),
+                ),
+        )
+        // Bubble chính
+        Box(
+            modifier = Modifier
+                .size(58.dp)
+                .clip(CircleShape)
+                .background(
+                    Brush.radialGradient(
+                        listOf(
+                            if (isPaused) Amber.copy(alpha = 0.9f) else Purple.copy(alpha = 0.9f),
+                            CardDark,
+                        ),
+                    ),
+                )
+                .border(1.5.dp, if (isPaused) Amber.copy(alpha = 0.5f) else Purple.copy(alpha = 0.5f), CircleShape)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication        = null,
+                    onClick           = onExpand,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                painter            = painterResource(R.drawable.icon_app),
+                contentDescription = "Mở lại farm status",
+                contentScale       = ContentScale.Crop,
+                modifier           = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape),
+            )
+        }
+    }
 }
 
 @Composable
@@ -1094,3 +1209,99 @@ private fun ShortcutTile(
 }
 
 // Helper — không cần thiết nữa vì đã import androidx.compose.ui.graphics.SolidColor
+
+// ─────────────────────────────────────────────────────────────
+//  Markdown Changelog Renderer
+//  Hỗ trợ: # ## ###, **bold**, - bullet, dòng trống
+// ─────────────────────────────────────────────────────────────
+
+private val ChangelogPurple = Color(0xFF6C63FF)
+private val ChangelogWhite  = Color.White
+private val ChangelogSec    = Color(0xFF9CA3AF)
+
+@Composable
+private fun MarkdownChangelogText(markdown: String) {
+    val lines = markdown.lines()
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        lines.forEach { raw ->
+            val line = raw.trimEnd()
+            when {
+                line.startsWith("### ") -> {
+                    Text(
+                        text       = line.removePrefix("### "),
+                        color      = ChangelogWhite,
+                        fontSize   = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        lineHeight = 18.sp,
+                        modifier   = Modifier.padding(top = 6.dp, bottom = 1.dp),
+                    )
+                }
+                line.startsWith("## ") -> {
+                    Text(
+                        text       = line.removePrefix("## "),
+                        color      = ChangelogWhite,
+                        fontSize   = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        lineHeight = 19.sp,
+                        modifier   = Modifier.padding(top = 8.dp, bottom = 2.dp),
+                    )
+                }
+                line.startsWith("# ") -> {
+                    Text(
+                        text       = line.removePrefix("# "),
+                        color      = ChangelogWhite,
+                        fontSize   = 14.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        lineHeight = 20.sp,
+                        modifier   = Modifier.padding(top = 10.dp, bottom = 2.dp),
+                    )
+                }
+                line.startsWith("- ") || line.startsWith("* ") -> {
+                    Row(modifier = Modifier.padding(top = 1.dp, bottom = 1.dp)) {
+                        Text(
+                            text  = "•  ",
+                            color = ChangelogPurple,
+                            fontSize = 11.sp,
+                        )
+                        Text(
+                            text       = parseInlineBold(line.substring(2)),
+                            color      = ChangelogSec,
+                            fontSize   = 11.sp,
+                            lineHeight = 16.sp,
+                        )
+                    }
+                }
+                line.isBlank() -> {
+                    Spacer(Modifier.height(4.dp))
+                }
+                else -> {
+                    Text(
+                        text       = parseInlineBold(line),
+                        color      = ChangelogSec,
+                        fontSize   = 11.sp,
+                        lineHeight = 16.sp,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Chuyển **text** thành AnnotatedString có in đậm trắng. */
+private fun parseInlineBold(text: String): AnnotatedString {
+    val boldPattern = Regex("""\*\*(.+?)\*\*""")
+    return buildAnnotatedString {
+        var cursor = 0
+        for (match in boldPattern.findAll(text)) {
+            // Phần trước bold
+            append(text.substring(cursor, match.range.first))
+            // Phần bold
+            withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = ChangelogWhite)) {
+                append(match.groupValues[1])
+            }
+            cursor = match.range.last + 1
+        }
+        // Phần còn lại
+        append(text.substring(cursor))
+    }
+}

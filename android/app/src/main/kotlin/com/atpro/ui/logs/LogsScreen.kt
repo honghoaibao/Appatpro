@@ -45,7 +45,7 @@ private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-fun LogsScreen(vm: LogsViewModel) {
+fun LogsScreen(vm: LogsViewModel, onNavigateUp: (() -> Unit)? = null) {
     val logs        by vm.logs.collectAsStateWithLifecycle()
     val levelFilter by vm.levelFilter.collectAsStateWithLifecycle()
     val clipboard   = LocalClipboardManager.current
@@ -70,7 +70,7 @@ fun LogsScreen(vm: LogsViewModel) {
                 .padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = { activity?.finish() }) {
+            IconButton(onClick = { onNavigateUp?.invoke() ?: activity?.finish() }) {
                 Icon(Icons.Rounded.ArrowBackIosNew, contentDescription = "Quay lại", tint = Color.White, modifier = Modifier.size(20.dp))
             }
             Text(

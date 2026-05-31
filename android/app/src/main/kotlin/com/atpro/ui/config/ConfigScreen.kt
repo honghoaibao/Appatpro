@@ -5,6 +5,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -58,13 +59,53 @@ private val TextSec    = Color(0xFF9CA3AF)
 private val TextMuted  = Color(0xFF5C5C78)
 
 // ── Section definitions ────────────────────────────────────────────────────
+
+/** Một mục setting con trong sidebar */
 private enum class Section(val label: String, val icon: ImageVector, val accent: Color) {
-    TIMING       ("Thời gian",  Icons.Rounded.Timer,                Purple),
-    ACTIONS      ("Hành động",  Icons.Rounded.TouchApp,             Pink),
+    PERMISSIONS  ("Quyền",      Icons.Rounded.AdminPanelSettings,   Green),
     NOTIFICATIONS("Thông báo",  Icons.Rounded.NotificationsNone,    Cyan),
     TIKTOK       ("TikTok",     Icons.Rounded.PhoneAndroid,         Amber),
-    PERMISSIONS  ("Quyền",      Icons.Rounded.AdminPanelSettings,   Green),
+    TIMING       ("Thời gian",  Icons.Rounded.Timer,                Purple),
+    ACTIONS      ("Hành động",  Icons.Rounded.TouchApp,             Pink),
+    EARN_GOLIKE  ("Golike",     Icons.Rounded.CurrencyExchange,     Color(0xFFF5A623)),
 }
+
+/**
+ * Nhóm setting — mỗi nhóm có thể mở rộng / thu gọn trong sidebar.
+ * Thiết kế mở rộng: thêm Section vào [sections] khi app có thêm loại
+ * nuôi tài khoản hoặc kiếm tiền.
+ */
+private data class SettingsGroup(
+    val id:       String,
+    val label:    String,
+    val icon:     ImageVector,
+    val accent:   Color,
+    val sections: List<Section>,
+)
+
+private val SETTINGS_GROUPS = listOf(
+    SettingsGroup(
+        id       = "system",
+        label    = "Hệ thống",
+        icon     = Icons.Rounded.Settings,
+        accent   = Green,
+        sections = listOf(Section.PERMISSIONS, Section.NOTIFICATIONS, Section.TIKTOK),
+    ),
+    SettingsGroup(
+        id       = "farm",
+        label    = "Nuôi TikTok",
+        icon     = Icons.Rounded.AccountCircle,
+        accent   = Purple,
+        sections = listOf(Section.TIMING, Section.ACTIONS),
+    ),
+    SettingsGroup(
+        id       = "earn",
+        label    = "Kiếm tiền",
+        icon     = Icons.Rounded.AttachMoney,
+        accent   = Color(0xFFF5A623),
+        sections = listOf(Section.EARN_GOLIKE),
+    ),
+)
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Root
@@ -78,6 +119,12 @@ fun ConfigScreen(vm: ConfigViewModel) {
 
     LaunchedEffect(Unit) {
         vm.loadTikTokVersion(context)
+        // [v1.1.4.1 FIX] Gọi refreshPermissions khi màn hình mở lần đầu.
+        // DisposableEffect ON_RESUME bên dưới chỉ bắt được lần resume tiếp theo
+        // (sau khi user rời sang màn hình khác rồi quay lại). LaunchedEffect(Unit)
+        // này đảm bảo permissions được đọc ngay lập tức, kể cả khi load() từ DB
+        // đang chạy song song và có thể ghi đè state sau đó.
+        vm.refreshPermissions(context)
     }
 
     // Refresh permission state every time the screen resumes — covers the case
@@ -217,88 +264,150 @@ private fun SettingsLayout(
     onOpenNotification:  () -> Unit,
     modifier:            Modifier = Modifier,
 ) {
-    var selected by remember { mutableStateOf(Section.TIMING) }
+    // Mặc định mở nhóm "Hệ thống" và chọn mục "Quyền"
+    val expandedGroups = remember { mutableStateMapOf("system" to true, "farm" to false, "earn" to false) }
+    var selected by remember { mutableStateOf(Section.PERMISSIONS) }
 
     Row(modifier.fillMaxSize()) {
 
-        // ── Left sidebar ─────────────────────────────────────────────────────
+        // ── Left sidebar — 3 nhóm có thể mở rộng ─────────────────────────
         Column(
             modifier = Modifier
-                .width(72.dp)
+                .width(80.dp)
                 .fillMaxHeight()
                 .background(BgCard)
-                .border(
-                    width = 0.5.dp,
-                    color = BorderDark,
-                    shape = RoundedCornerShape(topEnd = 0.dp, bottomEnd = 0.dp),
-                )
+                .border(width = 0.5.dp, color = BorderDark)
+                .verticalScroll(rememberScrollState())
                 .padding(top = 8.dp, bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // Permission badge on sidebar
             val missingPerm = !state.accessibilityGranted
-            Section.entries.forEach { sec ->
-                val active = selected == sec
-                val bgAnim by animateColorAsState(
-                    targetValue   = if (active) sec.accent.copy(alpha = 0.15f) else Color.Transparent,
-                    animationSpec = tween(200), label = "nav_bg_${sec.name}",
-                )
-                val fgAnim by animateColorAsState(
-                    targetValue   = if (active) sec.accent else TextMuted,
-                    animationSpec = tween(200), label = "nav_fg_${sec.name}",
-                )
 
+            SETTINGS_GROUPS.forEach { group ->
+                val expanded = expandedGroups[group.id] == true
+
+                // ── Group header ────────────────────────────────────────
+                val groupHasSelected = group.sections.any { it == selected }
+                val groupBg by animateColorAsState(
+                    targetValue   = if (groupHasSelected) group.accent.copy(alpha = 0.10f) else Color.Transparent,
+                    animationSpec = tween(200), label = "grp_bg_${group.id}",
+                )
                 Box(
                     modifier = Modifier
-                        .width(56.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(bgAnim)
-                        .clickable { selected = sec }
-                        .padding(vertical = 9.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        // Badge for permissions warning
-                        Box {
-                            Icon(sec.icon, null, tint = fgAnim, modifier = Modifier.size(20.dp))
-                            if (sec == Section.PERMISSIONS && missingPerm) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(7.dp)
-                                        .clip(CircleShape)
-                                        .background(Red)
-                                        .align(Alignment.TopEnd),
-                                )
+                        .width(68.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(groupBg)
+                        .clickable {
+                            expandedGroups[group.id] = !expanded
+                            // Auto-select first section khi mở nhóm
+                            if (!expanded && group.sections.isNotEmpty()) {
+                                selected = group.sections.first()
                             }
                         }
-                        Spacer(Modifier.height(3.dp))
+                        .padding(horizontal = 6.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        ) {
+                            Icon(
+                                group.icon, null,
+                                tint     = if (groupHasSelected) group.accent else TextMuted,
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Icon(
+                                if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                                null,
+                                tint     = if (groupHasSelected) group.accent else TextMuted,
+                                modifier = Modifier.size(12.dp),
+                            )
+                        }
                         Text(
-                            sec.label,
-                            color      = fgAnim,
-                            fontSize   = 8.5.sp,
-                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                            group.label,
+                            color      = if (groupHasSelected) group.accent else TextMuted,
+                            fontSize   = 8.sp,
+                            fontWeight = if (groupHasSelected) FontWeight.Bold else FontWeight.Normal,
                             maxLines   = 1,
                         )
                     }
                 }
 
-                // Active indicator line on right edge
-                if (active) {
-                    // Just spacing — the background highlight is enough
+                // ── Section items bên dưới group header ────────────────
+                if (expanded) {
+                    group.sections.forEach { sec ->
+                        val active = selected == sec
+                        val bgAnim by animateColorAsState(
+                            targetValue   = if (active) sec.accent.copy(alpha = 0.15f) else Color.Transparent,
+                            animationSpec = tween(200), label = "sec_bg_${sec.name}",
+                        )
+                        val fgAnim by animateColorAsState(
+                            targetValue   = if (active) sec.accent else TextSec,
+                            animationSpec = tween(200), label = "sec_fg_${sec.name}",
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .width(64.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(bgAnim)
+                                .clickable { selected = sec }
+                                .padding(vertical = 7.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Box {
+                                    Icon(sec.icon, null, tint = fgAnim, modifier = Modifier.size(17.dp))
+                                    if (sec == Section.PERMISSIONS && missingPerm) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(6.dp)
+                                                .clip(CircleShape)
+                                                .background(Red)
+                                                .align(Alignment.TopEnd),
+                                        )
+                                    }
+                                }
+                                Text(
+                                    sec.label,
+                                    color      = fgAnim,
+                                    fontSize   = 8.sp,
+                                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                                    maxLines   = 1,
+                                )
+                            }
+                        }
+                    }
+
+                    // Placeholder nếu nhóm chưa có section
+                    if (group.sections.size == 1 && group.sections.first() == Section.EARN_GOLIKE) {
+                        // (thêm section mới vào SETTINGS_GROUPS.earn.sections khi có)
+                    }
                 }
+
+                // Divider giữa các nhóm
+                Spacer(Modifier.height(4.dp))
+                Box(
+                    modifier = Modifier
+                        .width(48.dp)
+                        .height(0.5.dp)
+                        .background(BorderDark),
+                )
+                Spacer(Modifier.height(4.dp))
             }
         }
 
         // ── Content area ──────────────────────────────────────────────────────
         AnimatedContent(
-            targetState  = selected,
+            targetState = selected,
             transitionSpec = {
                 val down = targetState.ordinal > initialState.ordinal
                 (fadeIn(tween(200)) + slideInVertically(tween(240)) { if (down) it / 10 else -it / 10 }) togetherWith
                     (fadeOut(tween(150)) + slideOutVertically(tween(200)) { if (down) -it / 10 else it / 10 })
             },
-            label = "section_content",
+            label    = "section_content",
             modifier = Modifier.weight(1f).fillMaxHeight(),
         ) { sec ->
             when (sec) {
@@ -307,6 +416,7 @@ private fun SettingsLayout(
                 Section.NOTIFICATIONS -> NotificationsSection(state, onSet)
                 Section.TIKTOK        -> TikTokSection(state)
                 Section.PERMISSIONS   -> PermissionsSection(state, onOpenAccessibility, onOpenOverlay, onOpenNotification)
+                Section.EARN_GOLIKE   -> EarnGolikePlaceholder()
             }
         }
     }
@@ -724,6 +834,61 @@ private fun TikTokSection(state: ConfigUiState) {
         }
 
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Section: Earn — Golike placeholder
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun EarnGolikePlaceholder() {
+    val GolikeGold = Color(0xFFF5A623)
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        SectionTitle("Golike - TikTok", Icons.Rounded.CurrencyExchange, GolikeGold)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(BgCardAlt)
+                .border(0.5.dp, BorderDark, RoundedCornerShape(12.dp))
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(GolikeGold.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.Build, null, tint = GolikeGold, modifier = Modifier.size(20.dp))
+                }
+                Column {
+                    Text("Đang phát triển", color = GolikeGold, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Sẽ ra mắt trong phiên bản tiếp theo", color = TextMuted, fontSize = 11.sp)
+                }
+            }
+            Box(Modifier.fillMaxWidth().height(0.5.dp).background(BorderDark))
+            Text(
+                "Tính năng kiếm tiền Golike đang được tích hợp. " +
+                "Khi hoàn thành, bạn có thể cấu hình tốc độ làm nhiệm vụ, " +
+                "giới hạn kiếm tiền mỗi ngày và lịch chạy tự động.",
+                color    = TextSec,
+                fontSize = 12.sp,
+                lineHeight = 18.sp,
+            )
+        }
     }
 }
 

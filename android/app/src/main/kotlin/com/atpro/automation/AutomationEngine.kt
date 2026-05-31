@@ -348,6 +348,8 @@ class AutomationEngine(
             return FarmPhase.Failed("no_accounts")
         }
 
+        setStatus("✓ ${farmList.size} tài khoản sẽ được nuôi")
+
         log("LIST: Farm list (${farmList.size} acc): ${farmList.joinToString()}")
         LanWebSocketServer.broadcast("farmStatus",
             mapOf("status" to "started", "total" to farmList.size))
@@ -475,9 +477,11 @@ class AutomationEngine(
         val discovered = NodeTraverser.parseAccountList(host.getRootNode())
         if (discovered.isNotEmpty()) {
             log("LIST: Discover ${discovered.size} acc từ switch popup")
+            setStatus("✓ Tìm thấy ${discovered.size} tài khoản trong popup")
             autoSaveAccounts(discovered)
         } else {
             log("WARN: parseAccountList rỗng — TikTok dùng display name thay @username?")
+            setStatus("WARN: Không đọc được danh sách tài khoản")
         }
 
         return Pair(true, discovered)

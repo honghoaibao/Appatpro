@@ -42,7 +42,7 @@ private val TextMuted  = Color(0xFF6B7280)
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-fun AccountsScreen(vm: AccountsViewModel) {
+fun AccountsScreen(vm: AccountsViewModel, onNavigateUp: (() -> Unit)? = null) {
     val accounts by vm.accounts.collectAsStateWithLifecycle()
     var query    by remember { mutableStateOf("") }
     var filter   by remember { mutableStateOf("all") }
@@ -74,7 +74,7 @@ fun AccountsScreen(vm: AccountsViewModel) {
                 .padding(start = 4.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = { activity?.finish() }) {
+            IconButton(onClick = { onNavigateUp?.invoke() ?: activity?.finish() }) {
                 Icon(Icons.Rounded.ArrowBackIosNew, contentDescription = "Quay lại", tint = Color.White, modifier = Modifier.size(20.dp))
             }
             Column(Modifier.weight(1f)) {
