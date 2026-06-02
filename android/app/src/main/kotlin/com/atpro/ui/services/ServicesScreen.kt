@@ -394,6 +394,10 @@ private fun GolikeEarnCard() {
                             color      = Color(0xFFF5D78A),
                             fontSize   = 16.sp,
                             fontWeight = FontWeight.Bold,
+                            maxLines   = 1,
+                            // [v1.1.8] weight(1f) — title takes remaining space so the
+                            // TikTok badge is never squeezed to 0 width and text-wraps.
+                            modifier   = Modifier.weight(1f),
                         )
                         // "TikTok" label nhỏ
                         Surface(

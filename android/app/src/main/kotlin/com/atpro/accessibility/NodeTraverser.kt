@@ -204,6 +204,15 @@ object NodeTraverser {
             return PopupInfo(true, PopupType.FOLLOW_FRIENDS, dismissBtn)
         }
 
+        // [v1.1.8] Follow suggestion popup — TikTok gợi ý follow một account trong feed.
+        // Nhận ra bằng nút "Không quan tâm" / "Not interested" (luôn xuất hiện cặp với "Follow").
+        // Phát hiện trước GENERIC để có action chính xác (click dismiss thay vì generic back).
+        val khongQuanTamNode = findByText(root, "không quan tâm", ignoreCase = true)
+            ?: findByText(root, "not interested", ignoreCase = true)
+        if (khongQuanTamNode != null) {
+            return PopupInfo(true, PopupType.FOLLOW_SUGGEST, khongQuanTamNode)
+        }
+
         // Generic popup: tìm nút đóng (X / Cancel / Not now)
         // [FIX-GENERIC-FEED] Nút X/close trên feed (gợi ý follow, notification overlay...)
         // bị nhận nhầm là generic popup → click sai → continue loop → overlay đứng yên.
@@ -858,7 +867,7 @@ object NodeTraverser {
 
     // ── Data types ────────────────────────────────────────────────
 
-    enum class PopupType { NONE, ACCOUNT_SWITCH, VERIFY_1234, DAILY_LIMIT, FOLLOW_FRIENDS, GENERIC, SAVE_LOGIN, PERMISSION_REQUEST }
+    enum class PopupType { NONE, ACCOUNT_SWITCH, VERIFY_1234, DAILY_LIMIT, FOLLOW_FRIENDS, FOLLOW_SUGGEST, GENERIC, SAVE_LOGIN, PERMISSION_REQUEST }
 
     data class PopupInfo(
         val detected: Boolean,

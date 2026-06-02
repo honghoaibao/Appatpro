@@ -34,8 +34,14 @@ interface IFarmHost {
     fun launchTikTok(): Boolean
     /** Mở TikTok Settings cho account-switch flow. */
     fun openTikTokSettings(): Boolean
-    /** Force-stop TikTok process. */
-    fun killTikTok()
+    /**
+     * Force-stop TikTok process.
+     *
+     * Thứ tự: HOME → delay 600ms → killBackgroundProcesses().
+     * Phải là suspend để có thể delay() trước khi kill.
+     * KILL_BACKGROUND_PROCESSES chỉ hoạt động với background process — HOME trước.
+     */
+    suspend fun killTikTok()
     /** Hiện floating overlay. OverlayFarmMonitor tự xử lý thread. */
     fun showFarmOverlay()
     /** Ẩn floating overlay. */

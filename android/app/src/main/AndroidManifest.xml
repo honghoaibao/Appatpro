@@ -36,6 +36,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
     <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+    <!-- killTikTok(): force-stop process sau khi HOME, yêu cầu app ở background -->
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES"/>
     <!-- [v1.0.9] Cài đặt APK cập nhật tự động — yêu cầu người dùng cấp quyền "Cài từ nguồn lạ" -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
 

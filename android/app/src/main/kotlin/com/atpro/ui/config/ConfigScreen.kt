@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -621,6 +622,21 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
                 value    = state.skipAds,
                 accent   = Amber,
                 onChanged = { onSet { copy(skipAds = it) } },
+            )
+            Spacer(Modifier.height(4.dp))
+            ThinDivider()
+            Spacer(Modifier.height(4.dp))
+            // [v1.1.8] Like quảng cáo — chỉ có tác dụng khi skipAds = false
+            CfgSwitch(
+                label    = "Like quảng cáo",
+                subtitle = if (state.skipAds)
+                    "Tắt «Bỏ qua quảng cáo» để kích hoạt tuỳ chọn này"
+                else
+                    "Cho phép like quảng cáo TikTok khi dừng lại xem",
+                value    = state.likeAds && !state.skipAds,
+                accent   = Amber,
+                onChanged = { onSet { copy(likeAds = it) } },
+                enabled  = !state.skipAds,
             )
             Spacer(Modifier.height(4.dp))
             ThinDivider()
@@ -1652,10 +1668,14 @@ private fun CfgSwitch(
     subtitle:  String? = null,
     value:     Boolean,
     accent:    Color   = Purple,
+    enabled:   Boolean = true,
     onChanged: (Boolean) -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .then(if (!enabled) Modifier.alpha(0.4f) else Modifier),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -1668,6 +1688,7 @@ private fun CfgSwitch(
         Switch(
             checked         = value,
             onCheckedChange = onChanged,
+            enabled         = enabled,
             colors          = SwitchDefaults.colors(
                 checkedThumbColor   = Color.White,
                 checkedTrackColor   = accent,

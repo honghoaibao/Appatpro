@@ -8,6 +8,9 @@ package com.atpro.data
  *   [human]   occasionalPauseChance
  *   [watchdog] watchdogTimeoutSecs
  *
+ * v1.1.8 — thêm:
+ *   [like] likeAdsEnabled — kiểm soát like quảng cáo độc lập với skipAds
+ *
  * Mọi field đều có default value an toàn — engine chạy ngay cả khi DB trống.
  */
 data class FarmConfig(
@@ -66,6 +69,13 @@ data class FarmConfig(
 
     /** Bỏ qua quảng cáo TikTok (tự động vuốt qua). */
     val skipAds: Boolean = true,
+
+    /**
+     * `v1.1.8` Cho phép like quảng cáo TikTok.
+     * Chỉ có hiệu lực khi skipAds = false (tức quảng cáo không bị vuốt qua).
+     * Mặc định false — không bao giờ like quảng cáo.
+     */
+    val likeAdsEnabled: Boolean = false,
 
     /** Bật nghỉ giữa các acc. */
     val enableRestBetweenAccounts: Boolean = false,

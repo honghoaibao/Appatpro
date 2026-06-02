@@ -19,6 +19,11 @@ import com.atpro.accessibility.TikTokAccessibilityService
 /**
  * v1.1.0 OverlayFarmMonitor — floating popup hiển thị thông tin phiên farm.
  *
+ * Thay đổi v1.1.8:
+ *   - Fix bề ngang popup: width cố định 220dp qua WindowManager.LayoutParams thay vì WRAP_CONTENT.
+ *   - Minimize → hình tròn 52dp: ẩn toàn bộ panel, hiện FrameLayout oval với label "AT".
+ *     Tap vào circle để restore. WindowManager.LayoutParams cập nhật khi toggle.
+ *
  * Thay đổi v1.1.0:
  *   - Countdown thời gian thực: ticker 1s tự động giảm sessionTime/totalTime
  *     mà không cần chờ mỗi vòng lặp video (~30-60s) mới cập nhật.
@@ -54,6 +59,11 @@ object OverlayFarmMonitor {
     private var btnMinimize:   TextView? = null
     private var contentArea:   View?     = null
     private var isMinimized:   Boolean   = false
+    // [v1.1.8] Circle minimize — ẩn toàn bộ panel, hiện hình tròn nhỏ
+    private var fullPanel:     View?     = null
+    private var circleView:    View?     = null
+    private var panelWidthPx:  Int       = 0
+    private var circleSizePx:  Int       = 0
 
     // [v1.1.0] Log area — 3 dòng gần nhất
     private var tvLog1: TextView? = null
@@ -88,7 +98,7 @@ object OverlayFarmMonitor {
                     WindowManager.LayoutParams.TYPE_PHONE
 
                 val params = WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    panelWidthPx,   // [v1.1.8] Lớp ngoài cố định — không cho popup giãn ngang
                     WindowManager.LayoutParams.WRAP_CONTENT,
                     type,
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -119,6 +129,7 @@ object OverlayFarmMonitor {
             tvAction       = null; btnPauseResume = null
             btnStop        = null; btnMinimize    = null
             contentArea    = null; isMinimized    = false
+            fullPanel      = null; circleView     = null
             tvLog1         = null; tvLog2         = null; tvLog3 = null
             recentLogLines.clear()
             isPaused       = false
@@ -250,6 +261,14 @@ object OverlayFarmMonitor {
             ).toInt()
         }
 
+        // [v1.1.8] Lưu kích thước px để dùng khi cập nhật LayoutParams lúc minimize/restore
+        panelWidthPx = dp(220)
+        circleSizePx = dp(52)
+
+        // ── Outer wrapper — drag target, chứa cả panel lẫn circle ──
+        val wrapper = FrameLayout(context)
+
+        // ── Inner panel (toàn bộ nội dung popup) ──
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), dp(10), dp(12), dp(10))
@@ -258,8 +277,37 @@ object OverlayFarmMonitor {
                 cornerRadius = dp(12).toFloat()
                 setStroke(dp(1), C_BORDER)
             }
-            minimumWidth = dp(160)
         }
+        fullPanel = root
+        wrapper.addView(root, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+        ))
+
+        // ── Circle indicator — chỉ hiện khi thu nhỏ ──
+        // [v1.1.8] Khi minimize: ẩn panel, hiện hình tròn nhỏ 52dp x 52dp.
+        val circle = FrameLayout(context).apply {
+            visibility = View.GONE
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(C_BG)
+                setStroke(dp(2), C_PURPLE)
+            }
+        }
+        val circleLabel = TextView(context).apply {
+            text = "AT"
+            textSize = 10f
+            setTextColor(C_PURPLE)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+        }
+        circle.addView(circleLabel, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT,
+        ).apply { gravity = Gravity.CENTER })
+        circle.setOnClickListener { onMinimizeClick() }  // tap circle → restore
+        circleView = circle
+        wrapper.addView(circle, FrameLayout.LayoutParams(circleSizePx, circleSizePx))
 
         fun text(t: String, sizeSp: Float, color: Int, bold: Boolean = false): TextView =
             TextView(context).apply {
@@ -366,7 +414,7 @@ object OverlayFarmMonitor {
         // ── Drag to move ──
         var initialX = 0; var initialY = 0
         var touchX = 0f; var touchY = 0f
-        root.setOnTouchListener { _, event ->
+        wrapper.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     val lp = (overlayView?.layoutParams as? WindowManager.LayoutParams) ?: return@setOnTouchListener false
@@ -385,17 +433,29 @@ object OverlayFarmMonitor {
             }
         }
 
-        return root
+        return wrapper
     }
 
     // ── Button handlers ───────────────────────────────────────
 
-    // [v1.1.7] Minimize / restore — toggle contentArea visibility
+    // [v1.1.8] Minimize: ẩn toàn bộ panel → hiện hình tròn nhỏ; restore ngược lại.
+    // Cập nhật WindowManager.LayoutParams để overlay thu/giãn đúng kích thước.
     private fun onMinimizeClick() {
         handler.post {
             isMinimized = !isMinimized
-            contentArea?.visibility = if (isMinimized) View.GONE else View.VISIBLE
-            btnMinimize?.text = if (isMinimized) "  ⊞" else "  ⊟"
+            val lp = (overlayView?.layoutParams as? WindowManager.LayoutParams) ?: return@post
+            if (isMinimized) {
+                fullPanel?.visibility  = View.GONE
+                circleView?.visibility = View.VISIBLE
+                lp.width  = circleSizePx
+                lp.height = circleSizePx
+            } else {
+                circleView?.visibility = View.GONE
+                fullPanel?.visibility  = View.VISIBLE
+                lp.width  = panelWidthPx
+                lp.height = WindowManager.LayoutParams.WRAP_CONTENT
+            }
+            try { windowManager?.updateViewLayout(overlayView, lp) } catch (_: Exception) {}
         }
     }
 

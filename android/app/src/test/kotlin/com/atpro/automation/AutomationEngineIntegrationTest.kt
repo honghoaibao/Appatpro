@@ -98,7 +98,7 @@ class AutomationEngineIntegrationTest {
             every  { pressBack()   } returns true
             every  { launchTikTok()         } returns false  // default: fail
             every  { openTikTokSettings()   } returns true
-            every  { killTikTok()           } just Runs
+            coEvery { killTikTok()           } just Runs
             every  { showFarmOverlay()      } just Runs
             every  { hideFarmOverlay()      } just Runs
             coEvery { clickNode(any())           } returns true

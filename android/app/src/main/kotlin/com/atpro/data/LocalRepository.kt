@@ -186,6 +186,8 @@ class LocalRepository(context: Context) : IFarmRepository {
         // Behavior
         skipLive                  = getConfigBool  ("skip_live",                true),
         skipAds                   = getConfigBool  ("skip_ads",                 true),
+        // [v1.1.8] Like content-aware gate
+        likeAdsEnabled            = getConfigBool  ("like_ads",                 false),
         enableRestBetweenAccounts = getConfigBool  ("enable_rest",              false),
         restDurationMinutes       = getConfigInt   ("rest_minutes",             2),
         enableVerifyAccount       = getConfigBool  ("verify_account",           true),

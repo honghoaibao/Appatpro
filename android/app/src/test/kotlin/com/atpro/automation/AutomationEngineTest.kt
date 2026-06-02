@@ -64,7 +64,7 @@ class AutomationEngineTest {
             every  { pressBack()   } returns true
             every  { launchTikTok()         } returns false  // fail fast → farmOneAccount exits early
             every  { openTikTokSettings()   } returns false
-            every  { killTikTok()           } just Runs
+            coEvery { killTikTok()           } just Runs
             every  { showFarmOverlay()      } just Runs
             every  { hideFarmOverlay()      } just Runs
             coEvery { clickNode(any())      } returns true

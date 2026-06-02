@@ -46,6 +46,8 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
                 followRate               = repo.getConfigDouble("follow_rate",         0.15).toFloat(),
                 skipLive                 = repo.getConfigBool  ("skip_live",           true),
                 skipAds                  = repo.getConfigBool  ("skip_ads",            true),
+                // [v1.1.8] Like content-aware
+                likeAds                  = repo.getConfigBool  ("like_ads",            false),
                 verifyAccount            = repo.getConfigBool  ("verify_account",      true),
                 enableSystemNotifications = repo.getConfigBool ("enable_system_notifications", true),
             )
@@ -81,6 +83,7 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
             repo.setConfig("follow_rate",                  "${s.followRate}")
             repo.setConfig("skip_live",                    "${s.skipLive}")
             repo.setConfig("skip_ads",                     "${s.skipAds}")
+            repo.setConfig("like_ads",                     "${s.likeAds}")  // [v1.1.8]
             repo.setConfig("verify_account",               "${s.verifyAccount}")
             repo.setConfig("enable_system_notifications",  "${s.enableSystemNotifications}")
 
@@ -146,6 +149,8 @@ data class ConfigUiState(
     val followRate:               Float   = 0.15f,
     val skipLive:                 Boolean = true,
     val skipAds:                  Boolean = true,
+    // [v1.1.8] Like quảng cáo khi skipAds = false.
+    val likeAds:                  Boolean = false,
     val verifyAccount:            Boolean = true,
     val enableSystemNotifications: Boolean = true,
     val tikTokVersion:            String  = "Đang kiểm tra...",

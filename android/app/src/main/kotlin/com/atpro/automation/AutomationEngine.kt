@@ -178,6 +178,8 @@ class AutomationEngine(
 
     var isFarming = false; private set
     var isPaused  = false; private set
+    /** True khi engine đang trong giai đoạn nghỉ giữa 2 acc — watchdog bỏ qua để không false-alarm. */
+    private var isResting = false
 
     private val _liveFarmStats = MutableStateFlow(LiveFarmStats())
     val liveFarmStats: StateFlow<LiveFarmStats> = _liveFarmStats.asStateFlow()
@@ -197,8 +199,8 @@ class AutomationEngine(
     // Watchdog state — cập nhật bởi farmOneAccount()
     @Volatile private var watchdogVideoCount = 0
     @Volatile private var watchdogLastTick   = 0L
-    /** [v1.1.9+] Set true bởi watchdog khi phát hiện không có video mới quá lâu.
-     *  farmOneAccount() sẽ đọc flag này và thực hiện smart recovery. */
+    // [v1.1.9+] Set true bởi watchdog khi phát hiện không có video mới quá lâu.
+    //     farmOneAccount() sẽ đọc flag này và thực hiện smart recovery.
     @Volatile private var watchdogStuckFlag  = false
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -209,6 +211,7 @@ class AutomationEngine(
         if (isFarming) return
         isFarming = true
         isPaused  = false
+        isResting = false
 
         farmJob = host.scope.launch {
             config = repo.loadFarmConfig()
@@ -430,6 +433,9 @@ class AutomationEngine(
                 val restSecs = config.restDurationMinutes * 60L
                 log("REST: Nghỉ ${config.restDurationMinutes}m trước acc tiếp...")
 
+                // [v1.1.8] Báo watchdog: đang nghỉ — không phải stuck, không cần recovery.
+                isResting = true
+
                 // [v1.1.9+] Thoát TikTok hoàn toàn trước khi nghỉ (Restart the app)
                 log("REST: Đóng TikTok trước khi nghỉ")
                 host.killTikTok()
@@ -453,6 +459,11 @@ class AutomationEngine(
                     log("WARN: REST: Feed chưa load sau relaunch — thử recoverToFeed()")
                     recoverToFeed()
                 }
+
+                // Reset watchdog TRƯỚC khi bỏ cờ isResting —
+                // tránh watchdog đếm thời gian nghỉ vào stuckSecs của video đầu tiên.
+                resetWatchdog()
+                isResting = false
                 setStatus("")
             }
         }
@@ -866,12 +877,34 @@ class AutomationEngine(
             // Thỉnh thoảng dừng lâu (giả lập người dùng mất tập trung)
             Human.occasionalPause(config.occasionalPauseChance)
 
-            // ── [8] Like ──────────────────────────────────────────────────
+            // ── [8] Like — content-aware gate [v1.1.8] ───────────────────
+            // Phát hiện loại nội dung TRƯỚC khi quyết định like:
+            //   • Live  → không bao giờ like (dù skipLive = false)
+            //   • Ad    → chỉ like nếu config.likeAdsEnabled = true
+            //   • Video → like bình thường theo likeRate
+            // [FIX] Lấy freshRoot mới SAU khi watch xong — `root` từ đầu
+            // iteration đã stale (3–8 giây đã qua). AccessibilityNodeInfo cũ
+            // có thể đã bị framework recycle → traverseAll() ném exception
+            // → session kết thúc sớm → app không lướt video tiếp theo.
             if (Random.nextFloat() < config.likeRate) {
-                OverlayFarmMonitor.update(idx + 1, total, account,
-                    sessionSecsRemain, totalSecsRemain, "LIKE: Thích")
-                doLike()
-                likes++
+                val freshRoot     = host.getRootNode()
+                val isLiveContent = NodeTraverser.detectLive(freshRoot)
+                val isAdContent   = !isLiveContent && NodeTraverser.detectAd(freshRoot)
+                val shouldLike = when {
+                    isLiveContent -> false
+                    isAdContent   -> config.likeAdsEnabled
+                    else          -> true
+                }
+                if (shouldLike) {
+                    OverlayFarmMonitor.update(idx + 1, total, account,
+                        sessionSecsRemain, totalSecsRemain, "LIKE: Thích")
+                    doLike()
+                    likes++
+                } else if (isLiveContent) {
+                    log("LIKE SKIP: Không like live")
+                } else if (isAdContent) {
+                    log("LIKE SKIP: Không like quảng cáo (likeAds=off)")
+                }
             }
 
             // ── [9] Follow ────────────────────────────────────────────────
@@ -1076,7 +1109,9 @@ class AutomationEngine(
         watchdogJob = host.scope.launch {
             while (isActive && isFarming) {
                 delay(30_000L)
-                if (!isFarming || isPaused) continue
+                // Bỏ qua khi đã dừng, đang pause, hoặc đang nghỉ giữa acc —
+                // không có video mới trong REST là đúng, không phải stuck.
+                if (!isFarming || isPaused || isResting) continue
                 val stuckSecs = (System.currentTimeMillis() - watchdogLastTick) / 1_000
                 if (stuckSecs > config.watchdogTimeoutSecs) {
                     log("WDG: Không có video mới trong ${stuckSecs}s — kích hoạt smart recovery")
@@ -1335,6 +1370,7 @@ class AutomationEngine(
         _liveFarmStats.update { LiveFarmStats() }
         isFarming = false
         isPaused  = false
+        isResting = false
         LanWebSocketServer.broadcast("farmStatus",
             mapOf("status" to "stopped", "reason" to reason))
     }

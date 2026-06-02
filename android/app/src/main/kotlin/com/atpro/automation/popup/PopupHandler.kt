@@ -81,6 +81,21 @@ class PopupHandler(private val service: IFarmHost) {
             PopupResult(true, "follow_friends")
         }
 
+        // [v1.1.8] Popup gợi ý follow (profile card xuất hiện trong feed):
+        // TikTok hiển thị card profile với 2 nút "Không quan tâm" | "Follow".
+        // Click "Không quan tâm" để đóng — nếu không tìm được nút thì swipe qua.
+        NodeTraverser.PopupType.FOLLOW_SUGGEST -> {
+            log("SKIP: Gợi ý follow — bỏ qua")
+            val dismissed = popup.dismissButton?.let { service.clickNode(it.node) } ?: false
+            if (!dismissed) {
+                // Fallback: swipe lên để sang video tiếp theo
+                val w = service.screenWidth; val h = service.screenHeight
+                service.swipeSuspend(w / 2, (h * 0.75).toInt(), w / 2, (h * 0.25).toInt(), 350)
+            }
+            delay(800)
+            PopupResult(true, "follow_suggest")
+        }
+
         // Popup generic: không xác định được loại cụ thể nhưng
         // NodeTraverser phát hiện có nút dismiss. Áp dụng cho các
         // popup mới (thông báo, survey, v.v.) chưa được phân loại.

@@ -114,7 +114,12 @@ class TikTokAccessibilityService : AccessibilityService(), IFarmHost {
     override fun launchTikTok(): Boolean     = TikTokDeepLinks.openTikTok(this)
     override fun openTikTokSettings(): Boolean = TikTokDeepLinks.openSettings(this)
 
-    override fun killTikTok() {
+    override suspend fun killTikTok() {
+        // [FIX] killBackgroundProcesses() chỉ hoạt động với BACKGROUND process.
+        // TikTok đang ở foreground → call cũ là no-op dù có permission.
+        // Giải pháp: HOME trước → TikTok vào background → delay ngắn → kill.
+        runCatching { performGlobalAction(GLOBAL_ACTION_HOME) }
+        delay(600)
         runCatching {
             getSystemService(android.app.ActivityManager::class.java)
                 ?.killBackgroundProcesses(TikTokDeepLinks.pkg(this))

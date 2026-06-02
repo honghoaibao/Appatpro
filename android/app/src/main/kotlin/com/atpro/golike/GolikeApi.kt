@@ -106,10 +106,23 @@ object GolikeApi {
     private inline fun <reified T> readResponse(conn: HttpURLConnection): GolikeResult<T> {
         return try {
             val code = conn.responseCode
-            val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
-                ?.bufferedReader(Charsets.UTF_8)
-                ?.readText()
-                ?: ""
+
+            // Non-2xx: read error body for logging only — do NOT attempt JSON parse.
+            // The server often returns an HTML error page which would cause a misleading
+            // "Unexpected JSON token" exception to surface in the UI.
+            if (code !in 200..299) {
+                val errBody = conn.errorStream
+                    ?.bufferedReader(Charsets.UTF_8)
+                    ?.readText()
+                    ?.take(200)
+                    ?: ""
+                Log.w(TAG, "HTTP $code — $errBody")
+                return GolikeResult.Error("Lỗi máy chủ (HTTP $code)")
+            }
+
+            val body = conn.inputStream
+                .bufferedReader(Charsets.UTF_8)
+                .readText()
             Log.d(TAG, "HTTP $code — ${body.take(120)}")
             GolikeResult.Success(jsonParser.decodeFromString<T>(body))
         } catch (e: Exception) {
