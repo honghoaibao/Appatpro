@@ -34,9 +34,12 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.app.Activity
-import androidx.compose.ui.platform.LocalContext
+import android.content.Intent
+import android.net.Uri
 import com.atpro.data.AccessibilitySettingsHelper
 import com.atpro.data.TikTokDeepLinks
+import com.atpro.ui.golike.GolikeViewModel
+import com.atpro.ui.golike.GolikeUiState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 
@@ -112,7 +115,7 @@ private val SETTINGS_GROUPS = listOf(
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-fun ConfigScreen(vm: ConfigViewModel) {
+fun ConfigScreen(vm: ConfigViewModel, golikeVm: GolikeViewModel) {
     val state   by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
@@ -168,6 +171,7 @@ fun ConfigScreen(vm: ConfigViewModel) {
         SettingsLayout(
             state               = state,
             onSet               = vm::set,
+            golikeVm            = golikeVm,
             onOpenAccessibility = { AccessibilitySettingsHelper.openAccessibilitySettings(context) },
             onOpenOverlay       = { AccessibilitySettingsHelper.openOverlaySettings(context) },
             onOpenNotification  = { AccessibilitySettingsHelper.openAppSettings(context) },
@@ -259,6 +263,7 @@ private fun SettingsTopBar(isDirty: Boolean, isSaving: Boolean, onSave: () -> Un
 private fun SettingsLayout(
     state:               ConfigUiState,
     onSet:               (ConfigUiState.() -> ConfigUiState) -> Unit,
+    golikeVm:            GolikeViewModel,
     onOpenAccessibility: () -> Unit,
     onOpenOverlay:       () -> Unit,
     onOpenNotification:  () -> Unit,
@@ -416,7 +421,7 @@ private fun SettingsLayout(
                 Section.NOTIFICATIONS -> NotificationsSection(state, onSet)
                 Section.TIKTOK        -> TikTokSection(state)
                 Section.PERMISSIONS   -> PermissionsSection(state, onOpenAccessibility, onOpenOverlay, onOpenNotification)
-                Section.EARN_GOLIKE   -> EarnGolikePlaceholder()
+                Section.EARN_GOLIKE   -> EarnGolikeSection(golikeVm)
             }
         }
     }
@@ -606,6 +611,16 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
                 value    = state.skipLive,
                 accent   = Purple,
                 onChanged = { onSet { copy(skipLive = it) } },
+            )
+            Spacer(Modifier.height(4.dp))
+            ThinDivider()
+            Spacer(Modifier.height(4.dp))
+            CfgSwitch(
+                label    = "Bỏ qua quảng cáo",
+                subtitle = "Tự động vuốt qua khi gặp quảng cáo TikTok",
+                value    = state.skipAds,
+                accent   = Amber,
+                onChanged = { onSet { copy(skipAds = it) } },
             )
             Spacer(Modifier.height(4.dp))
             ThinDivider()
@@ -838,56 +853,386 @@ private fun TikTokSection(state: ConfigUiState) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Section: Earn — Golike placeholder
+//  Section: Earn — Golike TikTok (v1.1.9)
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun EarnGolikePlaceholder() {
+private fun EarnGolikeSection(golikeVm: GolikeViewModel) {
     val GolikeGold = Color(0xFFF5A623)
+    val state by golikeVm.state.collectAsStateWithLifecycle()
+
     Column(
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         SectionTitle("Golike - TikTok", Icons.Rounded.CurrencyExchange, GolikeGold)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(BgCardAlt)
-                .border(0.5.dp, BorderDark, RoundedCornerShape(12.dp))
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+
+        if (!state.isLoggedIn) {
+            GolikeLoginCard(state, GolikeGold, golikeVm)
+        } else {
+            GolikeUserCard(state, GolikeGold, golikeVm)
+            if (state.isLoadingAccounts) {
+                Box(Modifier.fillMaxWidth(), Alignment.Center) {
+                    CircularProgressIndicator(color = GolikeGold, strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
+                }
+            } else if (state.tikTokAccounts.isNotEmpty()) {
+                GolikeTikTokJobsCard(state, GolikeGold, golikeVm)
+            } else {
+                InfoBanner("Chưa có tài khoản TikTok liên kết với Golike.", GolikeGold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun GolikeLoginCard(
+    state:     GolikeUiState,
+    accent:    Color,
+    golikeVm:  GolikeViewModel,
+) {
+    var username by remember { mutableStateOf(state.savedUsername) }
+    var password by remember { mutableStateOf("") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(BgCard)
+            .border(1.dp, BorderDark, RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        CardLabel("Đăng nhập Golike", Icons.Rounded.AccountCircle, accent)
+
+        CfgTextField(
+            label     = "Tên đăng nhập",
+            value     = username,
+            hint      = "username hoặc email",
+            onChanged = { username = it },
+        )
+        CfgTextField(
+            label     = "Mật khẩu",
+            value     = password,
+            hint      = "••••••••",
+            obscure   = true,
+            isLast    = true,
+            onChanged = { password = it },
+        )
+
+        // Error banner
+        if (state.loginError != null) {
+            InfoBanner(state.loginError, Red)
+        }
+
+        Button(
+            onClick  = { golikeVm.login(username, password) },
+            enabled  = !state.isLoggingIn,
+            modifier = Modifier.fillMaxWidth().height(44.dp),
+            shape    = RoundedCornerShape(12.dp),
+            colors   = ButtonDefaults.buttonColors(
+                containerColor         = accent,
+                disabledContainerColor = accent.copy(alpha = 0.45f),
+            ),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            if (state.isLoggingIn) {
+                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.White)
+                Spacer(Modifier.width(8.dp))
+                Text("Đang đăng nhập...", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            } else {
+                Icon(Icons.Rounded.Login, null, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Đăng nhập", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun GolikeUserCard(
+    state:    GolikeUiState,
+    accent:   Color,
+    golikeVm: GolikeViewModel,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(BgCard)
+            .border(1.dp, accent.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(accent.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center,
             ) {
+                Icon(Icons.Rounded.AccountCircle, null, tint = accent, modifier = Modifier.size(22.dp))
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(state.displayName.ifEmpty { state.savedUsername }, color = TextPrim, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text("Rank: ${state.rankName.ifEmpty { "—" }}", color = TextSec, fontSize = 11.sp)
+            }
+            // Logout
+            IconButton(onClick = golikeVm::logout, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Rounded.Logout, null, tint = Red.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
+            }
+        }
+        Box(Modifier.fillMaxWidth().height(0.5.dp).background(BorderDark))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            GolikeCoinBox("Coin hiện có", "${state.coin}", accent, Modifier.weight(1f))
+            GolikeCoinBox("TikTok hold",  "${state.tiktokHold}",    Color(0xFF22D3EE), Modifier.weight(1f))
+            GolikeCoinBox("Đang duyệt",   "${state.tiktokPending}", Green, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun GolikeCoinBox(label: String, value: String, color: Color, modifier: Modifier) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(color.copy(alpha = 0.07f))
+            .border(1.dp, color.copy(alpha = 0.18f), RoundedCornerShape(10.dp))
+            .padding(vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Text(value, color = color, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
+        Text(label, color = TextMuted, fontSize = 9.sp)
+    }
+}
+
+@Composable
+private fun GolikeTikTokJobsCard(
+    state:    GolikeUiState,
+    accent:   Color,
+    golikeVm: GolikeViewModel,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(BgCard)
+            .border(1.dp, BorderDark, RoundedCornerShape(14.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CardLabel("Nhiệm vụ TikTok", Icons.Rounded.Assignment, accent)
+            Spacer(Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(accent.copy(alpha = 0.13f))
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+            ) {
+                Text("${state.totalJobCount} job", color = accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        Box(Modifier.fillMaxWidth().height(0.5.dp).background(BorderDark))
+
+        if (state.isLoadingAccounts) {
+            Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = accent, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+            }
+        } else {
+            state.tikTokAccounts.forEach { acc ->
+                val jobs = state.tikTokJobs[acc.uniqueUsername] ?: emptyList()
+                GolikeTikTokAccountRow(acc, jobs, accent, golikeVm)
+            }
+        }
+
+        // Refresh button
+        OutlinedButton(
+            onClick  = golikeVm::loadTikTokAccounts,
+            modifier = Modifier.fillMaxWidth().height(38.dp),
+            shape    = RoundedCornerShape(10.dp),
+            border   = BorderStroke(1.dp, accent.copy(alpha = 0.35f)),
+            colors   = ButtonDefaults.outlinedButtonColors(contentColor = accent),
+        ) {
+            Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Làm mới nhiệm vụ", fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable
+private fun GolikeTikTokAccountRow(
+    acc:      com.atpro.golike.TikTokAccountDto,
+    jobs:     List<com.atpro.golike.TikTokJobDto>,
+    accent:   Color,
+    golikeVm: GolikeViewModel,
+) {
+    val ctx = LocalContext.current
+    val golikeState by golikeVm.state.collectAsStateWithLifecycle()
+
+    // Tính tổng coin có thể kiếm từ các jobs của account này
+    val totalCoin = jobs.sumOf { it.fixCoin }
+    val doneCount = jobs.count { it.jobId in golikeState.completedJobs }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(BgCardAlt)
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        // ── Header: avatar + tên + badge ──────────────────────────────
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(accent.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.MusicNote, null, tint = accent, modifier = Modifier.size(14.dp))
+            }
+            Column(Modifier.weight(1f)) {
+                Text(acc.nickname.ifEmpty { acc.uniqueUsername }, color = TextPrim, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text(acc.uniqueUsername, color = TextMuted, fontSize = 10.sp)
+            }
+            // Coin summary badge
+            if (totalCoin > 0) {
                 Box(
                     modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(GolikeGold.copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center,
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(accent.copy(alpha = 0.13f))
+                        .padding(horizontal = 7.dp, vertical = 3.dp),
                 ) {
-                    Icon(Icons.Rounded.Build, null, tint = GolikeGold, modifier = Modifier.size(20.dp))
+                    Text("+${totalCoin}🪙", color = accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 }
-                Column {
-                    Text("Đang phát triển", color = GolikeGold, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Sẽ ra mắt trong phiên bản tiếp theo", color = TextMuted, fontSize = 11.sp)
+                Spacer(Modifier.width(4.dp))
+            }
+            StatusBadge(
+                text  = if (doneCount > 0) "${doneCount}/${jobs.size} xong" else "${jobs.size} job",
+                color = when {
+                    doneCount == jobs.size && jobs.isNotEmpty() -> Green
+                    jobs.isNotEmpty() -> accent
+                    else -> TextMuted
+                },
+            )
+        }
+
+        // ── Job rows ──────────────────────────────────────────────────
+        if (jobs.isEmpty()) {
+            Text("Không có nhiệm vụ", color = TextMuted, fontSize = 10.sp,
+                modifier = Modifier.padding(start = 4.dp, top = 2.dp))
+        } else {
+            jobs.forEach { job ->
+                val isCompleting = job.jobId in golikeState.completingJobs
+                val isDone       = job.jobId in golikeState.completedJobs
+
+                val jobColor = when (job.type) {
+                    "like"    -> Pink
+                    "follow"  -> Green
+                    "share"   -> Cyan
+                    "comment" -> Purple
+                    "view"    -> Amber
+                    else      -> TextSec
+                }
+                val jobIcon = when (job.type) {
+                    "like"    -> Icons.Rounded.Favorite
+                    "follow"  -> Icons.Rounded.PersonAdd
+                    "share"   -> Icons.Rounded.Share
+                    "comment" -> Icons.Rounded.Comment
+                    "view"    -> Icons.Rounded.Visibility
+                    else      -> Icons.Rounded.PlayArrow
+                }
+
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(
+                            if (isDone) Green.copy(alpha = 0.07f) else BgDeeper
+                        )
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    // Type badge với icon
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(jobColor.copy(alpha = if (isDone) 0.07f else 0.13f))
+                            .padding(horizontal = 5.dp, vertical = 3.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(jobIcon, null,
+                            tint = if (isDone) jobColor.copy(alpha = 0.4f) else jobColor,
+                            modifier = Modifier.size(11.dp))
+                    }
+                    Text(
+                        job.type,
+                        color    = if (isDone) TextMuted else jobColor,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    // Link rút gọn
+                    Text(
+                        job.link.removePrefix("https://www.tiktok.com/").take(28),
+                        color    = if (isDone) TextMuted else TextSec,
+                        fontSize = 9.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    // Coin
+                    Text(
+                        "+${job.fixCoin}🪙",
+                        color = if (isDone) TextMuted else accent,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(Modifier.width(2.dp))
+
+                    // Done indicator / action buttons
+                    if (isDone) {
+                        Icon(Icons.Rounded.CheckCircle, null,
+                            tint = Green, modifier = Modifier.size(16.dp))
+                    } else if (isCompleting) {
+                        CircularProgressIndicator(
+                            color = accent, strokeWidth = 1.5.dp,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    } else {
+                        // Nút Mở TikTok
+                        IconButton(
+                            onClick = {
+                                runCatching {
+                                    ctx.startActivity(
+                                        Intent(Intent.ACTION_VIEW, Uri.parse(job.link))
+                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    )
+                                }
+                            },
+                            modifier = Modifier.size(24.dp),
+                        ) {
+                            Icon(Icons.Rounded.OpenInNew, "Mở TikTok",
+                                tint = TextSec, modifier = Modifier.size(13.dp))
+                        }
+                        // Nút Hoàn thành
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(5.dp))
+                                .background(accent.copy(alpha = 0.15f))
+                                .clickable { golikeVm.completeJob(job.jobId, acc.uniqueUsername) }
+                                .padding(horizontal = 6.dp, vertical = 3.dp),
+                        ) {
+                            Text("Xong", color = accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
-            Box(Modifier.fillMaxWidth().height(0.5.dp).background(BorderDark))
-            Text(
-                "Tính năng kiếm tiền Golike đang được tích hợp. " +
-                "Khi hoàn thành, bạn có thể cấu hình tốc độ làm nhiệm vụ, " +
-                "giới hạn kiếm tiền mỗi ngày và lịch chạy tự động.",
-                color    = TextSec,
-                fontSize = 12.sp,
-                lineHeight = 18.sp,
-            )
         }
     }
 }

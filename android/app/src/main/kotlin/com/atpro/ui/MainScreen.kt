@@ -14,6 +14,7 @@ import com.atpro.ui.accounts.AccountsScreen
 import com.atpro.ui.accounts.AccountsViewModel
 import com.atpro.ui.dashboard.DashboardScreen
 import com.atpro.ui.dashboard.DashboardViewModel
+import com.atpro.ui.golike.GolikeViewModel
 import com.atpro.ui.logs.LogsScreen
 import com.atpro.ui.logs.LogsViewModel
 import com.atpro.ui.services.ServicesScreen
@@ -54,6 +55,7 @@ fun MainScreen(
     statsVm:     StatsViewModel,
     accountsVm:  AccountsViewModel,
     logsVm:      LogsViewModel,
+    golikeVm:    GolikeViewModel,
 ) {
     var selectedTab by remember { mutableStateOf(Tab.DASHBOARD) }
 
@@ -102,7 +104,7 @@ fun MainScreen(
                 .padding(bottom = innerPadding.calculateBottomPadding()),
         ) {
             when (selectedTab) {
-                Tab.DASHBOARD -> DashboardScreen(vm = dashboardVm)
+                Tab.DASHBOARD -> DashboardScreen(vm = dashboardVm, golikeVm = golikeVm)
                 Tab.SERVICES  -> ServicesScreen()
                 Tab.STATS     -> StatsScreen(
                     vm           = statsVm,

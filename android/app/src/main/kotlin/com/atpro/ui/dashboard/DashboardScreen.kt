@@ -50,6 +50,8 @@ import com.atpro.automation.LiveFarmStats
 import com.atpro.network.UpdateInfo
 import com.atpro.ui.accounts.AccountsActivity
 import com.atpro.ui.config.ConfigActivity
+import com.atpro.ui.golike.GolikeUiState
+import com.atpro.ui.golike.GolikeViewModel
 import com.atpro.ui.logs.LogsActivity
 import com.atpro.ui.stats.StatsActivity
 
@@ -62,6 +64,7 @@ private val Pink        = Color(0xFFEC4899)
 private val Green       = Color(0xFF10B981)
 private val Amber       = Color(0xFFF59E0B)
 private val RedStop     = Color(0xFFEF4444)
+private val TextPrim    = Color(0xFFEEEEF5)
 private val TextSec     = Color(0xFF9CA3AF)
 private val TextMuted   = Color(0xFF6B7280)
 
@@ -70,9 +73,10 @@ private val TextMuted   = Color(0xFF6B7280)
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-fun DashboardScreen(vm: DashboardViewModel) {
-    val state   by vm.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
+fun DashboardScreen(vm: DashboardViewModel, golikeVm: GolikeViewModel) {
+    val state      by vm.uiState.collectAsStateWithLifecycle()
+    val golikeState by golikeVm.state.collectAsStateWithLifecycle()
+    val context    = LocalContext.current
 
     // [v1.1.5] Trạng thái thu nhỏ popup — reset mỗi khi farm kết thúc
     var isMinimized by remember { mutableStateOf(false) }
@@ -104,7 +108,7 @@ fun DashboardScreen(vm: DashboardViewModel) {
             label = "farming_state",
         ) { farming ->
             if (farming) FarmingView(state, vm)
-            else         IdleView(state, vm)
+            else         IdleView(state, vm, golikeState)
         }
 
         // ── [v1.1.5] Startup status popup — có nút thu nhỏ ──────────────────
@@ -561,7 +565,7 @@ private fun UpdateAvailableDialog(
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun IdleView(state: DashboardUiState, vm: DashboardViewModel) {
+private fun IdleView(state: DashboardUiState, vm: DashboardViewModel, golikeState: GolikeUiState) {
     val context = LocalContext.current
 
     var visible by remember { mutableStateOf(false) }
@@ -672,6 +676,14 @@ private fun IdleView(state: DashboardUiState, vm: DashboardViewModel) {
                 enabled = state.canStart,
                 hint    = state.startHint,
                 onClick = vm::startFarm,
+            )
+
+            Spacer(Modifier.height(20.dp))
+
+            // ── [v1.1.9] Golike summary card ──
+            GolikeSummaryCard(
+                state    = golikeState,
+                onSetup  = { context.startActivity(Intent(context, ConfigActivity::class.java)) },
             )
 
             Spacer(Modifier.weight(1f))
@@ -1153,6 +1165,82 @@ private fun PauseResumeButton(isPaused: Boolean, onPause: () -> Unit, onResume: 
             text       = if (isPaused) "Tiếp tục" else "Tạm dừng",
             fontWeight = FontWeight.SemiBold,
         )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  [v1.1.9] Golike Summary Card — compact dashboard widget
+// ─────────────────────────────────────────────────────────────
+
+private val GolikeGold = Color(0xFFF5A623)
+
+@Composable
+private fun GolikeSummaryCard(
+    state:   GolikeUiState,
+    onSetup: () -> Unit,
+) {
+    if (state.isLoading) return  // don't flash empty card on startup
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+            .background(CardDark)
+            .border(1.dp, if (state.isLoggedIn) GolikeGold.copy(alpha = 0.22f) else BorderDark,
+                androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(9.dp))
+                    .background(GolikeGold.copy(alpha = 0.13f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.CurrencyExchange, null, tint = GolikeGold, modifier = Modifier.size(17.dp))
+            }
+
+            if (!state.isLoggedIn) {
+                Column(Modifier.weight(1f)) {
+                    Text("Golike", color = GolikeGold, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Chưa đăng nhập — bấm để cài đặt", color = TextMuted, fontSize = 11.sp)
+                }
+                androidx.compose.material3.TextButton(
+                    onClick = onSetup,
+                    colors  = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = GolikeGold),
+                ) {
+                    Text("Cài đặt", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            } else {
+                Column(Modifier.weight(1f)) {
+                    Text(state.displayName.ifEmpty { "Golike" }, color = GolikeGold, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (state.rankName.isNotEmpty()) {
+                            Text(state.rankName, color = TextMuted, fontSize = 10.sp)
+                            Text("•", color = TextMuted, fontSize = 10.sp)
+                        }
+                        Text("${state.totalJobCount} nhiệm vụ", color = TextMuted, fontSize = 10.sp)
+                    }
+                }
+                // Coin + TikTok stats
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("${state.coin}", color = GolikeGold, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+                        Text("coin", color = TextMuted, fontSize = 9.sp)
+                    }
+                    if (state.tiktokHold > 0 || state.tiktokPending > 0) {
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("+${state.tiktokHold}", color = Green, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("hold", color = TextMuted, fontSize = 9.sp)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

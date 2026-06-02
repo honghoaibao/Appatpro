@@ -12,6 +12,8 @@ import com.atpro.ui.accounts.AccountsViewModel
 import com.atpro.ui.logs.LogsViewModel
 import com.atpro.ui.stats.StatsViewModel
 
+import com.atpro.ui.golike.GolikeViewModel
+
 /**
  * DashboardActivity — single-Activity host cho toàn bộ app kể từ v1.1.5.
  *
@@ -40,6 +42,9 @@ class DashboardActivity : AppCompatActivity() {
     private val logsVm: LogsViewModel by viewModels {
         LogsViewModel.Factory(applicationContext)
     }
+    private val golikeVm: GolikeViewModel by viewModels {
+        GolikeViewModel.Factory(applicationContext)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -57,6 +62,7 @@ class DashboardActivity : AppCompatActivity() {
                     statsVm     = statsVm,
                     accountsVm  = accountsVm,
                     logsVm      = logsVm,
+                    golikeVm    = golikeVm,
                 )
             }
         }

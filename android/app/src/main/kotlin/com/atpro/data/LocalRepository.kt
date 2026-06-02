@@ -185,6 +185,7 @@ class LocalRepository(context: Context) : IFarmRepository {
         delayAfterSwitchClick     = getConfigDouble("delay_switch_click",       3.0),
         // Behavior
         skipLive                  = getConfigBool  ("skip_live",                true),
+        skipAds                   = getConfigBool  ("skip_ads",                 true),
         enableRestBetweenAccounts = getConfigBool  ("enable_rest",              false),
         restDurationMinutes       = getConfigInt   ("rest_minutes",             2),
         enableVerifyAccount       = getConfigBool  ("verify_account",           true),

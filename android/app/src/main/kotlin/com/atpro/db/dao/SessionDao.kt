@@ -22,7 +22,7 @@ interface SessionDao {
 
     /**
      * Đóng session: ghi endedAt, tính durationSecs và lưu stats.
-     * [v1.1.4 FIX] Thêm likes/follows/comments/videosWatched — trước đây
+     * v1.1.4 FIX: Thêm likes/follows/comments/videosWatched — trước đây
      * các trường này không được update → session record luôn giữ giá trị 0.
      */
     @Query("""

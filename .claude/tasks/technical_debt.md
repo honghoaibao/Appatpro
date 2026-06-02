@@ -148,3 +148,33 @@ tested with `kotlinx-coroutines-test` + mock Context.
   - Account list resolution for both modes
   - `startFarm()` / `stop()` service intent side effects
 **Added**: 2026-05-24
+
+---
+
+## TD-GOLIKE-001: skipAds field chưa được consume bởi AutomationEngine
+
+**Severity**: LOW (field + UI đã xong, automation chưa dùng)
+**Module**: `data/FarmConfig.kt`, `automation/AutomationEngine.kt`, `automation/PopupHandler.kt`
+**Reason**: v1.1.9 thêm `FarmConfig.skipAds` và switch trong Settings UI. Tuy nhiên
+`AutomationEngine` và `PopupHandler` chưa có logic detect quảng cáo TikTok (overlay "Quảng cáo",
+nút "Bỏ qua", "×"). Config được lưu/load đúng nhưng không có hiệu ứng runtime.
+**Fix scope**:
+  1. Detect node quảng cáo trong `PopupHandler.handle()` bằng content-desc / text pattern
+  2. Nếu `farmConfig.skipAds == true` → click nút "Bỏ qua" hoặc swipe
+  3. Thêm log `"[SkipAd] Quảng cáo bỏ qua"` vào FarmLog
+**Added**: 2026-06-01
+
+---
+
+## TD-GOLIKE-002: GolikeViewModel.completeJob() chưa được gọi từ AutomationEngine
+
+**Severity**: LOW (API wrapper đã xong, chưa wire vào automation loop)
+**Module**: `ui/golike/GolikeViewModel.kt`, `automation/AutomationEngine.kt`
+**Reason**: v1.1.9 implement full Golike API layer (login, get-jobs, complete-jobs).
+`completeJob()` có thể gọi thủ công từ UI nhưng chưa được trigger tự động sau khi
+`AutomationEngine` thực hiện xong tương tác TikTok cho job Golike.
+**Fix scope**:
+  1. Thêm `GolikeJobQueue` vào AutomationEngine — lấy jobs từ GolikeRepository
+  2. Match job type (`like`/`follow`/`share`) với action đang thực hiện
+  3. Sau khi action thành công → gọi `golikeRepo.completeTikTokJob(jobId, username)`
+**Added**: 2026-06-01

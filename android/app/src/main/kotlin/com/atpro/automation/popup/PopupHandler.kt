@@ -62,6 +62,10 @@ class PopupHandler(private val service: IFarmHost) {
         // Popup xác minh "1-2-3-4": TikTok yêu cầu người dùng nhập
         // 4 chữ số vào 4 EditText riêng biệt. Xuất hiện khi tài khoản
         // bị nghi ngờ hoạt động bất thường (login mới, IP lạ...).
+        // [v1.1.8] Giới hạn thời gian sử dụng hằng ngày.
+        // Nhập mật mã "1234" (mặc định TikTok) rồi click "Quay lại TikTok".
+        NodeTraverser.PopupType.DAILY_LIMIT -> handleDailyLimit(root)
+
         NodeTraverser.PopupType.VERIFY_1234 -> handle1234(root)
 
         // Popup "Theo dõi bạn bè": TikTok gợi ý follow contacts từ
@@ -132,6 +136,50 @@ class PopupHandler(private val service: IFarmHost) {
         return PopupResult(true, "verify_1234")
     }
 
+    /**
+     * Xử lý màn hình giới hạn thời gian sử dụng hằng ngày — v1.1.8.
+     *
+     * TikTok hiển thị màn hình toàn phần khi user đã vượt giới hạn thời gian đã đặt.
+     * Cho phép tiếp tục bằng cách nhập mật mã (mặc định: 1234).
+     *
+     * Flow:
+     * 1. Tìm 4 EditText → gõ "1","2","3","4" với delay giữa các ký tự.
+     * 2. Tìm nút "Quay lại TikTok" → click.
+     * 3. Nếu không tìm thấy nút → pressBack (last resort).
+     *
+     * Lưu ý: Mật mã 1234 là mặc định của TikTok Screen Time.
+     * Nếu user đổi mật mã → màn hình sẽ không bị xử lý đúng cách.
+     * TODO: Cho phép cấu hình passcode trong FarmConfig (TD-future).
+     */
+    private suspend fun handleDailyLimit(root: AccessibilityNodeInfo): PopupResult {
+        log("LIMIT: Daily screen time limit — nhập mật mã 1234")
+
+        val editTexts = NodeTraverser.findAllByClass(root, "EditText")
+        if (editTexts.size >= 4) {
+            listOf("1", "2", "3", "4").forEachIndexed { i, digit ->
+                service.typeText(editTexts[i].node, digit)
+                delay(250) // 250ms giữa mỗi ký tự — tránh bị reject input quá nhanh
+            }
+            delay(600) // Đợi TikTok xác nhận passcode trước khi tìm nút
+        }
+
+        // Lấy lại root sau khi gõ — UI có thể thay đổi sau input
+        val freshRoot = service.getRootNode() ?: root
+        val returnBtn = NodeTraverser.findReturnToTikTokButton(freshRoot)
+        if (returnBtn != null) {
+            service.clickNode(returnBtn.node)
+            delay(1_500)
+            log("LIMIT: Đã click 'Quay lại TikTok' — tiếp tục farm")
+            return PopupResult(true, "daily_limit")
+        }
+
+        // Không tìm thấy nút → pressBack
+        log("LIMIT: Không tìm thấy nút 'Quay lại TikTok' → pressBack")
+        service.pressBack()
+        delay(800)
+        return PopupResult(true, "daily_limit_back")
+    }
+
     // ── Tier 2: Keyword scan ──────────────────────────────────
 
     private data class KeywordMatch(val description: String, val action: String)
@@ -146,6 +194,7 @@ class PopupHandler(private val service: IFarmHost) {
      *   "confirm"          — chấp nhận để tiếp tục (sensitive content, cookies...)
      *   "save_login"       — lưu thông tin đăng nhập (click Save, không bỏ qua)
      *   "deny_permission"  — từ chối cấp quyền hệ thống (danh bạ, email, vị trí...)
+     *   "daily_limit"      — v1.1.8 giới hạn thời gian sử dụng hằng ngày
      *
      * Mỗi keyword phủ nhiều ngôn ngữ (EN + VI) để hoạt động với
      * device language settings khác nhau.
@@ -187,6 +236,12 @@ class PopupHandler(private val service: IFarmHost) {
             // Áp dụng cho: danh bạ, email, vị trí, micro, camera (khi không cần).
             "access your contacts"    to "deny_permission",
             "truy cập danh bạ"        to "deny_permission",
+            // [v1.1.9] Popup "kết nối danh bạ qua cài đặt thiết bị":
+            // "hãy cho phép truy cập vào danh bạ của bạn trong mục cài đặt thiết bị"
+            // Keyword "truy cập danh bạ" cũ không khớp vì có "vào" chen giữa.
+            "truy cập vào danh bạ"    to "deny_permission",
+            "kết nối với những người bạn biết" to "deny_permission",
+            "contacts in device settings"      to "deny_permission",
             "access your phone"       to "deny_permission",
             "access contacts"         to "deny_permission",
             "access your email"       to "deny_permission",
@@ -233,11 +288,26 @@ class PopupHandler(private val service: IFarmHost) {
             "accept cookies"          to "confirm",
             "privacy policy"          to "dismiss",
 
+            // ── Thông báo cập nhật chính sách TikTok ─────────────────────────
+            // [v1.1.9] Popup "Chính sách vật phẩm ảo / Phần thưởng":
+            // Nút duy nhất là "Đã hiểu" → action confirm.
+            "chính sách vật phẩm ảo" to "confirm",
+            "chính sách phần thưởng" to "confirm",
+            "virtual items policy"    to "confirm",
+            "reward policy"           to "confirm",
+
             // ── Mời bạn bè / Giới thiệu ─────────────────────────────────────
             // [v1.1.3]
             "invite your friends"     to "decline",
             "invite friends"          to "decline",
             "mời bạn bè"              to "decline",
+
+            // ── Giới hạn thời gian sử dụng hằng ngày ────────────────────────
+            // [v1.1.8] Tier 2 fallback: khi Tier 1 không detect được 4 EditTexts
+            // (vd: accessibility tree chưa load đủ). Sử dụng text đặc trưng nhất.
+            "bạn đã sẵn sàng đóng tiktok" to "daily_limit",
+            "ready to close tiktok"        to "daily_limit",
+            "giới hạn thời gian sử dụng hằng ngày" to "daily_limit",
         )
 
         return patterns.firstOrNull { (kw, _) -> kw in text }
@@ -261,7 +331,7 @@ class PopupHandler(private val service: IFarmHost) {
                 "để sau", "nhắc tôi sau", "skip", "bỏ qua", "hủy",
             )
             // Chấp nhận: ưu tiên "continue" / "tiếp tục"
-            "confirm" -> listOf("continue", "tiếp tục", "ok", "i understand", "đồng ý")
+            "confirm" -> listOf("continue", "tiếp tục", "ok", "i understand", "đồng ý", "đã hiểu")
             // [v1.1.3] Lưu thông tin đăng nhập: click "Lưu" / "Save" (không dismiss)
             "save_login" -> listOf("lưu", "save", "có", "yes", "ok", "đồng ý")
             // [v1.1.3] Từ chối quyền hệ thống: ưu tiên "Không cho phép" / "Deny"
@@ -269,6 +339,10 @@ class PopupHandler(private val service: IFarmHost) {
                 "không cho phép", "từ chối", "deny",
                 "don't allow", "không", "no", "cancel", "hủy",
             )
+            // [v1.1.8] Daily limit — không scan button text, delegate về handleDailyLimit()
+            // Tier 1 (4 EditText) đã xử lý qua handleKnownPopup(); đây là Tier 2 fallback
+            // khi cây node chưa load đủ EditText mà chỉ phát hiện qua keyword.
+            "daily_limit" -> return handleDailyLimit(root)
             // dismiss (default): tìm bất kỳ nút đóng nào
             else      -> listOf("skip", "close", "đóng", "không", "cancel", "x", "dismiss")
         }

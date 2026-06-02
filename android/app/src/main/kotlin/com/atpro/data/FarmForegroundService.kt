@@ -188,7 +188,7 @@ class FarmForegroundService : Service() {
             var hadFarming = false
 
             while (isActive) {
-                delay(10_000)
+                delay(15_000)  // [v1.1.8] 15s (từ 10s) — giảm wake count, tiết kiệm pin
                 val farming = TikTokAccessibilityService.instance?.engine?.isFarming == true
 
                 if (farming) hadFarming = true

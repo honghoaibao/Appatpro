@@ -337,4 +337,74 @@ class NodeTraverserTest {
 
         assertEquals(2, buttons.size)
     }
+
+    // ── detectPopup: DAILY_LIMIT vs VERIFY_1234 (v1.1.8) ─────
+
+    @Test
+    fun `detectPopup returns DAILY_LIMIT when 4 EditTexts AND daily limit signal present`() {
+        // Màn hình Daily Limit: 4 EditText + nút "Quay lại TikTok"
+        val edits   = (1..4).map { node(cls = "android.widget.EditText") }
+        val signal  = node(text = "Quay lại TikTok", clickable = true)
+        val root    = node(children = edits + signal)
+
+        val info = NodeTraverser.detectPopup(root)
+
+        assertTrue(info.detected)
+        assertEquals(NodeTraverser.PopupType.DAILY_LIMIT, info.type)
+    }
+
+    @Test
+    fun `detectPopup returns VERIFY_1234 when 4 EditTexts and no daily limit signal`() {
+        // Màn hình VERIFY_1234: 4 EditText, KHÔNG có text daily limit
+        val edits = (1..4).map { node(cls = "android.widget.EditText") }
+        val root  = node(children = edits)
+
+        val info = NodeTraverser.detectPopup(root)
+
+        assertTrue(info.detected)
+        assertEquals(NodeTraverser.PopupType.VERIFY_1234, info.type)
+    }
+
+    @Test
+    fun `detectDailyLimitScreen returns true when return button found`() {
+        val btn  = node(text = "Quay lại TikTok", clickable = true)
+        val root = node(children = listOf(btn))
+
+        assertTrue(NodeTraverser.detectDailyLimitScreen(root))
+    }
+
+    @Test
+    fun `detectDailyLimitScreen returns true via keyword fallback`() {
+        val txt  = node(text = "bạn đã sẵn sàng đóng tiktok")
+        val root = node(children = listOf(txt))
+
+        assertTrue(NodeTraverser.detectDailyLimitScreen(root))
+    }
+
+    @Test
+    fun `detectDailyLimitScreen returns false for normal feed screen`() {
+        val video = node(text = "Regular video content")
+        val root  = node(children = listOf(video))
+
+        assertFalse(NodeTraverser.detectDailyLimitScreen(root))
+    }
+
+    @Test
+    fun `findReturnToTikTokButton returns node for VN text`() {
+        val btn  = node(text = "Quay lại TikTok", clickable = true)
+        val root = node(children = listOf(btn))
+
+        val result = NodeTraverser.findReturnToTikTokButton(root)
+
+        assertNotNull(result)
+        assertEquals("Quay lại TikTok", result!!.text)
+    }
+
+    @Test
+    fun `findReturnToTikTokButton returns null when button absent`() {
+        val root = node(children = listOf(node(text = "Quay lại ngay bây giờ", clickable = true)))
+
+        // "Quay lại ngay bây giờ" là wellbeing button — không khớp daily limit
+        assertNull(NodeTraverser.findReturnToTikTokButton(root))
+    }
 }

@@ -50,6 +50,10 @@ object OverlayFarmMonitor {
     private var tvAction:      TextView? = null
     private var btnPauseResume: TextView? = null
     private var btnStop:       TextView? = null
+    // [v1.1.7] Minimize support — thu gọn overlay thành chỉ còn header
+    private var btnMinimize:   TextView? = null
+    private var contentArea:   View?     = null
+    private var isMinimized:   Boolean   = false
 
     // [v1.1.0] Log area — 3 dòng gần nhất
     private var tvLog1: TextView? = null
@@ -113,7 +117,8 @@ object OverlayFarmMonitor {
             tvHeader       = null; tvAccount      = null
             tvSessionTime  = null; tvTotalTime    = null
             tvAction       = null; btnPauseResume = null
-            btnStop        = null
+            btnStop        = null; btnMinimize    = null
+            contentArea    = null; isMinimized    = false
             tvLog1         = null; tvLog2         = null; tvLog3 = null
             recentLogLines.clear()
             isPaused       = false
@@ -134,6 +139,10 @@ object OverlayFarmMonitor {
         }
     }
 
+    // [v1.1.8] Last-posted values — skip redundant handler.post when nothing changed
+    private var lastAccountText = ""
+    private var lastActionText  = ""
+
     fun update(
         accountIndex:    Int,
         accountTotal:    Int,
@@ -142,18 +151,27 @@ object OverlayFarmMonitor {
         totalSecsLeft:   Long,
         action:          String,
     ) {
+        val accountText = "@$accountId  ·  $accountIndex/$accountTotal"
+        val sessionDiff = kotlin.math.abs(tickSessionSecs - sessionSecsLeft) > 2L
+        val totalDiff   = kotlin.math.abs(tickTotalSecs   - totalSecsLeft)   > 2L
+        // Skip post jika tidak ada perubahan yang berarti
+        if (accountText == lastAccountText && action == lastActionText && !sessionDiff && !totalDiff) return
+
+        lastAccountText = accountText
+        lastActionText  = action
+
         handler.post {
-            tvAccount?.text = "@$accountId  ·  $accountIndex/$accountTotal"
+            tvAccount?.text = accountText
             tvAction?.text  = action
             tvAction?.setTextColor(C_MUTED)
 
             // [v1.1.0] Sync ticker state với giá trị thực từ engine
             // Chỉ reset nếu lệch >2s để tránh giật khi update liên tục
-            if (kotlin.math.abs(tickSessionSecs - sessionSecsLeft) > 2L) {
+            if (sessionDiff) {
                 tickSessionSecs = sessionSecsLeft
                 tvSessionTime?.text = formatTime(tickSessionSecs)
             }
-            if (kotlin.math.abs(tickTotalSecs - totalSecsLeft) > 2L) {
+            if (totalDiff) {
                 tickTotalSecs = totalSecsLeft
                 tvTotalTime?.text = formatTime(tickTotalSecs)
             }
@@ -170,19 +188,22 @@ object OverlayFarmMonitor {
     fun addLog(msg: String) {
         // Bỏ qua các log noise không cần thiết trong overlay
         val skip = msg.startsWith("LIST:") || msg.startsWith("DEV:") ||
-                   msg.startsWith("SAVE:") || msg.startsWith("SCAN: Lost")
+                   msg.startsWith("SAVE:") || msg.startsWith("SCAN: Lost") ||
+                   msg.startsWith("WDG:")  || msg.startsWith("RECOVER:")   // [v1.1.8] noise giảm
         if (skip) return
 
-        handler.post {
-            // Rút gọn message cho vừa overlay nhỏ
-            val short = msg
-                .removePrefix("WARN: ").removePrefix("ERR: ").removePrefix("OK: ")
-                .removePrefix("SKIP: ").removePrefix("LIKE: ").removePrefix("FOLLOW: ")
-                .removePrefix("CMT: ").removePrefix("ACC: ").removePrefix("AUTH: ")
-                .removePrefix("NOTIFY: ").removePrefix("ACCS: ").removePrefix("REST: ")
-                .take(36)
+        // [v1.1.8] Bỏ qua nếu trùng với dòng log cuối — tránh spam overlay
+        val SHORT_MSG = msg
+            .removePrefix("WARN: ").removePrefix("ERR: ").removePrefix("OK: ")
+            .removePrefix("SKIP: ").removePrefix("LIKE: ").removePrefix("FOLLOW: ")
+            .removePrefix("CMT: ").removePrefix("ACC: ").removePrefix("AUTH: ")
+            .removePrefix("NOTIFY: ").removePrefix("ACCS: ").removePrefix("REST: ")
+            .removePrefix("LIMIT: ").removePrefix("WELLBEING: ")
+            .take(36)
+        if (recentLogLines.firstOrNull() == SHORT_MSG) return
 
-            recentLogLines.addFirst(short)
+        handler.post {
+            recentLogLines.addFirst(SHORT_MSG)
             while (recentLogLines.size > 3) recentLogLines.removeLast()
 
             tvLog1?.text = recentLogLines.getOrNull(0) ?: ""
@@ -248,12 +269,30 @@ object OverlayFarmMonitor {
                 typeface  = if (bold) Typeface.DEFAULT_BOLD else Typeface.MONOSPACE
             }
 
-        // ── Header: "AT PRO  ●" ──
+        // ── Header: "AT PRO  ●  ⊟" ──
         val header = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
         val tvLogo = text("AT PRO", 9f, C_PURPLE, bold = true).apply { typeface = Typeface.DEFAULT_BOLD }
         val tvDot  = text("  ●", 9f, C_GREEN, bold = true)
         header.addView(tvLogo); tvHeader = tvDot; header.addView(tvDot)
+
+        // [v1.1.7] Spacer giữa dot và minimize button
+        val spacerH = View(context).apply {
+            layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
+        }
+        header.addView(spacerH)
+
+        // [v1.1.7] Nút minimize — thu gọn overlay thành chỉ còn header
+        btnMinimize = text("  ⊟", 9f, C_MUTED, bold = true).also { btn ->
+            btn.setOnClickListener { onMinimizeClick() }
+            header.addView(btn)
+        }
+
         root.addView(header)
+
+        // [v1.1.7] contentArea — toàn bộ nội dung bên dưới header
+        // Ẩn/hiện cùng lúc khi minimize/restore
+        val body = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        contentArea = body
 
         fun divider() = View(context).apply {
             setBackgroundColor(C_BORDER)
@@ -261,10 +300,10 @@ object OverlayFarmMonitor {
                 LinearLayout.LayoutParams.MATCH_PARENT, 1
             ).apply { setMargins(0, dp(6), 0, dp(6)) }
         }
-        root.addView(divider())
+        body.addView(divider())
 
         // ── Account + progress ──
-        tvAccount = text("@—  ·  —/—", 10f, C_TEXT).also { root.addView(it) }
+        tvAccount = text("@—  ·  —/—", 10f, C_TEXT).also { body.addView(it) }
 
         val timeRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -276,20 +315,20 @@ object OverlayFarmMonitor {
         tvTotalTime    = text("--:--", 9f, C_TEXT)
         timeRow.addView(lblSession); timeRow.addView(tvSessionTime)
         timeRow.addView(lblSep);     timeRow.addView(tvTotalTime)
-        root.addView(timeRow)
+        body.addView(timeRow)
 
         // Action text
         tvAction = text("▶ Chờ...", 9f, C_MUTED).apply { setPadding(0, dp(3), 0, 0) }
-        root.addView(tvAction)
+        body.addView(tvAction)
 
         // [v1.1.0] Log area — 3 dòng gần nhất
-        root.addView(divider())
-        tvLog1 = text("", 8f, C_MUTED).also { root.addView(it) }
-        tvLog2 = text("", 8f, 0xFF6B7280.toInt()).also { root.addView(it) }
-        tvLog3 = text("", 8f, 0xFF4B5563.toInt()).also { root.addView(it) }
+        body.addView(divider())
+        tvLog1 = text("", 8f, C_MUTED).also { body.addView(it) }
+        tvLog2 = text("", 8f, 0xFF6B7280.toInt()).also { body.addView(it) }
+        tvLog3 = text("", 8f, 0xFF4B5563.toInt()).also { body.addView(it) }
 
         // Divider trước nút điều khiển
-        root.addView(divider())
+        body.addView(divider())
 
         // ── Control buttons row ──
         val btnRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
@@ -321,7 +360,8 @@ object OverlayFarmMonitor {
             btnRow.addView(btn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         }
 
-        root.addView(btnRow)
+        body.addView(btnRow)
+        root.addView(body)
 
         // ── Drag to move ──
         var initialX = 0; var initialY = 0
@@ -349,6 +389,15 @@ object OverlayFarmMonitor {
     }
 
     // ── Button handlers ───────────────────────────────────────
+
+    // [v1.1.7] Minimize / restore — toggle contentArea visibility
+    private fun onMinimizeClick() {
+        handler.post {
+            isMinimized = !isMinimized
+            contentArea?.visibility = if (isMinimized) View.GONE else View.VISIBLE
+            btnMinimize?.text = if (isMinimized) "  ⊞" else "  ⊟"
+        }
+    }
 
     private fun onPauseResumeClick() {
         val engine = TikTokAccessibilityService.instance?.engine ?: return

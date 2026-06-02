@@ -179,10 +179,17 @@ object NodeTraverser {
             }
         }
 
-        // 1234 popup: 4 EditText
+        // 4 EditText — có thể là VERIFY_1234 (xác minh tài khoản) hoặc DAILY_LIMIT (giới hạn thời gian).
+        // [v1.1.8] Kiểm tra daily limit signals TRƯỚC khi kết luận là VERIFY_1234.
+        // Lý do: cả hai loại đều có 4 EditText → phân biệt bằng text context trên màn hình.
         val editTexts = findAllByClass(root, "EditText")
         if (editTexts.size == 4) {
-            return PopupInfo(true, PopupType.VERIFY_1234, editTexts.first())
+            val screenText = getAllText(root).lowercase()
+            return if (DAILY_LIMIT_SIGNALS.any { it in screenText }) {
+                PopupInfo(true, PopupType.DAILY_LIMIT, editTexts.first())
+            } else {
+                PopupInfo(true, PopupType.VERIFY_1234, editTexts.first())
+            }
         }
 
         // Follow friends popup
@@ -590,6 +597,64 @@ object NodeTraverser {
      *   Tier 1: Tìm trực tiếp nút "Quay lại ngay bây giờ" (chính xác nhất).
      *   Tier 2: Quét text wellbeing đặc trưng để bắt các biến thể màn hình khác.
      */
+    // ── Daily Screen Time Limit screen (v1.1.8) ───────────────────────────────
+
+    /**
+     * Tín hiệu phân biệt màn hình "Giới hạn thời gian sử dụng hằng ngày".
+     *
+     * Màn hình này KHÁC với VERIFY_1234 (xác minh tài khoản) dù đều có 4 EditText.
+     * Phân biệt: cả hai đều hiện 4 ô nhập nhưng context text hoàn toàn khác.
+     *
+     * Screenshot 2026-05-31:
+     *   Title: "Thời gian sử dụng mà..." (Screen Time Limit)
+     *   Body: "...hoặc nhập mật mã 1234 để quay lại TikTok"
+     *   Button: "Quay lại TikTok"
+     */
+    private val DAILY_LIMIT_SIGNALS = listOf(
+        "bạn đã sẵn sàng đóng tiktok",          // tiêu đề đặc trưng nhất
+        "giới hạn thời gian sử dụng hằng ngày",  // body text
+        "nhập mật mã",                            // body: "nhập mật mã 1234 để quay lại"
+        "quay lại tiktok",                        // button text
+        "ready to close tiktok",                  // EN variant
+        "daily time limit",                       // EN variant
+        "enter your passcode",                    // EN passcode prompt
+    )
+
+    /**
+     * Phát hiện màn hình giới hạn thời gian sử dụng hằng ngày của TikTok.
+     *
+     * TikTok hiển thị màn hình này khi user đã dùng app quá giới hạn đã đặt.
+     * Yêu cầu nhập mật mã (mặc định: 1234) để tiếp tục xem.
+     *
+     * v1.1.8 Tier 1: Tìm nút "Quay lại TikTok" — tín hiệu mạnh nhất.
+     * v1.1.8 Tier 2: Quét DAILY_LIMIT_SIGNALS trong toàn bộ text màn hình.
+     */
+    fun detectDailyLimitScreen(root: AccessibilityNodeInfo?): Boolean {
+        root ?: return false
+        if (findReturnToTikTokButton(root) != null) return true
+        val text = getAllText(root).lowercase()
+        return DAILY_LIMIT_SIGNALS.any { it in text }
+    }
+
+    /**
+     * Tìm nút "Quay lại TikTok" trên màn hình giới hạn thời gian sử dụng.
+     *
+     * Thứ tự ưu tiên: text chính xác trước, fallback sau.
+     * Không thêm "quay lại" generic — quá phổ biến, gây false positive.
+     */
+    fun findReturnToTikTokButton(root: AccessibilityNodeInfo?): NodeResult? {
+        root ?: return null
+        val RETURN_TEXTS = listOf(
+            "quay lại tiktok",   // VN — text chính xác trên screenshot
+            "return to tiktok",  // EN variant
+        )
+        for (text in RETURN_TEXTS) {
+            val node = findByText(root, text, ignoreCase = true)
+            if (node != null) return node
+        }
+        return null
+    }
+
     fun detectWellbeingScreen(root: AccessibilityNodeInfo?): Boolean {
         root ?: return false
 
@@ -717,6 +782,24 @@ object NodeTraverser {
      * Dùng trong AutomationEngine để log khi isLostWithRetry() phát hiện lạc,
      * giúp phân tích xem nav bar đang hiển thị keyword nào bị NodeTraverser bỏ sót.
      */
+    /**
+     * Detect video có overlay "Xem Nhật ký" của TikTok — v1.1.9.
+     *
+     * TikTok hiển thị nút "Xem Nhật ký" (và dòng phụ "Nhật ký khác trong 'Hộp thư'")
+     * chồng lên video — che phủ giao diện bình thường, làm nhiễu farm flow.
+     * Khi phát hiện → swipe qua.
+     *
+     * Tier 1: Exact text match "xem nhật ký" — rất đặc trưng, không xuất hiện trong
+     *   caption video thường. Một tín hiệu đủ kết luận.
+     * Tier 2: Soft double-signal — "nhật ký" + "hộp thư" cùng lúc trên màn hình.
+     */
+    fun detectDiary(root: AccessibilityNodeInfo?): Boolean {
+        root ?: return false
+        val text = getAllText(root).lowercase()
+        if ("xem nhật ký" in text) return true
+        return "nhật ký" in text && "hộp thư" in text
+    }
+
     fun dumpScreenTexts(root: AccessibilityNodeInfo?): List<String> {
         root ?: return emptyList()
         return traverseAll(root)
@@ -775,7 +858,7 @@ object NodeTraverser {
 
     // ── Data types ────────────────────────────────────────────────
 
-    enum class PopupType { NONE, ACCOUNT_SWITCH, VERIFY_1234, FOLLOW_FRIENDS, GENERIC, SAVE_LOGIN, PERMISSION_REQUEST }
+    enum class PopupType { NONE, ACCOUNT_SWITCH, VERIFY_1234, DAILY_LIMIT, FOLLOW_FRIENDS, GENERIC, SAVE_LOGIN, PERMISSION_REQUEST }
 
     data class PopupInfo(
         val detected: Boolean,

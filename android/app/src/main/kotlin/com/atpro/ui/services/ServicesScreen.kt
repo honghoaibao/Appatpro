@@ -20,6 +20,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -228,7 +229,8 @@ private fun TikTokFarmCard() {
                     }
                 }
 
-                Column {
+                // [v1.1.7] weight(1f) → Column takes available space, badge stays natural width
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text       = "Nuôi tài khoản TikTok",
                         color      = Color.White,
@@ -243,8 +245,6 @@ private fun TikTokFarmCard() {
                     )
                 }
 
-                Spacer(Modifier.weight(1f))
-
                 // Active badge
                 Surface(
                     shape  = RoundedCornerShape(20.dp),
@@ -256,6 +256,7 @@ private fun TikTokFarmCard() {
                         color    = Color(0xFF10B981),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                     )
                 }
@@ -317,9 +318,18 @@ private fun TikTokFarmCard() {
 
 @Composable
 private fun GolikeEarnCard() {
+    // [v1.1.7] Press scale animation — đồng bộ với TikTokFarmCard
+    var pressed by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue   = if (pressed) 0.97f else 1f,
+        animationSpec = tween(120),
+        label         = "golike_card_scale",
+    )
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .scale(scale)
             .clip(RoundedCornerShape(16.dp))
             .background(
                 Brush.horizontalGradient(
@@ -340,6 +350,10 @@ private fun GolikeEarnCard() {
                     )
                 ),
                 shape = RoundedCornerShape(16.dp),
+            )
+            .clickable(
+                onClick = { /* TODO: navigate to Golike */ },
+                onClickLabel = "Mở kiếm tiền Golike",
             )
             .padding(horizontal = 20.dp, vertical = 20.dp),
     ) {
@@ -369,7 +383,8 @@ private fun GolikeEarnCard() {
                     )
                 }
 
-                Column {
+                // [v1.1.7] weight(1f) → Column takes available space, badge stays natural width
+                Column(modifier = Modifier.weight(1f)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -401,8 +416,6 @@ private fun GolikeEarnCard() {
                     )
                 }
 
-                Spacer(Modifier.weight(1f))
-
                 // "Đang phát triển" badge
                 Surface(
                     shape  = RoundedCornerShape(20.dp),
@@ -425,6 +438,7 @@ private fun GolikeEarnCard() {
                             color      = GolikeGold,
                             fontSize   = 9.sp,
                             fontWeight = FontWeight.SemiBold,
+                            maxLines   = 1,
                         )
                     }
                 }
@@ -462,10 +476,24 @@ private fun GolikeEarnCard() {
 
 @Composable
 private fun ServiceChip(label: String, accent: Color) {
+    // [v1.1.7] Alpha pulse on press — chips are display-only, scale would look odd at small size
+    var pressed by remember { mutableStateOf(false) }
+    val alpha by animateFloatAsState(
+        targetValue   = if (pressed) 0.6f else 1f,
+        animationSpec = tween(100),
+        label         = "chip_alpha",
+    )
+
     Surface(
         shape  = RoundedCornerShape(20.dp),
         color  = accent.copy(alpha = 0.10f),
         border = BorderStroke(0.5.dp, accent.copy(alpha = 0.3f)),
+        modifier = Modifier
+            .graphicsLayer { this.alpha = alpha }
+            .clickable(
+                onClick = {},
+                onClickLabel = label,
+            ),
     ) {
         Text(
             text     = label,

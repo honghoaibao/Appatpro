@@ -197,6 +197,9 @@ class AutomationEngine(
     // Watchdog state — cập nhật bởi farmOneAccount()
     @Volatile private var watchdogVideoCount = 0
     @Volatile private var watchdogLastTick   = 0L
+    /** [v1.1.9+] Set true bởi watchdog khi phát hiện không có video mới quá lâu.
+     *  farmOneAccount() sẽ đọc flag này và thực hiện smart recovery. */
+    @Volatile private var watchdogStuckFlag  = false
 
     // ─────────────────────────────────────────────────────────────────────────
     // Public API
@@ -426,8 +429,30 @@ class AutomationEngine(
             if (config.enableRestBetweenAccounts && idx < farmList.size - 1) {
                 val restSecs = config.restDurationMinutes * 60L
                 log("REST: Nghỉ ${config.restDurationMinutes}m trước acc tiếp...")
-                setStatus("REST: Đang nghỉ ${config.restDurationMinutes} phút...")
-                delay(restSecs * 1_000L)
+
+                // [v1.1.9+] Thoát TikTok hoàn toàn trước khi nghỉ (Restart the app)
+                log("REST: Đóng TikTok trước khi nghỉ")
+                host.killTikTok()
+                setStatus("REST: Đã đóng TikTok — bắt đầu nghỉ...")
+                delay(1_000)
+
+                // [v1.1.9] Đếm ngược từng giây thay vì delay tĩnh
+                for (remaining in restSecs downTo 1L) {
+                    awaitResumed()
+                    val mm = remaining / 60L
+                    val ss = remaining % 60L
+                    setStatus("REST: Đang nghỉ %02d:%02d...".format(mm, ss))
+                    delay(1_000L)
+                }
+
+                // [v1.1.9+] Mở lại TikTok sau khi nghỉ xong, chờ feed ổn định
+                log("REST: Nghỉ xong — mở lại TikTok để tiếp tục nuôi")
+                setStatus("REST: Đang mở lại TikTok...")
+                host.launchTikTok()
+                if (!waitFeedLoad()) {
+                    log("WARN: REST: Feed chưa load sau relaunch — thử recoverToFeed()")
+                    recoverToFeed()
+                }
                 setStatus("")
             }
         }
@@ -657,8 +682,6 @@ class AutomationEngine(
 
         var videos   = 0; var likes = 0; var follows = 0; var comments = 0
         var lostStreak     = 0  // Số lần isLostWithRetry() liên tiếp
-        var sameVideoCount = 0  // Số lần cùng 1 video text liên tiếp
-        var lastVideoSnap  = "" // Snapshot text video để phát hiện kẹt
 
         // [FIX-1] Pre-loop update — đẩy thông tin acc/session/time lên overlay + Dashboard
         // NGAY TRƯỚC khi vào while loop, tránh hiển thị "--" khi bước [1]-[4] dùng continue/break.
@@ -693,8 +716,13 @@ class AutomationEngine(
             awaitResumed()
             val secsLeft = maxOf(0L, (deadline - System.currentTimeMillis()) / 1_000L)
 
+            // [v1.1.8] getRootNode() là IPC call qua accessibility service.
+            // Cache 1 lần mỗi iteration để tái sử dụng ở steps 1–6.
+            // Ngoại lệ: popup.handleIfPresent() tự lấy root riêng (nó cần root fresh sau khi click).
+            val root = host.getRootNode()
+
             // ── [1] Checkpoint ────────────────────────────────────────────
-            if (NodeTraverser.detectCheckpoint(host.getRootNode())) {
+            if (NodeTraverser.detectCheckpoint(root)) {
                 log("WARN: Checkpoint phát hiện: @$account")
                 repo.setCheckpoint(account, true)
                 AtProNotificationManager.notifyCheckpoint(account)
@@ -714,7 +742,7 @@ class AutomationEngine(
             // [v1.1.4] TikTok hiển thị màn hình toàn phần yêu cầu nghỉ ngơi
             // sau khi xem quá lâu → che phủ feed → app bị stuck.
             // Click "Quay lại ngay bây giờ" để tiếp tục farm.
-            val wellbeingBtn = NodeTraverser.findReturnFromWellbeingButton(host.getRootNode())
+            val wellbeingBtn = NodeTraverser.findReturnFromWellbeingButton(root)
             if (wellbeingBtn != null) {
                 log("WELLBEING: Màn hình nghỉ ngơi TikTok — click 'Quay lại ngay bây giờ'")
                 host.clickNode(wellbeingBtn.node)
@@ -723,9 +751,22 @@ class AutomationEngine(
                 continue
             }
 
+            // ── [2c] Daily screen time limit ─────────────────────────────
+            // [v1.1.8] TikTok hiển thị màn hình giới hạn thời gian sử dụng hằng ngày.
+            // Nhập mật mã (mặc định: 1234) và click "Quay lại TikTok".
+            // PHẢI xử lý TRƯỚC isLostWithRetry(): màn hình này không phải feed
+            // → isLostWithRetry() = true → recoverToFeed() vô ích (pressBack không hoạt động).
+            if (NodeTraverser.detectDailyLimitScreen(root)) {
+                log("LIMIT: Daily screen time limit — xử lý tự động")
+                popup.handleIfPresent()
+                delay(2_000)
+                lostStreak = 0
+                continue
+            }
+
             // ── [3] Lost detection ────────────────────────────────────────
             if (isLostWithRetry()) {
-                val dbgTexts = NodeTraverser.dumpScreenTexts(host.getRootNode())
+                val dbgTexts = NodeTraverser.dumpScreenTexts(root)
                 log("SCAN: Lost #${lostStreak + 1}: ${dbgTexts.take(10).joinToString(" | ")}")
 
                 lostStreak++
@@ -743,25 +784,26 @@ class AutomationEngine(
             }
             lostStreak = 0
 
-            // ── [4] Stuck video detection ─────────────────────────────────
-            // Lấy snapshot text đầu tiên của màn hình làm "video fingerprint".
-            // Nếu fingerprint giống >= 3 lần liên tiếp → TikTok bị kẹt.
-            val snap = NodeTraverser.dumpScreenTexts(host.getRootNode())
-                .firstOrNull()?.take(40) ?: ""
-            if (snap.isNotBlank() && snap == lastVideoSnap) {
-                sameVideoCount++
-                if (sameVideoCount >= 3) {
-                    log("WARN: Kẹt cùng video $sameVideoCount lần → force swipe")
-                    forceSwipeNext()
-                    sameVideoCount = 0
-                    continue
+            // ── [3b] Watchdog stuck recovery ─────────────────────────────
+            // [v1.1.9+] Khi watchdog phát hiện không có video mới quá lâu,
+            // thực hiện smart recovery thay vì đứng yên:
+            //   1. Back × maxBackAttempts
+            //   2. Kiểm tra & xử lý popup chặn
+            //   3. Kiểm tra về feed chưa
+            //   4. Nếu chưa → kill + relaunch TikTok
+            if (watchdogStuckFlag) {
+                watchdogStuckFlag = false
+                log("WDG: Thực hiện smart recovery (không có video mới quá lâu)")
+                val recovered = recoverFromStuck()
+                if (!recovered) {
+                    log("ERR: recoverFromStuck() thất bại — kết thúc sớm @$account")
+                    break
                 }
-            } else {
-                lastVideoSnap  = snap
-                sameVideoCount = 0
+                resetWatchdog()
+                continue
             }
 
-            // ── [5] Update overlay ────────────────────────────────────────
+            // ── [4] Update overlay ────────────────────────────────────────
             val sessionSecsRemain = secsLeft
             val totalSecsRemain   = maxOf(0L,
                 totalSecsLeft - (config.minutesPerAccount * 60L - sessionSecsRemain))
@@ -776,22 +818,47 @@ class AutomationEngine(
 
             // ── [5a] Skip ad ──────────────────────────────────────────────
             // [v1.1.3] Phát hiện quảng cáo TikTok trong feed → lướt video tiếp theo.
-            if (NodeTraverser.detectAd(host.getRootNode())) {
+            // [v1.1.9] Tôn trọng config.skipAds — chỉ skip khi người dùng bật.
+            if (config.skipAds && NodeTraverser.detectAd(root)) {
                 log("SKIP: Bỏ qua quảng cáo")
                 swipeNext()
                 continue
             }
 
             // ── [6] Skip live ─────────────────────────────────────────────
-            if (config.skipLive && NodeTraverser.detectLive(host.getRootNode())) {
+            if (config.skipLive && NodeTraverser.detectLive(root)) {
                 log("SKIP: Bỏ qua live")
+                swipeNext()
+                continue
+            }
+
+            // ── [6b] Skip diary overlay ───────────────────────────────────
+            // [v1.1.9] TikTok hiển thị nút "Xem Nhật ký" chồng lên video
+            // (kèm "Nhật ký khác trong 'Hộp thư'") — swipe qua để tiếp tục farm.
+            if (NodeTraverser.detectDiary(root)) {
+                log("SKIP: Bỏ qua Xem Nhật ký")
                 swipeNext()
                 continue
             }
 
             // ── [7] Watch video ───────────────────────────────────────────
             val watchMs = randomWatchTimeMs()
-            delay(watchMs)
+            // [v1.1.9] Đếm ngược từng giây khi xem video — cập nhật overlay realtime
+            val watchSecs = (watchMs / 1_000L).coerceAtLeast(1L)
+            for (w in watchSecs downTo 1L) {
+                OverlayFarmMonitor.update(
+                    accountIndex    = idx + 1,
+                    accountTotal    = total,
+                    accountId       = account,
+                    sessionSecsLeft = maxOf(0L, (deadline - System.currentTimeMillis()) / 1_000L),
+                    totalSecsLeft   = maxOf(0L, totalSecsLeft - (config.minutesPerAccount * 60L - maxOf(0L, (deadline - System.currentTimeMillis()) / 1_000L))),
+                    action          = "▶ Xem video (${w}s)",
+                )
+                delay(1_000L)
+            }
+            // Delay phần dư nhỏ hơn 1s (nếu có)
+            val remainder = watchMs % 1_000L
+            if (remainder > 0L) delay(remainder)
             videos++
             watchdogVideoCount = videos
             watchdogLastTick   = System.currentTimeMillis()
@@ -1012,7 +1079,10 @@ class AutomationEngine(
                 if (!isFarming || isPaused) continue
                 val stuckSecs = (System.currentTimeMillis() - watchdogLastTick) / 1_000
                 if (stuckSecs > config.watchdogTimeoutSecs) {
-                    log("WDG: Watchdog: không có video mới trong ${stuckSecs}s — engine có thể bị kẹt")
+                    log("WDG: Không có video mới trong ${stuckSecs}s — kích hoạt smart recovery")
+                    watchdogStuckFlag = true
+                    // Reset timer để không kích hoạt lại ngay lập tức
+                    watchdogLastTick = System.currentTimeMillis()
                 }
             }
         }
@@ -1021,6 +1091,7 @@ class AutomationEngine(
     private fun resetWatchdog() {
         watchdogVideoCount = 0
         watchdogLastTick   = System.currentTimeMillis()
+        watchdogStuckFlag  = false
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1061,15 +1132,64 @@ class AutomationEngine(
     }
 
     /**
-     * Phục hồi về feed — 4 chiến lược theo thứ tự leo thang:
+     * Smart recovery khi watchdog phát hiện không có video mới quá lâu.
      *
-     *   Tier 0: (v1.1.4) Click "Quay lại ngay bây giờ" nếu đang ở Wellbeing screen
+     * Quy trình leo thang:
+     *   1. pressBack × config.maxBackAttempts — mỗi lần kiểm tra về feed ngay
+     *   2. Kiểm tra & xử lý popup đang chặn (nếu có)
+     *   3. Kiểm tra feed lần cuối
+     *   4. Kill + relaunch TikTok nếu vẫn chưa về feed
+     */
+    private suspend fun recoverFromStuck(): Boolean {
+        log("WDG-RECOVER: Back ×${config.maxBackAttempts} để thoát màn hình chặn")
+        repeat(config.maxBackAttempts) { i ->
+            host.pressBack()
+            delay(1_000)
+            if (NodeTraverser.isOnFeedTab(host.getRootNode())) {
+                log("WDG-RECOVER: Về feed sau ${i + 1} lần back ✓")
+                return true
+            }
+        }
+
+        // Kiểm tra popup chặn
+        val popupResult = popup.handleIfPresent()
+        if (popupResult.handled) {
+            log("WDG-RECOVER: Đã xử lý popup chặn")
+            delay(1_000)
+            if (NodeTraverser.isOnFeedTab(host.getRootNode())) {
+                log("WDG-RECOVER: Về feed sau xử lý popup ✓")
+                return true
+            }
+        }
+
+        // Vẫn chưa về feed → reset hoàn toàn
+        log("WDG-RECOVER: Vẫn chưa về feed — kill + relaunch TikTok")
+        host.killTikTok()
+        delay(2_000)
+        host.launchTikTok()
+        return waitFeedLoad()
+    }
+
+    /**
+     * Phục hồi về feed — 5 chiến lược theo thứ tự leo thang:
+     *
+     *   Tier 0a: (v1.1.8) Nhập passcode nếu đang ở Daily Screen Time Limit
+     *   Tier 0b: (v1.1.4) Click "Quay lại ngay bây giờ" nếu đang ở Wellbeing screen
      *   Tier 1: pressBack nhiều lần (config.maxBackAttempts)
      *   Tier 2: Click Home tab nếu nav bar đang hiển thị
      *   Tier 3: Kill + relaunch TikTok (nuclear option)
      */
     private suspend fun recoverToFeed(): Boolean {
-        // Tier 0: [v1.1.4] Wellbeing screen — click nút trở về trước khi pressBack
+        // Tier 0a: [v1.1.8] Daily screen time limit — nhập passcode + click "Quay lại TikTok"
+        // pressBack không hoạt động; phải nhập passcode và click button.
+        if (NodeTraverser.detectDailyLimitScreen(host.getRootNode())) {
+            log("RECOVER: Daily limit screen — nhập mật mã và tiếp tục")
+            popup.handleIfPresent()
+            delay(2_000)
+            if (NodeTraverser.isOnFeedTab(host.getRootNode())) return true
+        }
+
+        // Tier 0b: [v1.1.4] Wellbeing screen — click nút trở về trước khi pressBack
         // pressBack KHÔNG hoạt động trên màn hình này; phải click button.
         val wellbeingBtn = NodeTraverser.findReturnFromWellbeingButton(host.getRootNode())
         if (wellbeingBtn != null) {

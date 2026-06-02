@@ -64,6 +64,9 @@ data class FarmConfig(
     /** Bỏ qua video live stream. */
     val skipLive: Boolean = true,
 
+    /** Bỏ qua quảng cáo TikTok (tự động vuốt qua). */
+    val skipAds: Boolean = true,
+
     /** Bật nghỉ giữa các acc. */
     val enableRestBetweenAccounts: Boolean = false,
 
