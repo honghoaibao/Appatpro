@@ -11,7 +11,7 @@ on:
       version:
         description: 'Version (vd: 1.0.7)'
         required: true
-        default:  '1.1.8'
+        default:  '1.1.9'
       build:
         description: 'Build number'
         required: true
@@ -101,7 +101,7 @@ jobs:
           VER="${{ github.ref_name }}"; VER="${VER#v}"
           BLD="${{ github.run_number }}"
         else
-          VER="1.1.8"
+          VER="1.1.9"
           BLD="${{ github.run_number }}"
         fi
         echo "version=$VER"  >> $GITHUB_OUTPUT

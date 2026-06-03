@@ -82,6 +82,12 @@ private data class AccountResult(
  *   - Jitter nhỏ (±80ms) trên mọi action.
  *   - occasionalPause(): đôi khi người dùng "thẫn thờ" 3–10s.
  *   - swipeDuration(): biên độ ±100ms xung quanh giá trị cơ sở.
+ *
+ * v1.1.9: Tăng cường random:
+ *   - swipeStartFactor / swipeEndFactor: vị trí bắt đầu/kết thúc swipe random ±8% height.
+ *   - swipeDuration: phân phối phi đều — 35% slow, 65% fast.
+ *   - microPause: 5% cơ hội dừng dài 800–2500ms (đang đọc caption).
+ *   - likeAnimDelay: delay riêng sau double-tap, nhìn animation tim.
  */
 private object Human {
     /** Delay ngẫu nhiên trong [minMs, maxMs]. */
@@ -90,8 +96,16 @@ private object Human {
             if (maxMs > minMs) Random.nextLong(minMs, maxMs) else minMs
         )
 
-    /** Micro-pause sau click/swipe — người thật không thao tác tức thì. */
-    suspend fun microPause() = kotlinx.coroutines.delay(Random.nextLong(60, 220))
+    /**
+     * Micro-pause sau click/swipe — người thật không thao tác tức thì.
+     * v1.1.9: 5% cơ hội "đọc caption" → dừng dài hơn.
+     */
+    suspend fun microPause() {
+        if (Random.nextFloat() < 0.05f)
+            kotlinx.coroutines.delay(Random.nextLong(800, 2_500))
+        else
+            kotlinx.coroutines.delay(Random.nextLong(50, 300))
+    }
 
     /**
      * Thỉnh thoảng dừng lại lâu — mô phỏng người dùng bị phân tâm.
@@ -102,22 +116,45 @@ private object Human {
             kotlinx.coroutines.delay(Random.nextLong(3_000, 9_000))
     }
 
-    /** Thời gian swipe ngẫu nhiên xung quanh [baseMs]. */
-    fun swipeDuration(baseMs: Long = 350): Long =
-        (baseMs + Random.nextLong(-80, 100)).coerceAtLeast(150)
+    /**
+     * Thời gian swipe ngẫu nhiên xung quanh baseMs.
+     * v1.1.9: Phân phối phi đều: 35% chậm hơn (slow reader), 65% nhanh.
+     */
+    fun swipeDuration(baseMs: Long = 350): Long {
+        val bias = if (Random.nextFloat() < 0.35f) Random.nextLong(60, 160)
+                   else Random.nextLong(-60, 80)
+        return (baseMs + bias).coerceAtLeast(140)
+    }
 
     /** Jitter tọa độ click — tránh click cùng pixel mỗi lần. */
     fun jitter(range: Int = 25): Int = Random.nextInt(-range, range)
+
+    /**
+     * v1.1.9: Vị trí bắt đầu swipe ngẫu nhiên — dao động 68%–82% screen height.
+     * Người thật không luôn bắt đầu swipe từ cùng một điểm.
+     */
+    fun swipeStartFactor(): Float = 0.68f + Random.nextFloat() * 0.14f
+
+    /**
+     * v1.1.9: Vị trí kết thúc swipe ngẫu nhiên — dao động 18%–30% screen height.
+     */
+    fun swipeEndFactor(): Float = 0.18f + Random.nextFloat() * 0.12f
+
+    /**
+     * v1.1.9: Delay sau double-tap like — người thật đôi khi nhìn animation tim.
+     */
+    suspend fun likeAnimDelay() = kotlinx.coroutines.delay(Random.nextLong(350, 900))
 }
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // retry — helper chạy lại với exponential backoff
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Retry [block] tối đa [times] lần.
+ * Retry block tối đa times lần.
  * Trả null nếu tất cả lần đều fail.
- * Delay giữa các lần tăng dần: [delayMs] * [backoff] ^ attempt.
+ * Delay giữa các lần tăng dần: delayMs * backoff ^ attempt.
  */
 private suspend fun <T> retry(
     times:    Int,
@@ -220,7 +257,7 @@ class AutomationEngine(
             try {
                 runStateMachine(mode, inputList)
             } catch (e: CancellationException) {
-                log("⏹ Farm bị hủy bởi người dùng")
+                log("Farm bị hủy bởi người dùng")
                 throw e
             } catch (e: Exception) {
                 log("ERR: Lỗi không mong đợi: ${e.javaClass.simpleName} — ${e.message}")
@@ -304,7 +341,7 @@ class AutomationEngine(
             return FarmPhase.Failed("launch_failed")
         }
 
-        setStatus("⏳ Chờ feed tải...")
+        setStatus("Chờ feed tải...")
         if (!waitFeedLoad()) {
             log("ERR: Feed không load trong 18s")
             setStatus("")
@@ -354,7 +391,7 @@ class AutomationEngine(
             return FarmPhase.Failed("no_accounts")
         }
 
-        setStatus("✓ ${farmList.size} tài khoản sẽ được nuôi")
+        setStatus("${farmList.size} tài khoản sẽ được nuôi")
 
         log("LIST: Farm list (${farmList.size} acc): ${farmList.joinToString()}")
         LanWebSocketServer.broadcast("farmStatus",
@@ -678,7 +715,7 @@ class AutomationEngine(
         // [FIX-2] Thay delay(2_000) cứng bằng waitFeedLoad() để đảm bảo feed
         // thực sự sẵn sàng trước khi vào loop — tránh isLostWithRetry() kích hoạt
         // ngay lập tức và khiến app vòng lặp lost→recover vô hạn mà không tới step [5].
-        setStatus("⏳ Chờ feed ổn định (@$account)...")
+        setStatus("Chờ feed ổn định (@$account)...")
         if (!waitFeedLoad()) {
             log("WARN: farmOneAccount: feed chưa load sau waitFeedLoad() → recoverToFeed()")
             if (!recoverToFeed()) {
@@ -715,7 +752,7 @@ class AutomationEngine(
             accountId       = account,
             sessionSecsLeft = initSessionSecs,
             totalSecsLeft   = totalSecsLeft,
-            action          = "⏳ Đang bắt đầu nuôi...",
+            action          = "Khởi động...",
         )
         LanWebSocketServer.broadcast("currentAccount", mapOf(
             "account" to account,
@@ -824,7 +861,7 @@ class AutomationEngine(
                 accountId       = account,
                 sessionSecsLeft = sessionSecsRemain,
                 totalSecsLeft   = totalSecsRemain,
-                action          = if (videos == 0) "⏳ Chuẩn bị xem video..." else "▶ Xem video",
+                action          = if (videos == 0) "Chuẩn bị..." else "Xem video",
             )
 
             // ── [5a] Skip ad ──────────────────────────────────────────────
@@ -853,8 +890,9 @@ class AutomationEngine(
             }
 
             // ── [7] Watch video ───────────────────────────────────────────
+            // [v1.1.9] swipeStartFactor() random 68–82% xử lý image post carousel tự nhiên:
+            // vị trí bắt đầu thay đổi mỗi lần → tránh nhất quán chạm vào thanh dot ••••.
             val watchMs = randomWatchTimeMs()
-            // [v1.1.9] Đếm ngược từng giây khi xem video — cập nhật overlay realtime
             val watchSecs = (watchMs / 1_000L).coerceAtLeast(1L)
             for (w in watchSecs downTo 1L) {
                 OverlayFarmMonitor.update(
@@ -863,31 +901,27 @@ class AutomationEngine(
                     accountId       = account,
                     sessionSecsLeft = maxOf(0L, (deadline - System.currentTimeMillis()) / 1_000L),
                     totalSecsLeft   = maxOf(0L, totalSecsLeft - (config.minutesPerAccount * 60L - maxOf(0L, (deadline - System.currentTimeMillis()) / 1_000L))),
-                    action          = "▶ Xem video (${w}s)",
+                    action          = if (videos == 0) "Chuẩn bị..." else "Xem video (${w}s)",
                 )
                 delay(1_000L)
             }
-            // Delay phần dư nhỏ hơn 1s (nếu có)
             val remainder = watchMs % 1_000L
             if (remainder > 0L) delay(remainder)
             videos++
             watchdogVideoCount = videos
             watchdogLastTick   = System.currentTimeMillis()
 
-            // Thỉnh thoảng dừng lâu (giả lập người dùng mất tập trung)
             Human.occasionalPause(config.occasionalPauseChance)
 
-            // ── [8] Like — content-aware gate [v1.1.8] ───────────────────
+            // ── [8] Like — content-aware gate ────────────────────────────
             // Phát hiện loại nội dung TRƯỚC khi quyết định like:
-            //   • Live  → không bao giờ like (dù skipLive = false)
-            //   • Ad    → chỉ like nếu config.likeAdsEnabled = true
-            //   • Video → like bình thường theo likeRate
-            // [FIX] Lấy freshRoot mới SAU khi watch xong — `root` từ đầu
-            // iteration đã stale (3–8 giây đã qua). AccessibilityNodeInfo cũ
-            // có thể đã bị framework recycle → traverseAll() ném exception
-            // → session kết thúc sớm → app không lướt video tiếp theo.
+            //   • Live → không bao giờ like (dù skipLive = false)
+            //   • Ad   → chỉ like nếu config.likeAdsEnabled = true
+            //   • Còn lại → like theo likeRate
+            // [FIX] Lấy freshRoot mới SAU khi watch xong — `root` đã stale (3–8s).
+            // [v1.1.9] Cache freshRoot — tái sử dụng cho Follow, giảm số lần gọi IPC.
+            val freshRoot = host.getRootNode()
             if (Random.nextFloat() < config.likeRate) {
-                val freshRoot     = host.getRootNode()
                 val isLiveContent = NodeTraverser.detectLive(freshRoot)
                 val isAdContent   = !isLiveContent && NodeTraverser.detectAd(freshRoot)
                 val shouldLike = when {
@@ -908,10 +942,11 @@ class AutomationEngine(
             }
 
             // ── [9] Follow ────────────────────────────────────────────────
+            // [v1.1.9] Tái sử dụng freshRoot từ bước Like — tránh gọi getRootNode() lần nữa.
             if (Random.nextFloat() < config.followRate) {
                 OverlayFarmMonitor.update(idx + 1, total, account,
                     sessionSecsRemain, totalSecsRemain, "FOLLOW: Theo dõi")
-                if (doFollow()) follows++
+                if (doFollowWithRoot(freshRoot)) follows++
             }
 
             // ── [10] Comment [v2.0] ───────────────────────────────────────
@@ -925,6 +960,8 @@ class AutomationEngine(
             }
 
             // ── [11] Swipe next ───────────────────────────────────────────
+            // swipeNext() dùng swipeStartFactor(68–82%) + swipeEndFactor(18–30%) ngẫu nhiên
+            // → tự nhiên tránh thanh dot •••• của image carousel mà không cần detect.
             swipeNext()
 
             // ── [12] Emit live stats ──────────────────────────────────────
@@ -963,13 +1000,15 @@ class AutomationEngine(
      *
      * `v2.0` Thêm jitter tọa độ (±25px) để tránh click cùng pixel mỗi lần.
      * TikTok phân biệt bot qua pattern tọa độ chính xác lặp lại.
+     * v1.1.9: likeAnimDelay() sau double-tap — người thật thường nhìn animation tim.
      */
     private suspend fun doLike() {
         val cx = screenW / 2 + Human.jitter(25)
         val cy = (screenH * 0.55).toInt() + Human.jitter(20)
         host.clickSuspend(cx, cy)
         Human.microPause()
-        host.clickSuspend(cx, cy)
+        host.clickSuspend(cx + Human.jitter(8), cy + Human.jitter(8))
+        Human.likeAnimDelay()
         delay((config.delayAfterLike * 1_000).toLong())
     }
 
@@ -979,8 +1018,13 @@ class AutomationEngine(
      * Kiểm tra text nút trước khi click — bỏ qua nếu đã follow.
      * Trả true nếu đã thực sự click (chưa follow).
      */
-    private suspend fun doFollow(): Boolean {
-        val root = host.getRootNode()
+    private suspend fun doFollow(): Boolean = doFollowWithRoot(host.getRootNode())
+
+    /**
+     * v1.1.9: Overload nhận root đã fetch — tái sử dụng từ bước Like,
+     * giảm số lần gọi getRootNode() (IPC qua accessibility service).
+     */
+    private suspend fun doFollowWithRoot(root: android.view.accessibility.AccessibilityNodeInfo?): Boolean {
         val btn = NodeTraverser.findByText(root, "follow",     ignoreCase = true)
             ?: NodeTraverser.findByText(root, "theo dõi",     ignoreCase = true)
             ?: NodeTraverser.findByText(root, "đăng ký",      ignoreCase = true)
@@ -1067,12 +1111,14 @@ class AutomationEngine(
      * Swipe lên xem video tiếp theo.
      *
      * `v2.0` Jitter ngang nhỏ — người thật không swipe thẳng đứng hoàn toàn.
+     * v1.1.9: Dùng swipeStartFactor/EndFactor ngẫu nhiên — vị trí swipe thay đổi mỗi lần.
      */
     private suspend fun swipeNext() {
         val xOff = Human.jitter(12)
+        val x    = screenW / 2 + xOff
         host.swipeSuspend(
-            screenW / 2 + xOff, (screenH * 0.75).toInt(),
-            screenW / 2 + xOff, (screenH * 0.25).toInt(),
+            x, (screenH * Human.swipeStartFactor()).toInt(),
+            x, (screenH * Human.swipeEndFactor()).toInt(),
             Human.swipeDuration(350),
         )
         Human.delay(700, 1_400)

@@ -1003,9 +1003,9 @@ private fun GolikeUserCard(
         }
         Box(Modifier.fillMaxWidth().height(0.5.dp).background(BorderDark))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            GolikeCoinBox("Coin hiện có", "${state.coin}", accent, Modifier.weight(1f))
-            GolikeCoinBox("TikTok hold",  "${state.tiktokHold}",    Color(0xFF22D3EE), Modifier.weight(1f))
-            GolikeCoinBox("Đang duyệt",   "${state.tiktokPending}", Green, Modifier.weight(1f))
+            GolikeCoinBox("Coin hiện có", state.formatCoin(state.coin),          accent, Modifier.weight(1f))
+            GolikeCoinBox("TikTok hold",  state.formatCoin(state.tiktokHold),    Color(0xFF22D3EE), Modifier.weight(1f))
+            GolikeCoinBox("Đang duyệt",   state.formatCoin(state.tiktokPending), Green, Modifier.weight(1f))
         }
     }
 }
@@ -1126,7 +1126,18 @@ private fun GolikeTikTokAccountRow(
                         .background(accent.copy(alpha = 0.13f))
                         .padding(horizontal = 7.dp, vertical = 3.dp),
                 ) {
-                    Text("+${totalCoin}🪙", color = accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Icon(
+                            Icons.Rounded.MonetizationOn,
+                            contentDescription = null,
+                            tint     = accent,
+                            modifier = Modifier.size(9.dp),
+                        )
+                        Text("+${totalCoin}", color = accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
                 Spacer(Modifier.width(4.dp))
             }
@@ -1203,12 +1214,23 @@ private fun GolikeTikTokAccountRow(
                         modifier = Modifier.weight(1f),
                     )
                     // Coin
-                    Text(
-                        "+${job.fixCoin}🪙",
-                        color = if (isDone) TextMuted else accent,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Icon(
+                            Icons.Rounded.MonetizationOn,
+                            contentDescription = null,
+                            tint     = if (isDone) TextMuted else accent,
+                            modifier = Modifier.size(9.dp),
+                        )
+                        Text(
+                            "+${job.fixCoin}",
+                            color      = if (isDone) TextMuted else accent,
+                            fontSize   = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
                     Spacer(Modifier.width(2.dp))
 
                     // Done indicator / action buttons

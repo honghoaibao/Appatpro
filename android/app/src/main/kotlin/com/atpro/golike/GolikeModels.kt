@@ -29,7 +29,7 @@ data class GolikeUserData(
     val name:     String      = "",
     val email:    String      = "",
     val role:     String      = "user",
-    val coin:     Int         = 0,
+    val coin:     Double      = 0.0,
     @SerialName("total_notifications_unread") val totalNotificationsUnread: Int = 0,
     @SerialName("user_rank") val userRank: UserRankDto? = null,
 )
@@ -107,7 +107,7 @@ data class CompleteJobResponse(
 data class StatisticsResponse(
     val status:  Int     = 0,
     val success: Boolean = false,
-    @SerialName("current_coin") val currentCoin: Int = 0,
+    @SerialName("current_coin") val currentCoin: Double = 0.0,
     val tiktok:    PlatformStatsDto? = null,
     val facebook:  PlatformStatsDto? = null,
     val instagram: PlatformStatsDto? = null,
@@ -115,8 +115,8 @@ data class StatisticsResponse(
 
 @Serializable
 data class PlatformStatsDto(
-    @SerialName("hold_coin")    val holdCoin:    Int = 0,
-    @SerialName("pending_coin") val pendingCoin: Int = 0,
+    @SerialName("hold_coin")    val holdCoin:    Double = 0.0,
+    @SerialName("pending_coin") val pendingCoin: Double = 0.0,
 )
 
 // ── Result wrapper ────────────────────────────────────────────────────────────

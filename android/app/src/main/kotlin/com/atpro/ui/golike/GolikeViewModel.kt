@@ -183,10 +183,15 @@ data class GolikeUiState(
     /** Job IDs đã hoàn thành thành công trong session hiện tại — hiển thị checkmark. */
     val completedJobs:     Set<Int>                       = emptySet(),
 ) {
-    val coin:          Int    get() = user?.coin ?: stats?.currentCoin ?: 0
+    val coin:          Double get() = user?.coin ?: stats?.currentCoin ?: 0.0
     val rankName:      String get() = user?.userRank?.rankName ?: ""
-    val tiktokHold:    Int    get() = stats?.tiktok?.holdCoin    ?: 0
-    val tiktokPending: Int    get() = stats?.tiktok?.pendingCoin ?: 0
+    val tiktokHold:    Double get() = stats?.tiktok?.holdCoin    ?: 0.0
+    val tiktokPending: Double get() = stats?.tiktok?.pendingCoin ?: 0.0
     val totalJobCount: Int    get() = tikTokJobs.values.sumOf { it.size }
     val displayName:   String get() = user?.name?.ifEmpty { user?.username } ?: savedUsername
+
+    /** Hiển thị coin đẹp: "250" thay vì "250.0", "12.5" thay vì "12.500000". */
+    fun formatCoin(value: Double): String =
+        if (value == kotlin.math.floor(value)) value.toLong().toString()
+        else "%.1f".format(value)
 }

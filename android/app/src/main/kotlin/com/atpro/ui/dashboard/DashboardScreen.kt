@@ -151,8 +151,8 @@ fun DashboardScreen(vm: DashboardViewModel, golikeVm: GolikeViewModel) {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  [v1.0.9] Startup Status Dialog — compact, đẹp hơn
-//  Hiển thị overlay trong suốt với trạng thái farm + điều khiển
+//  [v1.1.9] Startup Status Dialog — redesigned popup
+//  Cải tiến: accent strip, icon header, bố cục rõ ràng hơn
 // ─────────────────────────────────────────────────────────────
 
 @Composable
@@ -162,7 +162,7 @@ private fun StartupStatusDialog(
     onPause:   () -> Unit,
     onResume:  () -> Unit,
     onStop:    () -> Unit,
-    onMinimize: () -> Unit,                          // [v1.1.5] thu nhỏ thành bubble
+    onMinimize: () -> Unit,
 ) {
     Dialog(
         onDismissRequest = { /* không dismiss khi tap ngoài */ },
@@ -175,128 +175,204 @@ private fun StartupStatusDialog(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.65f)),
+                .background(Color.Black.copy(alpha = 0.72f)),
             contentAlignment = Alignment.Center,
         ) {
-            // Card gọn hơn v1.0.8 — không có header logo thừa
             Card(
-                modifier  = Modifier.fillMaxWidth(0.78f),
-                shape     = RoundedCornerShape(18.dp),
+                modifier  = Modifier.fillMaxWidth(0.82f),
+                shape     = RoundedCornerShape(20.dp),
                 colors    = CardDefaults.cardColors(containerColor = CardDark),
-                elevation = CardDefaults.cardElevation(defaultElevation = 10.dp),
-                border    = BorderStroke(1.dp, BorderDark),
+                elevation = CardDefaults.cardElevation(defaultElevation = 24.dp),
+                border    = BorderStroke(1.dp, Purple.copy(alpha = 0.25f)),
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 24.dp),
-                ) {
-                    // ── Spinner + tiêu đề + nút thu nhỏ ──
-                    Row(
-                        verticalAlignment     = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+
+                    // ── Accent strip — gradient ngang trên cùng ──────────────
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(3.dp)
+                            .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                            .background(
+                                brush = Brush.horizontalGradient(
+                                    listOf(Purple, Color(0xFF06B6D4))
+                                )
+                            )
+                    )
+
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(horizontal = 22.dp, vertical = 18.dp),
                     ) {
-                        CircularProgressIndicator(
-                            modifier    = Modifier.size(18.dp),
-                            color       = Purple,
-                            strokeWidth = 2.dp,
-                        )
-                        AnimatedContent(
-                            targetState = isPaused,
-                            transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(150)) },
-                            label = "startup_title",
-                        ) { paused ->
-                            Text(
-                                text       = if (paused) "Đã tạm dừng" else "Đang khởi động farm",
-                                color      = if (paused) Amber else Color.White,
-                                fontSize   = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
-                        Spacer(Modifier.weight(1f))
-                        // [v1.1.5] Nút thu nhỏ — collapse popup thành bubble tròn
-                        IconButton(
-                            onClick  = onMinimize,
-                            modifier = Modifier.size(28.dp),
+
+                        // ── Header: icon badge + title + minimize ──────────────
+                        Row(
+                            verticalAlignment     = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            Icon(
-                                Icons.Rounded.KeyboardArrowDown,
-                                contentDescription = "Thu nhỏ",
-                                tint     = TextMuted,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                    }
+                            // Icon badge với nền tròn
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Purple.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                AnimatedContent(
+                                    targetState   = isPaused,
+                                    transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(150)) },
+                                    label          = "header_icon",
+                                ) { paused ->
+                                    if (paused) {
+                                        Icon(
+                                            Icons.Rounded.Pause,
+                                            contentDescription = null,
+                                            tint     = Amber,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    } else {
+                                        CircularProgressIndicator(
+                                            modifier    = Modifier.size(16.dp),
+                                            color       = Purple,
+                                            strokeWidth = 2.dp,
+                                        )
+                                    }
+                                }
+                            }
 
-                    Spacer(Modifier.height(12.dp))
+                            // Title
+                            AnimatedContent(
+                                targetState   = isPaused,
+                                transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(150)) },
+                                label          = "startup_title",
+                            ) { paused ->
+                                Column {
+                                    Text(
+                                        text       = if (paused) "Đã tạm dừng" else "Đang farm",
+                                        color      = if (paused) Amber else Color.White,
+                                        fontSize   = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                    Text(
+                                        text     = "AT PRO",
+                                        color    = TextMuted,
+                                        fontSize = 10.sp,
+                                    )
+                                }
+                            }
 
-                    // ── Status text ──
-                    AnimatedContent(
-                        targetState = status,
-                        transitionSpec = {
-                            (fadeIn(tween(200)) + slideInVertically(tween(200)) { it / 4 }) togetherWith
-                                (fadeOut(tween(120)) + slideOutVertically(tween(120)) { -it / 4 })
-                        },
-                        label = "startup_status",
-                    ) { msg ->
-                        Text(
-                            text      = msg,
-                            color     = TextSec,
-                            fontSize  = 12.sp,
-                            textAlign = TextAlign.Center,
-                            modifier  = Modifier.fillMaxWidth(),
-                        )
-                    }
+                            Spacer(Modifier.weight(1f))
 
-                    Spacer(Modifier.height(20.dp))
-
-                    // ── Nút điều khiển: Tạm dừng/Tiếp tục + Dừng ──
-                    Row(
-                        modifier              = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        // Tạm dừng / Tiếp tục
-                        OutlinedButton(
-                            onClick  = if (isPaused) onResume else onPause,
-                            modifier = Modifier.weight(1f).height(38.dp),
-                            shape    = RoundedCornerShape(10.dp),
-                            border   = BorderStroke(
-                                1.dp,
-                                if (isPaused) Green.copy(alpha = 0.6f) else BorderDark,
-                            ),
-                            colors   = ButtonDefaults.outlinedButtonColors(
-                                contentColor = if (isPaused) Green else TextSec,
-                            ),
-                            contentPadding = PaddingValues(horizontal = 8.dp),
-                        ) {
-                            Icon(
-                                if (isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                if (isPaused) "Tiếp tục" else "Tạm dừng",
-                                fontSize   = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                            )
+                            // Minimize button
+                            IconButton(
+                                onClick  = onMinimize,
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(BorderDark),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.KeyboardArrowDown,
+                                    contentDescription = "Thu nhỏ",
+                                    tint     = TextMuted,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
                         }
 
-                        // Dừng
-                        OutlinedButton(
-                            onClick  = onStop,
-                            modifier = Modifier.weight(1f).height(38.dp),
-                            shape    = RoundedCornerShape(10.dp),
-                            border   = BorderStroke(1.dp, RedStop.copy(alpha = 0.5f)),
-                            colors   = ButtonDefaults.outlinedButtonColors(contentColor = RedStop),
-                            contentPadding = PaddingValues(horizontal = 8.dp),
+                        Spacer(Modifier.height(14.dp))
+
+                        // ── Status text với left accent ────────────────────────
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.White.copy(alpha = 0.04f))
+                                .padding(0.dp),
                         ) {
-                            Icon(
-                                Icons.Rounded.Stop,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
+                            // Thin left accent bar
+                            Box(
+                                modifier = Modifier
+                                    .width(3.dp)
+                                    .height(36.dp)
+                                    .clip(RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp))
+                                    .background(if (isPaused) Amber else Purple)
                             )
-                            Spacer(Modifier.width(4.dp))
-                            Text("Dừng", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            AnimatedContent(
+                                targetState = status,
+                                transitionSpec = {
+                                    (fadeIn(tween(200)) + slideInVertically(tween(200)) { it / 4 }) togetherWith
+                                        (fadeOut(tween(120)) + slideOutVertically(tween(120)) { -it / 4 })
+                                },
+                                label = "startup_status",
+                            ) { msg ->
+                                Text(
+                                    text      = msg,
+                                    color     = TextSec,
+                                    fontSize  = 11.sp,
+                                    modifier  = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 10.dp),
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.height(16.dp))
+
+                        // ── Nút điều khiển ─────────────────────────────────────
+                        Row(
+                            modifier              = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            // Tạm dừng / Tiếp tục — outline style
+                            OutlinedButton(
+                                onClick  = if (isPaused) onResume else onPause,
+                                modifier = Modifier.weight(1f).height(40.dp),
+                                shape    = RoundedCornerShape(12.dp),
+                                border   = BorderStroke(
+                                    1.dp,
+                                    if (isPaused) Green.copy(alpha = 0.7f) else Amber.copy(alpha = 0.5f),
+                                ),
+                                colors   = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (isPaused) Green.copy(alpha = 0.08f)
+                                                     else Amber.copy(alpha = 0.06f),
+                                    contentColor   = if (isPaused) Green else Amber,
+                                ),
+                                contentPadding = PaddingValues(horizontal = 10.dp),
+                            ) {
+                                Icon(
+                                    if (isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(15.dp),
+                                )
+                                Spacer(Modifier.width(5.dp))
+                                Text(
+                                    if (isPaused) "Tiếp tục" else "Tạm dừng",
+                                    fontSize   = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+
+                            // Dừng farm — nhẹ nhàng hơn
+                            OutlinedButton(
+                                onClick  = onStop,
+                                modifier = Modifier.weight(1f).height(40.dp),
+                                shape    = RoundedCornerShape(12.dp),
+                                border   = BorderStroke(1.dp, RedStop.copy(alpha = 0.6f)),
+                                colors   = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = RedStop.copy(alpha = 0.08f),
+                                    contentColor   = RedStop,
+                                ),
+                                contentPadding = PaddingValues(horizontal = 10.dp),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Stop,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(15.dp),
+                                )
+                                Spacer(Modifier.width(5.dp))
+                                Text("Dừng", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
                         }
                     }
                 }
@@ -1229,12 +1305,12 @@ private fun GolikeSummaryCard(
                 // Coin + TikTok stats
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(horizontalAlignment = Alignment.End) {
-                        Text("${state.coin}", color = GolikeGold, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+                        Text(state.formatCoin(state.coin), color = GolikeGold, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
                         Text("coin", color = TextMuted, fontSize = 9.sp)
                     }
                     if (state.tiktokHold > 0 || state.tiktokPending > 0) {
                         Column(horizontalAlignment = Alignment.End) {
-                            Text("+${state.tiktokHold}", color = Green, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("+${state.formatCoin(state.tiktokHold)}", color = Green, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             Text("hold", color = TextMuted, fontSize = 9.sp)
                         }
                     }

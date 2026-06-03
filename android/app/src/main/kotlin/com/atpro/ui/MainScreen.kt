@@ -1,5 +1,7 @@
 package com.atpro.ui
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
@@ -103,21 +105,29 @@ fun MainScreen(
                 .fillMaxSize()
                 .padding(bottom = innerPadding.calculateBottomPadding()),
         ) {
-            when (selectedTab) {
-                Tab.DASHBOARD -> DashboardScreen(vm = dashboardVm, golikeVm = golikeVm)
-                Tab.SERVICES  -> ServicesScreen()
-                Tab.STATS     -> StatsScreen(
-                    vm           = statsVm,
-                    onNavigateUp = { selectedTab = Tab.DASHBOARD },
-                )
-                Tab.ACCOUNTS  -> AccountsScreen(
-                    vm           = accountsVm,
-                    onNavigateUp = { selectedTab = Tab.DASHBOARD },
-                )
-                Tab.LOGS      -> LogsScreen(
-                    vm           = logsVm,
-                    onNavigateUp = { selectedTab = Tab.DASHBOARD },
-                )
+            // [v1.1.9] Crossfade — hiệu ứng chuyển tab mượt mà (180ms).
+            // Ngắn hơn Material default (300ms) để không ảnh hưởng tốc độ thao tác.
+            Crossfade(
+                targetState  = selectedTab,
+                animationSpec = tween(durationMillis = 180),
+                label        = "tab_crossfade",
+            ) { tab ->
+                when (tab) {
+                    Tab.DASHBOARD -> DashboardScreen(vm = dashboardVm, golikeVm = golikeVm)
+                    Tab.SERVICES  -> ServicesScreen()
+                    Tab.STATS     -> StatsScreen(
+                        vm           = statsVm,
+                        onNavigateUp = { selectedTab = Tab.DASHBOARD },
+                    )
+                    Tab.ACCOUNTS  -> AccountsScreen(
+                        vm           = accountsVm,
+                        onNavigateUp = { selectedTab = Tab.DASHBOARD },
+                    )
+                    Tab.LOGS      -> LogsScreen(
+                        vm           = logsVm,
+                        onNavigateUp = { selectedTab = Tab.DASHBOARD },
+                    )
+                }
             }
         }
     }
