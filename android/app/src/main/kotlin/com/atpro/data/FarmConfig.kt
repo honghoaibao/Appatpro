@@ -103,4 +103,24 @@ data class FarmConfig(
      * Mặc định 120s (2 phút) — đủ dài để không false-alarm khi xem video dài.
      */
     val watchdogTimeoutSecs: Int = 120,
+
+    // ── Tab ghé thăm [v1.1.9+] ────────────────────────────────────────────
+
+    /**
+     * Xác suất ghé qua Hộp thư sau mỗi video (0.0 = tắt).
+     * Engine click tab Hộp thư, xem `inboxViewDurationSecs` giây, rồi về feed.
+     */
+    val inboxViewRate: Float = 0.0f,
+
+    /** Thời gian xem Hộp thư mỗi lần ghé (giây). */
+    val inboxViewDurationSecs: Int = 15,
+
+    /**
+     * Xác suất ghé qua Cửa hàng sau mỗi video (0.0 = tắt).
+     * Engine click tab Cửa hàng, cuộn `shopScrollCount` lần, rồi về feed.
+     */
+    val shopViewRate: Float = 0.0f,
+
+    /** Số lần cuộn khi xem Cửa hàng. */
+    val shopScrollCount: Int = 3,
 )

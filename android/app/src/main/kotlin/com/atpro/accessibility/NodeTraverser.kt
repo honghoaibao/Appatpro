@@ -293,6 +293,42 @@ object NodeTraverser {
     }
 
     /**
+     * Tìm tab Hộp thư trong nav bar — dùng cho doViewInbox() [v1.1.9+].
+     */
+    fun findInboxTab(root: AccessibilityNodeInfo?): NodeResult? {
+        root ?: return null
+        val IDS   = listOf("inbox", "tab_inbox", "inbox_tab", "main_tab_inbox",
+                           "bottom_tab_inbox", "notification", "tab_notification")
+        val TEXTS = listOf("hộp thư", "inbox", "messages", "notifications")
+        val CDS   = listOf("hộp thư, tab", "inbox tab", "messages tab", "notification tab")
+
+        IDS.forEach   { findByResourceId(root, it)?.let { r -> return r } }
+        TEXTS.forEach { findByText(root, it, exact = false)?.let { r -> return r } }
+        return traverseAll(root).firstOrNull { node ->
+            val cd = node.contentDescription?.toString()?.lowercase() ?: return@firstOrNull false
+            CDS.any { cd.contains(it) }
+        }?.toResult()
+    }
+
+    /**
+     * Tìm tab Cửa hàng trong nav bar — dùng cho doViewShop() [v1.1.9+].
+     */
+    fun findShopTab(root: AccessibilityNodeInfo?): NodeResult? {
+        root ?: return null
+        val IDS   = listOf("shop", "tab_shop", "shop_tab", "main_tab_shop",
+                           "bottom_tab_shop", "store", "tab_store")
+        val TEXTS = listOf("cửa hàng", "shop", "store")
+        val CDS   = listOf("cửa hàng, tab", "shop tab", "store tab")
+
+        IDS.forEach   { findByResourceId(root, it)?.let { r -> return r } }
+        TEXTS.forEach { findByText(root, it, exact = false)?.let { r -> return r } }
+        return traverseAll(root).firstOrNull { node ->
+            val cd = node.contentDescription?.toString()?.lowercase() ?: return@firstOrNull false
+            CDS.any { cd.contains(it) }
+        }?.toResult()
+    }
+
+    /**
      * Kiểm tra đang ở màn hình Feed (Trang chủ) — v1.0.8 3 chiến lược xếp tầng.
      *
      * Chiến lược 1 — Broad isSelected scan (chính xác nhất):
@@ -673,12 +709,17 @@ object NodeTraverser {
         // Tier 2: Text signals đặc trưng của wellbeing screen
         val text = getAllText(root).lowercase()
         val WELLBEING_SIGNALS = listOf(
-            "khám phá các công cụ chăm sóc sức khỏe",  // footer cố định
+            "khám phá các công cụ chăm sóc sức khỏe",  // footer cố định (mọi biến thể)
             "sức khỏe kỹ thuật số",                     // "Digital Wellbeing" VN
             "digital wellbeing",                         // EN variant
             "screen time",                               // EN screen time
             "thời gian sử dụng màn hình",               // VN screen time
             "take a break",                              // EN break screen
+            // [v1.1.9+] Swipe-to-return / stretch screen (screenshot 2026-06-04):
+            "hãy kéo giãn cơ thể",                     // header đầy đủ — stretch screen
+            "bạn đã đạt đến giới hạn hằng ngày",       // subtitle cố định
+            "hãy kéo",                                  // header rút gọn (biến thể cũ hơn)
+            "tạm thời quay lại",                        // button text
         )
         return WELLBEING_SIGNALS.any { it in text }
     }
@@ -692,7 +733,10 @@ object NodeTraverser {
     fun findReturnFromWellbeingButton(root: AccessibilityNodeInfo?): NodeResult? {
         root ?: return null
         val RETURN_TEXTS = listOf(
-            "quay lại ngay bây giờ",   // text chính xác nhất (screenshot 2026-05-30)
+            "quay lại ngay bây giờ",   // Wellbeing/nghỉ ngơi (screenshot 2026-05-30)
+            "tạm thời quay lại",       // Stretch/swipe screen VN (screenshot 2026-06-04)
+            "tam thời quay lại",       // Biến thể hiển thị không dấu (font rendering)
+            "temporarily go back",     // EN: Stretch/swipe screen
             "return now",               // EN variant
             "tiếp tục xem",            // "Continue watching" VN
             "continue watching",        // EN variant

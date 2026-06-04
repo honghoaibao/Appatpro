@@ -50,6 +50,11 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
                 likeAds                  = repo.getConfigBool  ("like_ads",            false),
                 verifyAccount            = repo.getConfigBool  ("verify_account",      true),
                 enableSystemNotifications = repo.getConfigBool ("enable_system_notifications", true),
+                // [v1.1.9+] Tab ghé thăm
+                inboxViewRate             = repo.getConfigDouble("inbox_view_rate",          0.0).toFloat(),
+                inboxViewDurationSecs     = repo.getConfigInt   ("inbox_view_duration_secs", 15),
+                shopViewRate              = repo.getConfigDouble("shop_view_rate",           0.0).toFloat(),
+                shopScrollCount           = repo.getConfigInt   ("shop_scroll_count",        3),
             )
             // [v1.1.4.1 FIX] Dùng update thay vì assignment trực tiếp để giữ lại
             // trạng thái quyền đã được refreshPermissions() cập nhật. Nếu dùng
@@ -86,6 +91,11 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
             repo.setConfig("like_ads",                     "${s.likeAds}")  // [v1.1.8]
             repo.setConfig("verify_account",               "${s.verifyAccount}")
             repo.setConfig("enable_system_notifications",  "${s.enableSystemNotifications}")
+            // [v1.1.9+] Tab ghé thăm
+            repo.setConfig("inbox_view_rate",          "${s.inboxViewRate}")
+            repo.setConfig("inbox_view_duration_secs", "${s.inboxViewDurationSecs}")
+            repo.setConfig("shop_view_rate",           "${s.shopViewRate}")
+            repo.setConfig("shop_scroll_count",        "${s.shopScrollCount}")
 
             // Áp dụng ngay vào runtime manager
             AtProNotificationManager.enableSystemNotifications = s.enableSystemNotifications
@@ -154,6 +164,11 @@ data class ConfigUiState(
     val verifyAccount:            Boolean = true,
     val enableSystemNotifications: Boolean = true,
     val tikTokVersion:            String  = "Đang kiểm tra...",
+    // [v1.1.9+] Tab ghé thăm
+    val inboxViewRate:            Float   = 0.0f,
+    val inboxViewDurationSecs:    Int     = 15,
+    val shopViewRate:             Float   = 0.0f,
+    val shopScrollCount:          Int     = 3,
     // ── Permission state (read-only, refreshed via refreshPermissions()) ──
     val accessibilityGranted:     Boolean = false,
     val overlayGranted:           Boolean = false,

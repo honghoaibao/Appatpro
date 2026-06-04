@@ -211,7 +211,11 @@ class AutomationEngine(
     private val host: IFarmHost,
     private val repo: IFarmRepository,
 ) {
-    companion object { const val TAG = "AutomationEngine" }
+    companion object {
+        const val TAG = "AutomationEngine"
+        /** Số lần skip (ad/live/diary) liên tiếp tối đa trước khi force-swipe mạnh hơn. */
+        private const val MAX_CONSECUTIVE_SKIPS = 8
+    }
 
     var isFarming = false; private set
     var isPaused  = false; private set
@@ -512,6 +516,11 @@ class AutomationEngine(
             farmList.size * config.minutesPerAccount,
         )
 
+        // [v1.1.9+] Thoát TikTok sau khi nuôi xong — không để app chạy nền
+        log("DONE: Farm hoàn thành tất cả ${farmList.size} tài khoản — đóng TikTok")
+        delay(800)
+        host.killTikTok()
+
         return FarmPhase.Done
     }
 
@@ -729,7 +738,11 @@ class AutomationEngine(
         val deadline = System.currentTimeMillis() + config.minutesPerAccount * 60_000L
 
         var videos   = 0; var likes = 0; var follows = 0; var comments = 0
-        var lostStreak     = 0  // Số lần isLostWithRetry() liên tiếp
+        var lostStreak         = 0  // Số lần isLostWithRetry() liên tiếp
+        // [v1.1.9+] Đếm số lần skip (ad/live/diary) liên tiếp mà không xem được video nào.
+        // Nếu >= MAX_CONSECUTIVE_SKIPS: có thể TikTok đang không phản hồi swipe
+        // → dùng forceSwipeNext() + delay dài hơn để thoát khỏi stuck state.
+        var consecutiveSkipCount = 0
 
         // [FIX-1] Pre-loop update — đẩy thông tin acc/session/time lên overlay + Dashboard
         // NGAY TRƯỚC khi vào while loop, tránh hiển thị "--" khi bước [1]-[4] dùng continue/break.
@@ -786,13 +799,14 @@ class AutomationEngine(
                 continue
             }
 
-            // ── [2b] Wellbeing screen (màn hình nghỉ ngơi TikTok) ────────
-            // [v1.1.4] TikTok hiển thị màn hình toàn phần yêu cầu nghỉ ngơi
-            // sau khi xem quá lâu → che phủ feed → app bị stuck.
-            // Click "Quay lại ngay bây giờ" để tiếp tục farm.
+            // ── [2b] Wellbeing / Swipe-to-return screen ─────────────────
+            // [v1.1.4] Màn hình nghỉ ngơi TikTok — click "Quay lại ngay bây giờ".
+            // [v1.1.9+] Swipe-to-return screen — click "Tạm thời quay lại" (hãy kéo).
+            // Cả 2 loại đều được xử lý bởi findReturnFromWellbeingButton().
             val wellbeingBtn = NodeTraverser.findReturnFromWellbeingButton(root)
             if (wellbeingBtn != null) {
-                log("WELLBEING: Màn hình nghỉ ngơi TikTok — click 'Quay lại ngay bây giờ'")
+                val btnText = wellbeingBtn.text?.take(30) ?: "?"
+                log("WELLBEING: Màn hình wellbeing TikTok — click '$btnText'")
                 host.clickNode(wellbeingBtn.node)
                 delay(1_500)
                 lostStreak = 0
@@ -869,14 +883,26 @@ class AutomationEngine(
             // [v1.1.9] Tôn trọng config.skipAds — chỉ skip khi người dùng bật.
             if (config.skipAds && NodeTraverser.detectAd(root)) {
                 log("SKIP: Bỏ qua quảng cáo")
-                swipeNext()
+                consecutiveSkipCount++
+                if (consecutiveSkipCount >= MAX_CONSECUTIVE_SKIPS) {
+                    log("WARN: Skip liên tiếp ${consecutiveSkipCount}× (ad) → forceSwipeNext")
+                    forceSwipeNext(); delay(2_000); consecutiveSkipCount = 0
+                } else {
+                    swipeNext()
+                }
                 continue
             }
 
             // ── [6] Skip live ─────────────────────────────────────────────
             if (config.skipLive && NodeTraverser.detectLive(root)) {
                 log("SKIP: Bỏ qua live")
-                swipeNext()
+                consecutiveSkipCount++
+                if (consecutiveSkipCount >= MAX_CONSECUTIVE_SKIPS) {
+                    log("WARN: Skip liên tiếp ${consecutiveSkipCount}× (live) → forceSwipeNext")
+                    forceSwipeNext(); delay(2_000); consecutiveSkipCount = 0
+                } else {
+                    swipeNext()
+                }
                 continue
             }
 
@@ -885,7 +911,13 @@ class AutomationEngine(
             // (kèm "Nhật ký khác trong 'Hộp thư'") — swipe qua để tiếp tục farm.
             if (NodeTraverser.detectDiary(root)) {
                 log("SKIP: Bỏ qua Xem Nhật ký")
-                swipeNext()
+                consecutiveSkipCount++
+                if (consecutiveSkipCount >= MAX_CONSECUTIVE_SKIPS) {
+                    log("WARN: Skip liên tiếp ${consecutiveSkipCount}× (diary) → forceSwipeNext")
+                    forceSwipeNext(); delay(2_000); consecutiveSkipCount = 0
+                } else {
+                    swipeNext()
+                }
                 continue
             }
 
@@ -908,6 +940,7 @@ class AutomationEngine(
             val remainder = watchMs % 1_000L
             if (remainder > 0L) delay(remainder)
             videos++
+            consecutiveSkipCount = 0  // [v1.1.9+] reset sau khi xem được 1 video thành công
             watchdogVideoCount = videos
             watchdogLastTick   = System.currentTimeMillis()
 
@@ -957,6 +990,22 @@ class AutomationEngine(
                 OverlayFarmMonitor.update(idx + 1, total, account,
                     sessionSecsRemain, totalSecsRemain, "CMT: Bình luận")
                 if (doComment(config.commentTexts)) comments++
+            }
+
+            // ── [10b] Diversion: Hộp thư / Cửa hàng [v1.1.9+] ────────────
+            // Thỉnh thoảng ghé thăm tab phụ trước khi lướt — hành vi tự nhiên hơn.
+            // Chỉ 1 tab mỗi lần (ưu tiên inbox). Các hàm doView* tự về feed.
+            run diversion@{
+                val curSecs  = maxOf(0L, (deadline - System.currentTimeMillis()) / 1_000L)
+                val curTotal = maxOf(0L, totalSecsLeft -
+                    (config.minutesPerAccount * 60L - curSecs))
+                if (config.inboxViewRate > 0f && Random.nextFloat() < config.inboxViewRate) {
+                    doViewInbox(idx + 1, total, account, curSecs, curTotal)
+                    return@diversion
+                }
+                if (config.shopViewRate > 0f && Random.nextFloat() < config.shopViewRate) {
+                    doViewShop(idx + 1, total, account, curSecs, curTotal)
+                }
             }
 
             // ── [11] Swipe next ───────────────────────────────────────────
@@ -1105,6 +1154,107 @@ class AutomationEngine(
         log("CMT: Comment: \"${text.take(20)}${if (text.length > 20) "..." else ""}\"")
         delay((config.delayAfterComment * 1_000).toLong())
         return true
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Tab diversion: Hộp thư / Cửa hàng  [v1.1.9+]
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Ghé qua tab Hộp thư — xem `config.inboxViewDurationSecs` giây rồi về feed.
+     * Gọi từ step [10b] trong farmOneAccount(), sau khi đã xem + tương tác xong.
+     */
+    private suspend fun doViewInbox(
+        idx:         Int,
+        total:       Int,
+        account:     String,
+        sessionSecs: Long,
+        totalSecs:   Long,
+    ) {
+        val inboxTab = NodeTraverser.findInboxTab(host.getRootNode()) ?: run {
+            log("WARN: Không tìm thấy tab Hộp thư — bỏ qua")
+            return
+        }
+        log("INBOX: Ghé qua Hộp thư (${config.inboxViewDurationSecs}s)")
+        host.clickNode(inboxTab.node)
+        delay(1_500)
+
+        val viewSecs = config.inboxViewDurationSecs.toLong().coerceAtLeast(5L)
+        for (s in viewSecs downTo 1L) {
+            OverlayFarmMonitor.update(
+                accountIndex    = idx,
+                accountTotal    = total,
+                accountId       = account,
+                sessionSecsLeft = maxOf(0L, sessionSecs - (viewSecs - s)),
+                totalSecsLeft   = maxOf(0L, totalSecs   - (viewSecs - s)),
+                action          = "Hộp thư (${s}s)",
+            )
+            delay(1_000L)
+        }
+
+        // Về feed
+        val homeTab = NodeTraverser.findHomeTab(host.getRootNode())
+        if (homeTab != null) {
+            host.clickNode(homeTab.node)
+        } else {
+            host.pressBack()
+        }
+        delay(1_200)
+        log("INBOX: Xong → về feed")
+    }
+
+    /**
+     * Ghé qua tab Cửa hàng — cuộn `config.shopScrollCount` lần rồi về feed.
+     * Gọi từ step [10b] trong farmOneAccount(), sau khi đã xem + tương tác xong.
+     */
+    private suspend fun doViewShop(
+        idx:         Int,
+        total:       Int,
+        account:     String,
+        sessionSecs: Long,
+        totalSecs:   Long,
+    ) {
+        val shopTab = NodeTraverser.findShopTab(host.getRootNode()) ?: run {
+            log("WARN: Không tìm thấy tab Cửa hàng — bỏ qua")
+            return
+        }
+        val scrollCount = config.shopScrollCount.coerceIn(1, 10)
+        log("SHOP: Ghé qua Cửa hàng (${scrollCount} lần cuộn)")
+        host.clickNode(shopTab.node)
+        delay(2_000)
+
+        repeat(scrollCount) { i ->
+            OverlayFarmMonitor.update(
+                accountIndex    = idx,
+                accountTotal    = total,
+                accountId       = account,
+                sessionSecsLeft = sessionSecs,
+                totalSecsLeft   = totalSecs,
+                action          = "Cửa hàng (${i + 1}/${scrollCount})",
+            )
+            host.swipeSuspend(
+                screenW / 2, (screenH * 0.70).toInt(),
+                screenW / 2, (screenH * 0.30).toInt(),
+                Human.swipeDuration(400),
+            )
+            Human.delay(1_500, 2_500)
+        }
+
+        // Về feed
+        val homeTab = NodeTraverser.findHomeTab(host.getRootNode())
+        if (homeTab != null) {
+            host.clickNode(homeTab.node)
+            delay(1_500)
+        } else {
+            host.pressBack()
+            delay(1_500)
+        }
+        if (!NodeTraverser.isOnFeedTab(host.getRootNode())) {
+            log("SHOP: Chưa về feed → recoverToFeed()")
+            recoverToFeed()
+        } else {
+            log("SHOP: Xong → về feed")
+        }
     }
 
     /**
@@ -1270,11 +1420,14 @@ class AutomationEngine(
             if (NodeTraverser.isOnFeedTab(host.getRootNode())) return true
         }
 
-        // Tier 0b: [v1.1.4] Wellbeing screen — click nút trở về trước khi pressBack
-        // pressBack KHÔNG hoạt động trên màn hình này; phải click button.
+        // Tier 0b: [v1.1.4+] Wellbeing / Swipe-to-return screen
+        // pressBack KHÔNG hoạt động trên 2 loại màn hình này; phải click button.
+        //   - "Quay lại ngay bây giờ" (nghỉ ngơi/hít thở)
+        //   - "Tạm thời quay lại" (hãy kéo — swipe-to-return, v1.1.9+)
         val wellbeingBtn = NodeTraverser.findReturnFromWellbeingButton(host.getRootNode())
         if (wellbeingBtn != null) {
-            log("RECOVER: Wellbeing screen — click 'Quay lại ngay bây giờ'")
+            val btnText = wellbeingBtn.text?.take(30) ?: "?"
+            log("RECOVER: Wellbeing/swipe screen — click '$btnText'")
             host.clickNode(wellbeingBtn.node)
             delay(2_000)
             if (NodeTraverser.isOnFeedTab(host.getRootNode())) return true

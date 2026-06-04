@@ -650,6 +650,80 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
             )
         }
 
+        // ── [v1.1.9+] Ghé qua tab khác ──────────────────────────────────
+        Spacer(Modifier.height(16.dp))
+        SettingCard {
+            CardLabel("Ghé qua tab khác", Icons.Rounded.Explore, Cyan)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Thỉnh thoảng ghé Hộp thư / Cửa hàng sau khi xem video — tăng tính tự nhiên",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+            Spacer(Modifier.height(10.dp))
+
+            // Hộp thư
+            RateRow(
+                icon  = Icons.Rounded.Inbox,
+                label = "Tỉ lệ ghé Hộp thư",
+                value = state.inboxViewRate,
+                color = Cyan,
+            )
+            Spacer(Modifier.height(6.dp))
+            CfgSlider(
+                label    = "",
+                display  = if (state.inboxViewRate <= 0f) "Tắt"
+                           else "${(state.inboxViewRate * 100).toInt()}%",
+                value    = state.inboxViewRate,
+                range    = 0f..0.5f, steps = 9,
+                accent   = Cyan,
+                onChanged = { onSet { copy(inboxViewRate = it) } },
+            )
+            Spacer(Modifier.height(4.dp))
+            CfgSlider(
+                label    = "Thời gian xem (giây)",
+                display  = "${state.inboxViewDurationSecs}s",
+                value    = state.inboxViewDurationSecs.toFloat(),
+                range    = 5f..60f, steps = 10,
+                accent   = Cyan,
+                enabled  = state.inboxViewRate > 0f,
+                onChanged = { onSet { copy(inboxViewDurationSecs = it.toInt()) } },
+            )
+
+            Spacer(Modifier.height(10.dp))
+            ThinDivider()
+            Spacer(Modifier.height(10.dp))
+
+            // Cửa hàng
+            RateRow(
+                icon  = Icons.Rounded.ShoppingBag,
+                label = "Tỉ lệ ghé Cửa hàng",
+                value = state.shopViewRate,
+                color = Amber,
+            )
+            Spacer(Modifier.height(6.dp))
+            CfgSlider(
+                label    = "",
+                display  = if (state.shopViewRate <= 0f) "Tắt"
+                           else "${(state.shopViewRate * 100).toInt()}%",
+                value    = state.shopViewRate,
+                range    = 0f..0.5f, steps = 9,
+                accent   = Amber,
+                onChanged = { onSet { copy(shopViewRate = it) } },
+            )
+            Spacer(Modifier.height(4.dp))
+            CfgSlider(
+                label    = "Số lần cuộn Cửa hàng",
+                display  = "${state.shopScrollCount} lần",
+                value    = state.shopScrollCount.toFloat(),
+                range    = 1f..10f, steps = 8,
+                accent   = Amber,
+                enabled  = state.shopViewRate > 0f,
+                onChanged = { onSet { copy(shopScrollCount = it.toInt()) } },
+            )
+        }
+
         Spacer(Modifier.height(24.dp))
     }
 }
@@ -1622,9 +1696,14 @@ private fun CfgSlider(
     range:    ClosedFloatingPointRange<Float>,
     steps:    Int,
     accent:   Color = Purple,
+    enabled:  Boolean = true,
     onChanged: (Float) -> Unit,
 ) {
-    Column(Modifier.padding(bottom = 2.dp)) {
+    val effectiveAccent = if (enabled) accent else TextSec
+    Column(Modifier
+        .padding(bottom = 2.dp)
+        .alpha(if (enabled) 1f else 0.38f)
+    ) {
         if (label.isNotBlank()) {
             Row(
                 Modifier.fillMaxWidth(),
@@ -1636,10 +1715,10 @@ private fun CfgSlider(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(7.dp))
-                        .background(accent.copy(alpha = 0.12f))
+                        .background(effectiveAccent.copy(alpha = 0.12f))
                         .padding(horizontal = 9.dp, vertical = 3.dp),
                 ) {
-                    Text(display, color = accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(display, color = effectiveAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
             Spacer(Modifier.height(2.dp))
@@ -1649,23 +1728,24 @@ private fun CfgSlider(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(7.dp))
-                        .background(accent.copy(alpha = 0.12f))
+                        .background(effectiveAccent.copy(alpha = 0.12f))
                         .padding(horizontal = 9.dp, vertical = 3.dp),
                 ) {
-                    Text(display, color = accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(display, color = effectiveAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
         Box(modifier = Modifier.fillMaxWidth()) {
             Slider(
                 value         = value.coerceIn(range.start, range.endInclusive),
-                onValueChange = onChanged,
+                onValueChange = if (enabled) onChanged else { _ -> },
                 valueRange    = range,
                 steps         = steps,
+                enabled       = enabled,
                 modifier      = Modifier.fillMaxWidth(),
                 colors        = SliderDefaults.colors(
-                    thumbColor         = accent,
-                    activeTrackColor   = accent,
+                    thumbColor         = effectiveAccent,
+                    activeTrackColor   = effectiveAccent,
                     inactiveTrackColor = BorderHi,
                     activeTickColor    = Color.Transparent,
                     inactiveTickColor  = Color.Transparent,
@@ -1675,8 +1755,8 @@ private fun CfgSlider(
                         modifier = Modifier
                             .size(18.dp)
                             .clip(CircleShape)
-                            .background(accent)
-                            .border(2.dp, accent.copy(alpha = 0.3f), CircleShape),
+                            .background(effectiveAccent)
+                            .border(2.dp, effectiveAccent.copy(alpha = 0.3f), CircleShape),
                     )
                 },
             )

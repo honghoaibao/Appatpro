@@ -197,6 +197,11 @@ class LocalRepository(context: Context) : IFarmRepository {
         maxBackAttempts           = getConfigInt   ("max_back_attempts",        5),
         // [v2.0] Watchdog
         watchdogTimeoutSecs       = getConfigInt   ("watchdog_timeout_secs",    120),
+        // [v1.1.9+] Tab ghé thăm
+        inboxViewRate             = getConfigDouble("inbox_view_rate",           0.0).toFloat(),
+        inboxViewDurationSecs     = getConfigInt   ("inbox_view_duration_secs",  15),
+        shopViewRate              = getConfigDouble("shop_view_rate",            0.0).toFloat(),
+        shopScrollCount           = getConfigInt   ("shop_scroll_count",         3),
     )
 
     /** Lưu danh sách comment, phân cách bằng "||" trong DB. */
