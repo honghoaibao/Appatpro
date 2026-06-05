@@ -123,4 +123,54 @@ data class FarmConfig(
 
     /** Số lần cuộn khi xem Cửa hàng. */
     val shopScrollCount: Int = 3,
+
+    // ── Tim video theo nội dung [v1.2.0] ─────────────────────────────────
+
+    /**
+     * `v1.2.0` Bật like video khi caption chứa ít nhất 1 từ khoá trong [captionKeywords].
+     * Ưu tiên over likeRate — video khớp luôn được like (trừ live/ad).
+     */
+    val likeByCaption: Boolean = false,
+
+    /**
+     * `v1.2.0` Danh sách từ khoá tìm trong caption video (lowercase, chứa là match).
+     * Ví dụ: ["review", "unboxing", "trending", "hot"]
+     */
+    val captionKeywords: List<String> = emptyList(),
+
+    /**
+     * `v1.2.0` Bật like video khi video có ít nhất 1 hashtag khớp trong [hashtagKeywords].
+     * Ưu tiên over likeRate — video khớp luôn được like (trừ live/ad).
+     */
+    val likeByHashtag: Boolean = false,
+
+    /**
+     * `v1.2.0` Danh sách hashtag tìm trong video (không cần dấu #, lowercase).
+     * Ví dụ: ["xuhuong", "trending", "viral", "fyp"]
+     */
+    val hashtagKeywords: List<String> = emptyList(),
+
+    // ── Tìm kiếm theo từ khoá [v1.2.0] ──────────────────────────────────
+
+    /**
+     * `v1.2.0` Bật tính năng tìm kiếm định kỳ trong quá trình farm.
+     * Flow: click search → nhập keyword → click video → xem N video → back về feed.
+     */
+    val searchEnabled: Boolean = false,
+
+    /**
+     * `v1.2.0` Danh sách từ khoá tìm kiếm (chọn ngẫu nhiên mỗi phiên).
+     */
+    val searchKeywords: List<String> = emptyList(),
+
+    /**
+     * `v1.2.0` Số video xem trong mỗi phiên tìm kiếm trước khi về feed.
+     */
+    val searchVideosPerSession: Int = 3,
+
+    /**
+     * `v1.2.0` Xác suất thực hiện 1 phiên search sau mỗi video (0.0 = tắt).
+     * Độc lập với inboxViewRate / shopViewRate.
+     */
+    val searchRate: Float = 0.05f,
 )

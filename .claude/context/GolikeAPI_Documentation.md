@@ -1,12 +1,10 @@
 # 📘 Golike API – Tài liệu tích hợp chi tiết
 
-> **Nguồn:** Reverse-engineered từ `GolikeApi.smali` + toàn bộ DTO trong package `com.autogolike.mobile.core.network.dto`  
-> **Base URL:** `https://golike.io/`  
-> **Base URL cũ (deprecated):** `https://golike.net/` — đã đổi domain từ v1.1.9  
+> **Nguồn:** Reverse-engineered từ `GolikeApi.smali` + toàn bộ DTO trong package `com.autogolike.mobile.core.network.dto`    
+> **Base URL:** `https://golike.net/`
 > **Content-Type:** `application/json`  
 > **Auth:** Bearer Token trong header `Authorization: Bearer <token>`
 
-> ⚠️ **v1.1.9 — Breaking change:** Các field `coin`, `hold_coin`, `pending_coin` đổi kiểu từ `Int` → `Double` (API có thể trả về số thập phân, ví dụ `250.5`). Xem `GolikeModels.kt`.
 
 ---
 

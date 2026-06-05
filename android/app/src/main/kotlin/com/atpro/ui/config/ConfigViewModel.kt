@@ -55,6 +55,16 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
                 inboxViewDurationSecs     = repo.getConfigInt   ("inbox_view_duration_secs", 15),
                 shopViewRate              = repo.getConfigDouble("shop_view_rate",           0.0).toFloat(),
                 shopScrollCount           = repo.getConfigInt   ("shop_scroll_count",        3),
+                // [v1.2.0] Tim video theo nội dung
+                likeByCaption             = repo.getConfigBool  ("like_by_caption",           false),
+                captionKeywords           = repo.getConfig      ("caption_keywords",          ""),
+                likeByHashtag             = repo.getConfigBool  ("like_by_hashtag",           false),
+                hashtagKeywords           = repo.getConfig      ("hashtag_keywords",          ""),
+                // [v1.2.0] Tìm kiếm theo từ khoá
+                searchEnabled             = repo.getConfigBool  ("search_enabled",            false),
+                searchKeywords            = repo.getConfig      ("search_keywords",           ""),
+                searchVideosPerSession    = repo.getConfigInt   ("search_videos_per_session",  3),
+                searchRate                = repo.getConfigDouble("search_rate",               0.05).toFloat(),
             )
             // [v1.1.4.1 FIX] Dùng update thay vì assignment trực tiếp để giữ lại
             // trạng thái quyền đã được refreshPermissions() cập nhật. Nếu dùng
@@ -96,6 +106,16 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
             repo.setConfig("inbox_view_duration_secs", "${s.inboxViewDurationSecs}")
             repo.setConfig("shop_view_rate",           "${s.shopViewRate}")
             repo.setConfig("shop_scroll_count",        "${s.shopScrollCount}")
+            // [v1.2.0] Tim video theo nội dung
+            repo.setConfig("like_by_caption",          "${s.likeByCaption}")
+            repo.setConfig("caption_keywords",         s.captionKeywords)
+            repo.setConfig("like_by_hashtag",          "${s.likeByHashtag}")
+            repo.setConfig("hashtag_keywords",         s.hashtagKeywords)
+            // [v1.2.0] Tìm kiếm theo từ khoá
+            repo.setConfig("search_enabled",           "${s.searchEnabled}")
+            repo.setConfig("search_keywords",          s.searchKeywords)
+            repo.setConfig("search_videos_per_session","${s.searchVideosPerSession}")
+            repo.setConfig("search_rate",              "${s.searchRate}")
 
             // Áp dụng ngay vào runtime manager
             AtProNotificationManager.enableSystemNotifications = s.enableSystemNotifications
@@ -169,6 +189,16 @@ data class ConfigUiState(
     val inboxViewDurationSecs:    Int     = 15,
     val shopViewRate:             Float   = 0.0f,
     val shopScrollCount:          Int     = 3,
+    // [v1.2.0] Tim video theo nội dung
+    val likeByCaption:            Boolean = false,
+    val captionKeywords:          String  = "",
+    val likeByHashtag:            Boolean = false,
+    val hashtagKeywords:          String  = "",
+    // [v1.2.0] Tìm kiếm theo từ khoá
+    val searchEnabled:            Boolean = false,
+    val searchKeywords:           String  = "",
+    val searchVideosPerSession:   Int     = 3,
+    val searchRate:               Float   = 0.05f,
     // ── Permission state (read-only, refreshed via refreshPermissions()) ──
     val accessibilityGranted:     Boolean = false,
     val overlayGranted:           Boolean = false,

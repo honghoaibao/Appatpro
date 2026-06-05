@@ -202,6 +202,19 @@ class LocalRepository(context: Context) : IFarmRepository {
         inboxViewDurationSecs     = getConfigInt   ("inbox_view_duration_secs",  15),
         shopViewRate              = getConfigDouble("shop_view_rate",            0.0).toFloat(),
         shopScrollCount           = getConfigInt   ("shop_scroll_count",         3),
+        // [v1.2.0] Tim video theo nội dung
+        likeByCaption             = getConfigBool  ("like_by_caption",           false),
+        captionKeywords           = getConfig      ("caption_keywords",          "")
+                                        .split(",").map { it.trim() }.filter { it.isNotEmpty() },
+        likeByHashtag             = getConfigBool  ("like_by_hashtag",           false),
+        hashtagKeywords           = getConfig      ("hashtag_keywords",          "")
+                                        .split(",").map { it.trim() }.filter { it.isNotEmpty() },
+        // [v1.2.0] Tìm kiếm theo từ khoá
+        searchEnabled             = getConfigBool  ("search_enabled",            false),
+        searchKeywords            = getConfig      ("search_keywords",           "")
+                                        .split(",").map { it.trim() }.filter { it.isNotEmpty() },
+        searchVideosPerSession    = getConfigInt   ("search_videos_per_session",  3),
+        searchRate                = getConfigDouble("search_rate",               0.05).toFloat(),
     )
 
     /** Lưu danh sách comment, phân cách bằng "||" trong DB. */

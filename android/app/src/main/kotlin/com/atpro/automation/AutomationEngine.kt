@@ -950,21 +950,42 @@ class AutomationEngine(
             // Phát hiện loại nội dung TRƯỚC khi quyết định like:
             //   • Live → không bao giờ like (dù skipLive = false)
             //   • Ad   → chỉ like nếu config.likeAdsEnabled = true
+            //   • [v1.2.0] captionKeywords / hashtagKeywords → luôn like nếu khớp
             //   • Còn lại → like theo likeRate
             // [FIX] Lấy freshRoot mới SAU khi watch xong — `root` đã stale (3–8s).
             // [v1.1.9] Cache freshRoot — tái sử dụng cho Follow, giảm số lần gọi IPC.
             val freshRoot = host.getRootNode()
-            if (Random.nextFloat() < config.likeRate) {
-                val isLiveContent = NodeTraverser.detectLive(freshRoot)
-                val isAdContent   = !isLiveContent && NodeTraverser.detectAd(freshRoot)
+            val isLiveContent = NodeTraverser.detectLive(freshRoot)
+            val isAdContent   = !isLiveContent && NodeTraverser.detectAd(freshRoot)
+
+            // [v1.2.0] Content-aware: kiểm tra caption/hashtag keywords khi tính năng bật.
+            // Chỉ chạy scan khi feature enabled — tránh overhead khi tắt.
+            val contentMatch = !isLiveContent && !isAdContent && run {
+                val captionHit = config.likeByCaption && config.captionKeywords.isNotEmpty() &&
+                    config.captionKeywords.any { kw ->
+                        kw.lowercase() in NodeTraverser.extractVideoCaption(freshRoot).lowercase()
+                    }
+                if (captionHit) return@run true
+                config.likeByHashtag && config.hashtagKeywords.isNotEmpty() &&
+                    config.hashtagKeywords.any { kw ->
+                        kw.lowercase() in NodeTraverser.extractVideoHashtags(freshRoot)
+                    }
+            }
+
+            // contentMatch → bypass likeRate; không match → dùng likeRate bình thường
+            val passRateGate = contentMatch || Random.nextFloat() < config.likeRate
+            if (passRateGate) {
                 val shouldLike = when {
                     isLiveContent -> false
                     isAdContent   -> config.likeAdsEnabled
                     else          -> true
                 }
                 if (shouldLike) {
+                    val action = if (contentMatch) "LIKE: Khớp từ khoá" else "LIKE: Thích"
                     OverlayFarmMonitor.update(idx + 1, total, account,
-                        sessionSecsRemain, totalSecsRemain, "LIKE: Thích")
+                        sessionSecsRemain, totalSecsRemain, action)
+                    // [v1.2.0] Micro-pause trước like — người thật dừng ngắn khi thích video
+                    Human.delay(450, 1_200)
                     doLike()
                     likes++
                 } else if (isLiveContent) {
@@ -1005,6 +1026,14 @@ class AutomationEngine(
                 }
                 if (config.shopViewRate > 0f && Random.nextFloat() < config.shopViewRate) {
                     doViewShop(idx + 1, total, account, curSecs, curTotal)
+                    return@diversion
+                }
+                // [v1.2.0] Phiên tìm kiếm từ khoá — độc lập với inbox/shop
+                if (config.searchEnabled
+                    && config.searchKeywords.isNotEmpty()
+                    && Random.nextFloat() < config.searchRate
+                ) {
+                    doSearchSession(idx + 1, total, account, curSecs, curTotal)
                 }
             }
 
@@ -1254,6 +1283,104 @@ class AutomationEngine(
             recoverToFeed()
         } else {
             log("SHOP: Xong → về feed")
+        }
+    }
+
+
+    /**
+     * Phiên tìm kiếm theo từ khoá — v1.2.0.
+     *
+     * Flow:
+     * 1. Click icon tìm kiếm (kính lúp) trên feed.
+     * 2. Tìm ô input → gõ từng ký tự keyword (random delay 80–220ms/ký tự).
+     * 3. Nhấn ACTION_IME_ENTER → đợi kết quả.
+     * 4. Click vào video đầu tiên trong kết quả (vùng 35–45% chiều cao màn hình).
+     * 5. Xem [config.searchVideosPerSession] video (swipeNext giữa các video).
+     * 6. Back từng bước, kiểm tra isOnFeedTab() sau mỗi back đến khi về feed.
+     */
+    private suspend fun doSearchSession(
+        idx:         Int,
+        total:       Int,
+        account:     String,
+        sessionSecs: Long,
+        totalSecs:   Long,
+    ) {
+        val keyword = config.searchKeywords.randomOrNull() ?: return
+        log("SEARCH: Bắt đầu tìm kiếm \"$keyword\"")
+
+        // 1. Click tab tìm kiếm
+        val searchTab = NodeTraverser.findSearchTab(host.getRootNode()) ?: run {
+            log("SEARCH: WARN — Không tìm thấy nút tìm kiếm, bỏ qua")
+            return
+        }
+        host.clickNode(searchTab.node)
+        Human.delay(1_200, 2_000)
+
+        // 2. Điền từ khoá vào ô input
+        val freshRoot  = host.getRootNode()
+        val inputField = NodeTraverser.findSearchInputField(freshRoot) ?: run {
+            log("SEARCH: WARN — Không tìm thấy ô nhập, quay về")
+            host.pressBack()
+            return
+        }
+        host.clickNode(inputField.node)
+        Human.delay(350, 600)
+        // Gõ từng ký tự — delay ngẫu nhiên mô phỏng người gõ thực
+        host.typeText(inputField.node, keyword)
+        Human.delay(600, 1_000)
+
+        // 3. Submit search — tìm nút Search/Tìm kiếm trên màn hình, fallback tap phím Enter
+        //    Không dùng ACTION_IME_ENTER vì constant chỉ có API 30 và không resolve ổn định
+        val rootAfterType  = host.getRootNode()
+        val searchSubmitBtn = NodeTraverser.findByText(rootAfterType, "tìm kiếm", ignoreCase = true)
+            ?: NodeTraverser.findByText(rootAfterType, "search", ignoreCase = true)
+            ?: NodeTraverser.findByText(rootAfterType, "done", ignoreCase = true)
+        if (searchSubmitBtn != null) {
+            host.clickNode(searchSubmitBtn.node)
+        } else {
+            // Fallback: tap vùng phím Search/Done góc phải-dưới bàn phím
+            host.clickSuspend(screenW - 90, (screenH * 0.88).toInt())
+            Human.delay(200, 400)
+        }
+        Human.delay(1_600, 2_600)
+
+        // 4. Click video đầu tiên trong kết quả
+        //    TikTok search result: grid 2 cột — click cột trái, hàng đầu (~35–42% chiều cao)
+        OverlayFarmMonitor.update(idx, total, account, sessionSecs, totalSecs, "SEARCH: \"$keyword\"")
+        host.clickSuspend(
+            screenW / 4 + Human.jitter(20),
+            (screenH * (0.36 + Random.nextDouble() * 0.06)).toInt(),
+        )
+        Human.delay(1_000, 1_800)
+
+        // 5. Xem N video
+        val videoCount = config.searchVideosPerSession.coerceIn(1, 10)
+        repeat(videoCount) { i ->
+            OverlayFarmMonitor.update(
+                accountIndex    = idx,
+                accountTotal    = total,
+                accountId       = account,
+                sessionSecsLeft = sessionSecs,
+                totalSecsLeft   = totalSecs,
+                action          = "SEARCH: Video ${i + 1}/$videoCount",
+            )
+            val watchMs = randomWatchTimeMs()
+            delay(watchMs)
+            if (i < videoCount - 1) swipeNext()
+        }
+
+        // 6. Back từng bước về feed — kiểm tra sau mỗi lần back
+        var backCount = 0
+        while (!NodeTraverser.isOnFeedTab(host.getRootNode()) && backCount < 10) {
+            host.pressBack()
+            Human.delay(700, 1_100)
+            backCount++
+        }
+        if (NodeTraverser.isOnFeedTab(host.getRootNode())) {
+            log("SEARCH: Xong \"$keyword\" → về feed (back ${backCount}x)")
+        } else {
+            log("SEARCH: Chưa về feed → recoverToFeed()")
+            recoverToFeed()
         }
     }
 

@@ -828,6 +828,99 @@ object NodeTraverser {
             }
     }
 
+
+    // ── Tim theo nội dung [v1.2.0] ───────────────────────────────────────
+
+    /**
+     * Trích xuất text caption của video hiện tại trên feed.
+     *
+     * Pass 1: resource-id chứa "caption" / "desc" / "description".
+     * Pass 2: node text dài nhất không phải số thống kê (≥15 ký tự).
+     */
+    fun extractVideoCaption(root: AccessibilityNodeInfo?): String {
+        root ?: return ""
+        val CAPTION_IDS = listOf(
+            "caption", "desc", "description", "video_desc",
+            "text_content", "video_caption", "caption_text",
+        )
+        for (id in CAPTION_IDS) {
+            val node = findByResourceId(root, id) ?: continue
+            val text = node.text?.toString()?.trim() ?: continue
+            if (text.length >= 5) return text
+        }
+        // Fallback: node text dài nhất, loại số thuần và UI labels ngắn
+        val STAT_RE = Regex("^[0-9.,KMBkmb%\\s]+$")
+        return traverseAll(root)
+            .mapNotNull { it.text?.toString()?.trim()?.takeIf { t -> t.length >= 15 && !STAT_RE.matches(t) } }
+            .maxByOrNull { it.length }
+            ?: ""
+    }
+
+    /**
+     * Trích xuất danh sách hashtag từ video hiện tại.
+     *
+     * Pass 1: Regex #word trong caption text.
+     * Pass 2: Quét node bắt đầu bằng "#" (TikTok render hashtag thành node riêng).
+     */
+    fun extractVideoHashtags(root: AccessibilityNodeInfo?): List<String> {
+        root ?: return emptyList()
+        val HASHTAG_RE = Regex("#([\\w\u00C0-\u024F\u1E00-\u1EFF]+)")
+        val caption = extractVideoCaption(root)
+        val fromCaption = HASHTAG_RE.findAll(caption).map { it.groupValues[1].lowercase() }.toList()
+        val fromNodes = traverseAll(root).mapNotNull { node ->
+            val t = (node.text?.toString() ?: node.contentDescription?.toString()) ?: return@mapNotNull null
+            if (t.startsWith("#") && t.length > 2) t.removePrefix("#").lowercase() else null
+        }
+        return (fromCaption + fromNodes).distinct()
+    }
+
+    // ── Tìm kiếm theo từ khoá [v1.2.0] ──────────────────────────────────
+
+    /**
+     * Tìm nút/icon tìm kiếm (kính lúp) trên feed TikTok.
+     * TikTok render search icon ở nhiều vị trí tuỳ version — thử resource-id trước, text sau.
+     */
+    fun findSearchTab(root: AccessibilityNodeInfo?): NodeResult? {
+        root ?: return null
+        val SEARCH_IDS = listOf(
+            "search", "search_tab", "search_icon", "search_button",
+            "navigation_search", "nav_search", "search_entry",
+            "icon_search", "action_search", "feed_search",
+        )
+        for (id in SEARCH_IDS) {
+            findByResourceId(root, id)?.let { return it }
+        }
+        return findByText(root, "tìm kiếm", ignoreCase = true)
+            ?: findByText(root, "search", ignoreCase = true)
+    }
+
+    /**
+     * Tìm ô nhập liệu trên màn hình search.
+     * Thử resource-id trước, fallback EditText đầu tiên trên màn hình.
+     */
+    fun findSearchInputField(root: AccessibilityNodeInfo?): NodeResult? {
+        root ?: return null
+        val INPUT_IDS = listOf(
+            "search_input", "search_box", "search_field",
+            "search_edittext", "input_search", "search_bar_input", "search_query",
+        )
+        for (id in INPUT_IDS) {
+            findByResourceId(root, id)?.let { return it }
+        }
+        return findAllByClass(root, "EditText").firstOrNull()
+    }
+
+    /**
+     * Phát hiện đang ở màn hình kết quả search.
+     * Dùng sau pressBack() để kiểm tra đã về feed chưa.
+     */
+    fun isOnSearchScreen(root: AccessibilityNodeInfo?): Boolean {
+        root ?: return false
+        if (isOnFeedTab(root)) return false
+        val text = getAllText(root).lowercase()
+        return "tìm kiếm" in text || "search" in text
+    }
+
     // ── Private Helpers ───────────────────────────────────────────
 
     /**

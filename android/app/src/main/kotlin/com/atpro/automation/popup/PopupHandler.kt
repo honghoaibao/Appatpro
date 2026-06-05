@@ -167,32 +167,31 @@ class PopupHandler(private val service: IFarmHost) {
      * TODO: Cho phép cấu hình passcode trong FarmConfig (TD-future).
      */
     private suspend fun handleDailyLimit(root: AccessibilityNodeInfo): PopupResult {
-        log("LIMIT: Daily screen time limit — nhập mật mã 1234")
-
+        // Nhập passcode 1234 nếu có ô EditText
         val editTexts = NodeTraverser.findAllByClass(root, "EditText")
-        if (editTexts.size >= 4) {
+        val enteredCode = editTexts.size >= 4
+        if (enteredCode) {
             listOf("1", "2", "3", "4").forEachIndexed { i, digit ->
                 service.typeText(editTexts[i].node, digit)
-                delay(250) // 250ms giữa mỗi ký tự — tránh bị reject input quá nhanh
+                delay(250)
             }
-            delay(600) // Đợi TikTok xác nhận passcode trước khi tìm nút
+            delay(600)
         }
 
         // Lấy lại root sau khi gõ — UI có thể thay đổi sau input
         val freshRoot = service.getRootNode() ?: root
         val returnBtn = NodeTraverser.findReturnToTikTokButton(freshRoot)
-        if (returnBtn != null) {
+        return if (returnBtn != null) {
             service.clickNode(returnBtn.node)
             delay(1_500)
-            log("LIMIT: Đã click 'Quay lại TikTok' — tiếp tục farm")
-            return PopupResult(true, "daily_limit")
+            log("LIMIT: Giới hạn thời gian${if (enteredCode) " → đã nhập 1234" else ""} → click 'Quay lại TikTok'")
+            PopupResult(true, "daily_limit")
+        } else {
+            service.pressBack()
+            delay(800)
+            log("LIMIT: Giới hạn thời gian${if (enteredCode) " → đã nhập 1234" else ""} → pressBack (không tìm thấy nút)")
+            PopupResult(true, "daily_limit_back")
         }
-
-        // Không tìm thấy nút → pressBack
-        log("LIMIT: Không tìm thấy nút 'Quay lại TikTok' → pressBack")
-        service.pressBack()
-        delay(800)
-        return PopupResult(true, "daily_limit_back")
     }
 
     // ── Tier 2: Keyword scan ──────────────────────────────────

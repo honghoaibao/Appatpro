@@ -10,7 +10,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 private const val TAG      = "GolikeApi"
-private const val BASE_URL = "https://golike.io/"
+private const val BASE_URL = "https://golike.net/"
 
 private val jsonParser = Json {
     ignoreUnknownKeys = true

@@ -724,6 +724,114 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
             )
         }
 
+
+        // ── [v1.2.0] Tim video theo nội dung ─────────────────────────────────
+        Spacer(Modifier.height(16.dp))
+        SettingCard {
+            CardLabel("Tim theo nội dung", Icons.Rounded.Favorite, Pink)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Like video khớp từ khoá caption hoặc hashtag — bỏ qua likeRate cho video khớp",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+            Spacer(Modifier.height(10.dp))
+
+            // Caption keywords
+            CfgSwitch(
+                label    = "Like theo caption",
+                subtitle = "Like video khi caption chứa từ khoá đã cài",
+                value    = state.likeByCaption,
+                accent   = Pink,
+                onChanged = { onSet { copy(likeByCaption = it) } },
+            )
+            Spacer(Modifier.height(6.dp))
+            CfgTextField(
+                label     = "Từ khoá caption (cách nhau bằng dấu phẩy)",
+                value     = state.captionKeywords,
+                hint      = "review, unboxing, trending, hot...",
+                onChanged = { onSet { copy(captionKeywords = it) } },
+            )
+
+            Spacer(Modifier.height(10.dp))
+            ThinDivider()
+            Spacer(Modifier.height(10.dp))
+
+            // Hashtag keywords
+            CfgSwitch(
+                label    = "Like theo hashtag",
+                subtitle = "Like video khi có hashtag khớp danh sách",
+                value    = state.likeByHashtag,
+                accent   = Pink,
+                onChanged = { onSet { copy(likeByHashtag = it) } },
+            )
+            Spacer(Modifier.height(6.dp))
+            CfgTextField(
+                label     = "Hashtag (không cần #, cách nhau bằng dấu phẩy)",
+                value     = state.hashtagKeywords,
+                hint      = "xuhuong, trending, viral, fyp...",
+                onChanged = { onSet { copy(hashtagKeywords = it) } },
+            )
+        }
+
+        // ── [v1.2.0] Tìm kiếm theo từ khoá ──────────────────────────────────
+        Spacer(Modifier.height(16.dp))
+        SettingCard {
+            CardLabel("Tìm kiếm từ khoá", Icons.Rounded.Search, Purple)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Định kỳ tìm kiếm từ khoá, xem vài video rồi về feed — tăng tính tự nhiên",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+            Spacer(Modifier.height(10.dp))
+
+            CfgSwitch(
+                label    = "Bật tìm kiếm",
+                subtitle = "Thỉnh thoảng tự động tìm kiếm theo từ khoá",
+                value    = state.searchEnabled,
+                accent   = Purple,
+                onChanged = { onSet { copy(searchEnabled = it) } },
+            )
+            Spacer(Modifier.height(6.dp))
+            CfgTextField(
+                label     = "Từ khoá tìm kiếm (cách nhau bằng dấu phẩy)",
+                value     = state.searchKeywords,
+                hint      = "dance, cooking, travel, funny...",
+                onChanged = { onSet { copy(searchKeywords = it) } },
+            )
+            Spacer(Modifier.height(4.dp))
+            CfgSlider(
+                label    = "Số video xem mỗi phiên search",
+                display  = "${state.searchVideosPerSession} video",
+                value    = state.searchVideosPerSession.toFloat(),
+                range    = 1f..10f, steps = 8,
+                accent   = Purple,
+                enabled  = state.searchEnabled,
+                onChanged = { onSet { copy(searchVideosPerSession = it.toInt()) } },
+            )
+            Spacer(Modifier.height(4.dp))
+            RateRow(
+                icon  = Icons.Rounded.Search,
+                label = "Tỉ lệ tìm kiếm",
+                value = state.searchRate,
+                color = Purple,
+            )
+            Spacer(Modifier.height(6.dp))
+            CfgSlider(
+                label    = "",
+                display  = if (state.searchRate <= 0f) "Tắt"
+                           else "${(state.searchRate * 100).toInt()}%",
+                value    = state.searchRate,
+                range    = 0f..0.3f, steps = 5,
+                accent   = Purple,
+                enabled  = state.searchEnabled,
+                onChanged = { onSet { copy(searchRate = it) } },
+            )
+        }
+
         Spacer(Modifier.height(24.dp))
     }
 }
