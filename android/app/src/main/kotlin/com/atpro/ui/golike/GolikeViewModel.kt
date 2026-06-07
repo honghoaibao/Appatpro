@@ -77,6 +77,20 @@ class GolikeViewModel(
         }
     }
 
+    /**
+     * v1.2.1: Nhận token từ WebView login (GolikeLoginWebActivity).
+     * Sau khi WebView phát hiện token trong localStorage, Activity gọi method này.
+     * Tự động refresh thông tin user và TikTok accounts.
+     */
+    fun receiveTokenFromWebLogin(token: String) {
+        if (token.isBlank()) return
+        viewModelScope.launch {
+            repo.saveWebToken(token)
+            _state.update { it.copy(isLoading = true, loginError = null) }
+            refreshUserInfo()
+        }
+    }
+
     // ── Refresh ───────────────────────────────────────────────────────────────
 
     fun refreshUserInfo() {

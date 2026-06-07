@@ -113,6 +113,7 @@ class TikTokAccessibilityService : AccessibilityService(), IFarmHost {
 
     override fun launchTikTok(): Boolean     = TikTokDeepLinks.openTikTok(this)
     override fun openTikTokSettings(): Boolean = TikTokDeepLinks.openSettings(this)
+    override fun openDeepLink(url: String): Boolean = TikTokDeepLinks.openDeepLink(this, url)
 
     override suspend fun killTikTok() {
         // [FIX] killBackgroundProcesses() chỉ hoạt động với BACKGROUND process.
@@ -134,7 +135,11 @@ class TikTokAccessibilityService : AccessibilityService(), IFarmHost {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
-        engine   = AutomationEngine(this, LocalRepository.getInstance(this))
+        engine   = AutomationEngine(
+            this,
+            LocalRepository.getInstance(this),
+            com.atpro.golike.GolikeRepository.getInstance(LocalRepository.getInstance(this)),
+        )
         Log.i(TAG, "OK: Accessibility Service connected")
         LanWebSocketServer.broadcast("serviceStatus", mapOf("status" to "connected"))
         // NOTE: FarmForegroundService intentionally NOT started here.

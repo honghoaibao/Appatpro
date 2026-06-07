@@ -293,7 +293,7 @@ object NodeTraverser {
     }
 
     /**
-     * Tìm tab Hộp thư trong nav bar — dùng cho doViewInbox() [v1.1.9+].
+     * Tìm tab Hộp thư trong nav bar — dùng cho doViewInbox() v1.1.9+.
      */
     fun findInboxTab(root: AccessibilityNodeInfo?): NodeResult? {
         root ?: return null
@@ -311,7 +311,7 @@ object NodeTraverser {
     }
 
     /**
-     * Tìm tab Cửa hàng trong nav bar — dùng cho doViewShop() [v1.1.9+].
+     * Tìm tab Cửa hàng trong nav bar — dùng cho doViewShop() v1.1.9+.
      */
     fun findShopTab(root: AccessibilityNodeInfo?): NodeResult? {
         root ?: return null
@@ -331,32 +331,48 @@ object NodeTraverser {
     /**
      * Kiểm tra đang ở màn hình Feed (Trang chủ) — v1.0.8 3 chiến lược xếp tầng.
      *
+     * v1.2.1: Thêm Tier 0 live-room exclusion:
+     * Live room TikTok có thể chứa keyword feed ("bạn bè", "đề xuất" từ live
+     * recommendation strip) → các Tier 1/2 bên dưới trả true nhầm.
+     * Kiểm tra nhanh một số resource-ID đặc trưng của live room để loại trừ sớm.
+     *
      * Chiến lược 1 — Broad isSelected scan (chính xác nhất):
      *   Quét TOÀN BỘ node trong cây. Bất kỳ node nào có text/contentDescription khớp
      *   từ khóa feed VÀ isSelected == true → đang ở feed tab.
-     *   Rộng hơn cách cũ (chỉ tìm homeTab theo ID) — bắt được mọi biến thể tab name.
      *
      * Chiến lược 2 — Nav keyword count (dự phòng khi isSelected không khả dụng):
      *   Đếm số từ khóa nav bar phân biệt xuất hiện trên màn hình (>= 2).
-     *   Tránh false positive từ popup chứa 1 từ trùng.
      *
-     * Chiến lược 3 — Video interaction fallback (khi nav bar chưa render):
-     *   Nếu layout tương tác video (like_layout, comment_layout, share_layout) hiển thị
-     *   → chắc chắn đang ở feed, kể cả khi nav bar chưa kịp render xong sau animation.
-     *
-     * Dùng thay cho isLost() (= !hasNavBar) trong farmOneAccount() và waitFeedLoad().
+     * Chiến lược 3 — Video interaction layout fallback (khi nav bar chưa render):
+     *   Nếu layout Like/Comment/Share hiển thị → đang ở feed.
      */
     fun isOnFeedTab(root: AccessibilityNodeInfo?): Boolean {
         root ?: return false
 
+        // ── Tier 0: Live-room exclusion ───────────────────────────────────
+        // Kiểm tra nhanh resource-ID đặc trưng của live room.
+        // Live room hay có text "bạn bè"/"đề xuất" từ recommendation strip
+        // → Tier 1/2 dễ false-positive nếu không loại trừ trước.
+        // Dùng subset nhỏ của GIFT_IDS/LIVE_IDS — đủ phân biệt, không IPC tốn kém.
+        val LIVE_EXCL_IDS = listOf(
+            "liveroom", "live_room", "gift_entrance", "gift_btn", "send_gift_btn",
+            "live_chat", "live_anchor", "live_host", "live_viewer_count",
+            "audience_tab", "pk_battle",
+        )
+        if (LIVE_EXCL_IDS.any { findByResourceId(root, it) != null }) return false
+
+        // Bổ sung: quét viewIdResourceName cho live fragment
+        val hasLiveFragment = traverseAll(root).any { node ->
+            val id = node.viewIdResourceName?.lowercase() ?: return@any false
+            id.contains("liveroom") || id.contains("/gift_") || id.contains("live_room")
+        }
+        if (hasLiveFragment) return false
+
         val allNodes = traverseAll(root)
 
         // ── Chiến lược 1: Broad isSelected scan ───────────────────────
-        // Quét toàn bộ — không giới hạn chỉ homeTab — bắt được mọi biến thể UI/locale.
         val FEED_TAB_KEYWORDS = listOf(
-            // EN
             "home", "for you", "following", "friends",
-            // VN — TikTok Global 2024-2026
             "trang chủ", "dành cho bạn", "đề xuất", "đã follow", "bạn bè", "cộng đồng",
         )
         val hasSelectedFeedTab = allNodes.any { node ->
@@ -368,7 +384,6 @@ object NodeTraverser {
         if (hasSelectedFeedTab) return true
 
         // ── Chiến lược 2: Nav keyword count >= 2 ─────────────────────
-        // Không dùng isSelected — bắt trường hợp tree không expose trạng thái selected.
         val NAV_KEYWORDS = setOf(
             "trang chủ", "đề xuất", "cộng đồng", "đã follow",
             "bạn bè", "hộp thư", "hồ sơ",
@@ -381,13 +396,8 @@ object NodeTraverser {
         if (matched >= 2) return true
 
         // ── Chiến lược 3: Video interaction layout fallback ───────────
-        // Nav bar đôi khi chưa render ngay sau swipe animation, nhưng nếu
-        // layout Like/Comment/Share đã xuất hiện → chắc chắn đang ở feed.
-        // Dùng layout container ID (thực tế TikTok APK) thay vì icon button ID.
         val VIDEO_LAYOUT_IDS = listOf(
-            // TikTok APK layout containers — phổ biến nhất
             "like_layout", "comment_layout", "share_layout",
-            // Fallback icon-level IDs (Trill / bản quốc tế cũ)
             "btn_like", "iv_like", "like_button",
             "btn_comment", "iv_comment", "comment_btn",
         )
@@ -494,10 +504,55 @@ object NodeTraverser {
      *   "tặng quà", "người xem", "bình luận trực tiếp" có thể xuất hiện lẻ trong
      *   caption video thường → chỉ kết luận khi có >= 2 soft signals cùng lúc.
      */
+    /**
+     * Phát hiện đang ở trong phòng live TikTok — v1.2.1 rewrite.
+     *
+     * Các tầng theo thứ tự độ tin cậy giảm dần:
+     *
+     * **Tier 0 — Gift-panel + viewer-count combo** (chỉ tồn tại trong live room):
+     *   Nút gửi quà và badge số người xem xuất hiện DUY NHẤT ở live room.
+     *   Bất kỳ resource-ID nào trong GIFT_IDS → kết luận live ngay.
+     *
+     * **Tier 1 — Resource-ID fragments** (nhanh, chính xác):
+     *   Quét `viewIdResourceName` của toàn bộ node tree.
+     *   Cập nhật thêm ID từ TikTok APK 2025-2026 so với v1.1.x.
+     *
+     * **Tier 2 — Strict text signals** (một tín hiệu đủ kết luận):
+     *   Các cụm từ CHỈ xuất hiện trong live room TikTok — không bao giờ trong feed.
+     *
+     * **Tier 3 — Số người xem với pattern số** (tránh false-positive từ "viewers" trong caption):
+     *   Yêu cầu "số + người xem" hoặc "số + viewer(s)" — không match chỉ từ "viewer" đơn lẻ.
+     *
+     * **Tier 4 — Soft combo** (>= 2 tín hiệu mềm, mỗi tín hiệu đơn có thể sai):
+     *   Giảm từ SOFT_SIGNALS cũ, loại bỏ "viewers" và "live now" (dễ false-positive).
+     *
+     * FALSE-POSITIVE known risks (đã xử lý):
+     *   - Tab "LIVE" trong horizontal scroll của feed → không có gift IDs → không trigger Tier 0/1
+     *   - Caption video chứa từ "live" → Tier 2 strict không match; Tier 3 cần số đi kèm
+     *   - "người xem" trong stats video thường → không có gift IDs để pair
+     */
     fun detectLive(root: AccessibilityNodeInfo?): Boolean {
         root ?: return false
 
-        // Tier 1: Resource-ID partial match — bắt cả short-id và full path
+        // ── Tier 0: Gift-panel IDs — CHỈ tồn tại trong live room ────────
+        // Nút/panel quà tặng + danh sách người xem là tín hiệu mạnh nhất,
+        // không bao giờ xuất hiện trong feed video thông thường.
+        val GIFT_IDS = listOf(
+            // Gift buttons / panels
+            "gift_entrance", "gift_btn", "send_gift_btn", "gift_panel",
+            "gift_list", "gift_item", "gift_container", "coin_panel",
+            "gift_tab", "gift_icon", "btn_gift",
+            // Audience / viewers
+            "audience_list", "audience_tab", "live_audience",
+            "viewer_list", "viewer_count", "live_viewer_count",
+            // PK battle UI
+            "pk_battle", "pk_score", "pk_vs",
+            // Live-specific action bar
+            "live_action_bar", "live_tool_bar",
+        )
+        if (GIFT_IDS.any { findByResourceId(root, it) != null }) return true
+
+        // ── Tier 1a: Resource-ID exact fragments ─────────────────────────
         val LIVE_ID_FRAGMENTS = listOf(
             "liveroom", "live_room", "live_gift", "live_rank", "live_chat",
             "live_duration", "live_viewer", "live_viewers", "live_anchor",
@@ -505,38 +560,68 @@ object NodeTraverser {
             "live_button", "btn_exit_live", "exit_live",
             "live_stream", "live_badge", "live_comment", "broadcast",
             "live_panel", "live_info", "live_title",
+            // v1.2.1 — IDs từ TikTok APK 2025 build
+            "live_screen", "live_container", "live_layer",
+            "live_floating", "live_status_bar", "live_top_bar",
+            "live_bottom_bar", "live_control", "live_interact",
+            "live_caption", "live_pinned", "live_notice",
         )
         if (LIVE_ID_FRAGMENTS.any { findByResourceId(root, it) != null }) return true
 
-        // Tier 1b: Full-path resource-id scan — quét toàn bộ node tree
-        // TikTok APK đặt full path dạng "com.zhiliaoapp.musically:id/live_room_xxx"
+        // ── Tier 1b: Full-path resource-id scan ──────────────────────────
         val hasLiveId = traverseAll(root).any { node ->
             val resId = node.viewIdResourceName?.lowercase() ?: return@any false
-            resId.contains("/live") || resId.contains("liveroom") || resId.contains("broadcast")
+            resId.contains("/live") || resId.contains("liveroom") ||
+                resId.contains("broadcast") || resId.contains("/gift_")
         }
         if (hasLiveId) return true
 
-        val text = getAllText(root).lowercase()
+        val allNodes = traverseAll(root)
+        val text     = allNodes
+            .mapNotNull { it.text?.toString() ?: it.contentDescription?.toString() }
+            .joinToString(" ")
+            .lowercase()
 
-        // Tier 2: Strict signals — một tín hiệu đủ để kết luận
+        // ── Tier 2: Strict text signals — 1 tín hiệu đủ kết luận ────────
+        // Các cụm này KHÔNG xuất hiện trong feed video thông thường.
         val STRICT_SIGNALS = listOf(
-            "đang trực tiếp",        // badge TikTok VN
+            // TikTok VN
+            "đang trực tiếp",        // badge live VN
             "đang phát trực tiếp",   // toast khi vào live
             "đang live",             // variant ngắn
-            "liveroom",              // TikTok internal class name
-            ":id/live",              // resource-id fragment trong text dump
+            "phòng live",            // "Phòng Live của @..."
+            "đang phát sóng",        // host sees this
+            "kết thúc phát sóng",    // end-broadcast button (host)
+            "thoát khỏi phòng live", // viewer exit prompt
+            "tặng quà cho người dùng", // gift action text
+            // TikTok internal
+            "liveroom",
+            ":id/live",
+            // TikTok EN
+            "you are now live",
+            "end your live",
+            "going live",            // "You are going live" — toast
         )
         if (STRICT_SIGNALS.any { it in text }) return true
 
-        // Tier 3: Soft signals — cần >= 2 để tránh false positive từ caption video
+        // ── Tier 3: Số người xem với pattern số — tránh false-positive ───
+        // "1.2K người xem" / "234 viewers" là chỉ số riêng của live room.
+        // Không dùng "viewers" đơn lẻ — có thể xuất hiện trong caption video.
+        val viewerPattern = Regex("""[\d,.]+\s*[kKmM]?\s*(người xem|viewer|viewers)""")
+        if (viewerPattern.containsMatchIn(text)) return true
+
+        // ── Tier 4: Soft combo >= 2 — thu hẹp so với v1.1.x ─────────────
+        // Đã LOẠI BỎ khỏi SOFT_SIGNALS: "viewers", "live now" (quá dễ false-positive)
+        // Chỉ giữ tín hiệu ĐẶC THÙ cho live interaction/gifting.
         val SOFT_SIGNALS = listOf(
-            "tặng quà",              // nút gửi gift trong live
-            "người xem",             // viewer count badge
-            "bình luận trực tiếp",   // live comment stream
-            "kết thúc phát sóng",    // end-live button
-            "live now",
-            "viewers",
-            "tặng tim",              // heart gift trong live VN
+            "tặng quà",              // gift button text
+            "gửi quà",               // alternative gift text
+            "bình luận trực tiếp",   // live chat label
+            "tặng tim",              // heart gift VN
+            "nhận quà",              // receive gift
+            "kết thúc live",         // end live (shorter variant)
+            "thoát live",            // exit live viewer
+            "chia sẻ live",          // share live button
         )
         return SOFT_SIGNALS.count { it in text } >= 2
     }
@@ -957,7 +1042,92 @@ object NodeTraverser {
             .distinct()
     }
 
-    private fun traverseAll(root: AccessibilityNodeInfo): List<AccessibilityNodeInfo> {
+    // ── Profile page helpers [v1.2.1] ──────────────────────────────────────
+
+    /**
+     * v1.2.1: Tìm nút Follow trên trang hồ sơ người dùng.
+     *
+     * Khác với doFollowWithRoot() trong AutomationEngine (tìm trên feed):
+     * Trang hồ sơ có nút Follow nổi bật hơn, thường có resource-id chuyên biệt.
+     * Trả null nếu không tìm thấy (đã follow / profile bị khoá / không có nút).
+     */
+    fun findFollowButtonOnProfile(root: AccessibilityNodeInfo?): NodeResult? {
+        root ?: return null
+
+        // Resource-id ưu tiên cao nhất
+        val PROFILE_FOLLOW_IDS = listOf(
+            "btn_follow", "follow_btn", "follow_button",
+            "user_follow_btn", "profile_follow", "btn_user_follow",
+            "follow_action_btn",
+        )
+        PROFILE_FOLLOW_IDS.forEach { id ->
+            findByResourceId(root, id)?.let { return it }
+        }
+
+        // Tìm node clickable có text khớp từ khoá follow (chưa follow)
+        val FOLLOW_LABELS = listOf("follow", "theo dõi", "đăng ký")
+        val ALREADY_FOLLOWING_LABELS = listOf(
+            "following", "đang theo dõi", "đã theo dõi", "friends", "bạn bè",
+        )
+        return traverseAll(root).firstOrNull { node ->
+            if (!node.isClickable) return@firstOrNull false
+            val label = (node.text?.toString() ?: node.contentDescription?.toString())
+                ?.lowercase() ?: return@firstOrNull false
+            // Khớp follow nhưng KHÔNG phải "following"
+            val isFollow = FOLLOW_LABELS.any { label == it || (label.contains(it) && label.length < 30) }
+            val isAlready = ALREADY_FOLLOWING_LABELS.any { label.contains(it) }
+            isFollow && !isAlready
+        }?.toResult()
+    }
+
+    /**
+     * v1.2.1: Kiểm tra trang hồ sơ có bị khoá / hạn chế không.
+     *
+     * Phát hiện:
+     *   - Tài khoản bị khoá / đình chỉ
+     *   - Trang chế độ riêng tư (private account — không follow được)
+     *   - Trang không tồn tại / không khả dụng
+     */
+    fun detectBlockedProfile(root: AccessibilityNodeInfo?): Boolean {
+        root ?: return false
+        val allText = traverseAll(root)
+            .mapNotNull { (it.text?.toString() ?: it.contentDescription?.toString())?.lowercase() }
+
+        val BLOCKED_KEYWORDS = listOf(
+            // Khoá / đình chỉ
+            "account suspended", "tài khoản bị khóa", "tài khoản bị đình chỉ",
+            "this account has been suspended",
+            // Không khả dụng
+            "account unavailable", "tài khoản không khả dụng",
+            "this account is unavailable",
+            // Riêng tư
+            "this account is private", "tài khoản này ở chế độ riêng tư",
+            "đây là tài khoản riêng tư",
+            // Không thể xem
+            "không thể xem hồ sơ này", "bị hạn chế",
+        )
+        return BLOCKED_KEYWORDS.any { kw -> allText.any { it.contains(kw) } }
+    }
+
+    /**
+     * v1.2.1: Kiểm tra nút Follow đã thành công chưa sau khi click.
+     *
+     * Trả true nếu nút đã chuyển sang "Following" / "Đang theo dõi".
+     * Dùng để xác nhận follow thành công trước khi báo cáo lên Golike.
+     */
+    fun isFollowConfirmed(root: AccessibilityNodeInfo?): Boolean {
+        root ?: return false
+        val CONFIRMED_LABELS = listOf(
+            "following", "đang theo dõi", "đã theo dõi", "friends", "bạn bè",
+        )
+        return traverseAll(root).any { node ->
+            val label = (node.text?.toString() ?: node.contentDescription?.toString())
+                ?.lowercase() ?: return@any false
+            CONFIRMED_LABELS.any { label.contains(it) }
+        }
+    }
+
+    fun traverseAll(root: AccessibilityNodeInfo): List<AccessibilityNodeInfo> {
         val result = mutableListOf<AccessibilityNodeInfo>()
         val queue  = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)

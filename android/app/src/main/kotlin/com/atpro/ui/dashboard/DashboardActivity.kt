@@ -1,7 +1,9 @@
 package com.atpro.ui.dashboard
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.material3.MaterialTheme
@@ -9,24 +11,18 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.ui.graphics.Color
 import com.atpro.ui.MainScreen
 import com.atpro.ui.accounts.AccountsViewModel
+import com.atpro.ui.golike.GolikeLoginWebActivity
+import com.atpro.ui.golike.GolikeViewModel
 import com.atpro.ui.logs.LogsViewModel
 import com.atpro.ui.stats.StatsViewModel
-
-import com.atpro.ui.golike.GolikeViewModel
 
 /**
  * DashboardActivity — single-Activity host cho toàn bộ app kể từ v1.1.5.
  *
- * v1.1.5 Chuyển sang tab navigation: Dashboard · Thống kê · Tài khoản · Nhật ký
- * đều nằm trong MainScreen. Các Activity riêng (StatsActivity, AccountsActivity,
- * LogsActivity) vẫn giữ nguyên cho backward compat nhưng không còn được dùng
- * trong luồng điều hướng chính.
- *
- * Mọi ViewModel được khởi tạo ở đây để sống cùng vòng đời Activity,
- * không bị huỷ khi switch tab.
- *
- * FIX (crash startup): private fun enableEdgeToEdge() bị xóa vì cùng JVM signature
- * với ComponentActivity.enableEdgeToEdge(). Window colors đặt inline.
+ * v1.2.1: Thêm launcher cho GolikeLoginWebActivity.
+ * Khi user bấm "Đăng nhập Golike" ở ServicesScreen →
+ *   openGolikeLoginLauncher.launch() → GolikeLoginWebActivity →
+ *   RESULT_OK → golikeVm.receiveTokenFromWebLogin(token) → refresh UI.
  */
 class DashboardActivity : AppCompatActivity() {
 
@@ -46,6 +42,16 @@ class DashboardActivity : AppCompatActivity() {
         GolikeViewModel.Factory(applicationContext)
     }
 
+    // v1.2.1: Launcher để nhận kết quả từ GolikeLoginWebActivity
+    private val golikeLoginLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val token = result.data?.getStringExtra(GolikeLoginWebActivity.EXTRA_TOKEN) ?: ""
+            golikeVm.receiveTokenFromWebLogin(token)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor     = android.graphics.Color.TRANSPARENT
@@ -58,13 +64,19 @@ class DashboardActivity : AppCompatActivity() {
                 )
             ) {
                 MainScreen(
-                    dashboardVm = dashboardVm,
-                    statsVm     = statsVm,
-                    accountsVm  = accountsVm,
-                    logsVm      = logsVm,
-                    golikeVm    = golikeVm,
+                    dashboardVm      = dashboardVm,
+                    statsVm          = statsVm,
+                    accountsVm       = accountsVm,
+                    logsVm           = logsVm,
+                    golikeVm         = golikeVm,
+                    onOpenGolikeLogin = {
+                        golikeLoginLauncher.launch(
+                            Intent(this@DashboardActivity, GolikeLoginWebActivity::class.java)
+                        )
+                    },
                 )
             }
         }
     }
 }
+

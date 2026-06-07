@@ -1,5 +1,8 @@
 package com.atpro.data
 
+/** v1.2.1 — Loại nhiệm vụ Golike được thực hiện trong task mode. */
+enum class TaskJobType { LIKE, FOLLOW, BOTH }
+
 /**
  * FarmConfig — cấu hình farm, load từ Room DB qua LocalRepository.loadFarmConfig()
  *
@@ -173,4 +176,36 @@ data class FarmConfig(
      * Độc lập với inboxViewRate / shopViewRate.
      */
     val searchRate: Float = 0.05f,
+
+    // ── Làm nhiệm vụ TikTok [v1.2.1] ────────────────────────────────────────
+
+    /**
+     * `v1.2.1` Loại nhiệm vụ được thực hiện trong task mode.
+     * LIKE = chỉ tim, FOLLOW = chỉ follow, BOTH = cả hai (filter theo job.type).
+     */
+    val taskJobType: TaskJobType = TaskJobType.BOTH,
+
+    /**
+     * `v1.2.1` Số giây nuôi acc (scroll feed + tim) trước mỗi nhiệm vụ.
+     * Thời gian farm đệm giúp tài khoản trông tự nhiên hơn giữa các job.
+     */
+    val taskFarmBeforeJobSecs: Int = 60,
+
+    /**
+     * `v1.2.1` Delay (giây) sau khi mở link nhiệm vụ trước khi thực hiện tương tác.
+     * Cho phép video/profile tải đầy đủ trước khi tim/follow.
+     */
+    val taskJobDelaySecs: Int = 4,
+
+    /**
+     * `v1.2.1` Số job hoàn thành trên một acc trước khi chuyển sang acc tiếp theo.
+     * Khi đạt đủ số này, chuyển acc kể cả còn thời gian.
+     */
+    val taskJobsPerAccount: Int = 5,
+
+    /**
+     * `v1.2.1` Số lần thất bại liên tiếp tối đa trước khi chuyển acc.
+     * Reset về 0 mỗi khi có job thành công.
+     */
+    val taskMaxConsecFailures: Int = 3,
 )

@@ -65,6 +65,12 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
                 searchKeywords            = repo.getConfig      ("search_keywords",           ""),
                 searchVideosPerSession    = repo.getConfigInt   ("search_videos_per_session",  3),
                 searchRate                = repo.getConfigDouble("search_rate",               0.05).toFloat(),
+                // [v1.2.1] Task mode
+                taskJobType               = repo.getConfig      ("task_job_type",             "BOTH"),
+                taskFarmBeforeJobSecs     = repo.getConfigInt   ("task_farm_before_job_secs",  60),
+                taskJobDelaySecs          = repo.getConfigInt   ("task_job_delay_secs",         4),
+                taskJobsPerAccount        = repo.getConfigInt   ("task_jobs_per_account",       5),
+                taskMaxConsecFailures     = repo.getConfigInt   ("task_max_consec_failures",    3),
             )
             // [v1.1.4.1 FIX] Dùng update thay vì assignment trực tiếp để giữ lại
             // trạng thái quyền đã được refreshPermissions() cập nhật. Nếu dùng
@@ -116,6 +122,12 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
             repo.setConfig("search_keywords",          s.searchKeywords)
             repo.setConfig("search_videos_per_session","${s.searchVideosPerSession}")
             repo.setConfig("search_rate",              "${s.searchRate}")
+            // [v1.2.1] Task mode
+            repo.setConfig("task_job_type",            s.taskJobType)
+            repo.setConfig("task_farm_before_job_secs","${s.taskFarmBeforeJobSecs}")
+            repo.setConfig("task_job_delay_secs",      "${s.taskJobDelaySecs}")
+            repo.setConfig("task_jobs_per_account",    "${s.taskJobsPerAccount}")
+            repo.setConfig("task_max_consec_failures", "${s.taskMaxConsecFailures}")
 
             // Áp dụng ngay vào runtime manager
             AtProNotificationManager.enableSystemNotifications = s.enableSystemNotifications
@@ -199,6 +211,12 @@ data class ConfigUiState(
     val searchKeywords:           String  = "",
     val searchVideosPerSession:   Int     = 3,
     val searchRate:               Float   = 0.05f,
+    // [v1.2.1] Task mode — làm nhiệm vụ Golike
+    val taskJobType:              String  = "BOTH",   // "LIKE" | "FOLLOW" | "BOTH"
+    val taskFarmBeforeJobSecs:    Int     = 60,
+    val taskJobDelaySecs:         Int     = 4,
+    val taskJobsPerAccount:       Int     = 5,
+    val taskMaxConsecFailures:    Int     = 3,
     // ── Permission state (read-only, refreshed via refreshPermissions()) ──
     val accessibilityGranted:     Boolean = false,
     val overlayGranted:           Boolean = false,

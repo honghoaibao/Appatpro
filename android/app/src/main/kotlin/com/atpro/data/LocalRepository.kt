@@ -4,8 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.atpro.db.AtProDatabase
 import com.atpro.db.dao.TotalsRow
-import com.atpro.db.entity.*
-import kotlinx.coroutines.Dispatchers
+import com.atpro.db.entity.*import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
@@ -215,6 +214,16 @@ class LocalRepository(context: Context) : IFarmRepository {
                                         .split(",").map { it.trim() }.filter { it.isNotEmpty() },
         searchVideosPerSession    = getConfigInt   ("search_videos_per_session",  3),
         searchRate                = getConfigDouble("search_rate",               0.05).toFloat(),
+        // [v1.2.1] Task mode
+        taskJobType               = when (getConfig("task_job_type", "BOTH").uppercase()) {
+                                        "LIKE"   -> TaskJobType.LIKE
+                                        "FOLLOW" -> TaskJobType.FOLLOW
+                                        else     -> TaskJobType.BOTH
+                                    },
+        taskFarmBeforeJobSecs     = getConfigInt   ("task_farm_before_job_secs",  60),
+        taskJobDelaySecs          = getConfigInt   ("task_job_delay_secs",         4),
+        taskJobsPerAccount        = getConfigInt   ("task_jobs_per_account",       5),
+        taskMaxConsecFailures     = getConfigInt   ("task_max_consec_failures",    3),
     )
 
     /** Lưu danh sách comment, phân cách bằng "||" trong DB. */

@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.atpro.automation.ServiceMode
 import com.atpro.ui.accounts.AccountsScreen
 import com.atpro.ui.accounts.AccountsViewModel
 import com.atpro.ui.dashboard.DashboardScreen
@@ -53,13 +54,15 @@ private enum class Tab(
 
 @Composable
 fun MainScreen(
-    dashboardVm: DashboardViewModel,
-    statsVm:     StatsViewModel,
-    accountsVm:  AccountsViewModel,
-    logsVm:      LogsViewModel,
-    golikeVm:    GolikeViewModel,
+    dashboardVm:    DashboardViewModel,
+    statsVm:        StatsViewModel,
+    accountsVm:     AccountsViewModel,
+    logsVm:         LogsViewModel,
+    golikeVm:       GolikeViewModel,
+    onOpenGolikeLogin: () -> Unit = {},
 ) {
     var selectedTab by remember { mutableStateOf(Tab.DASHBOARD) }
+    val golikeState by golikeVm.state.collectAsState()
 
     Scaffold(
         containerColor      = BgDark,
@@ -105,16 +108,29 @@ fun MainScreen(
                 .fillMaxSize()
                 .padding(bottom = innerPadding.calculateBottomPadding()),
         ) {
-            // [v1.1.9] Crossfade — hiệu ứng chuyển tab mượt mà (180ms).
-            // Ngắn hơn Material default (300ms) để không ảnh hưởng tốc độ thao tác.
             Crossfade(
-                targetState  = selectedTab,
+                targetState   = selectedTab,
                 animationSpec = tween(durationMillis = 180),
-                label        = "tab_crossfade",
+                label         = "tab_crossfade",
             ) { tab ->
                 when (tab) {
                     Tab.DASHBOARD -> DashboardScreen(vm = dashboardVm, golikeVm = golikeVm)
-                    Tab.SERVICES  -> ServicesScreen()
+
+                    Tab.SERVICES  -> ServicesScreen(
+                        // v1.2.1: Mode switch + navigate to Dashboard
+                        onOpenFarmService = {
+                            dashboardVm.setServiceMode(ServiceMode.FARM)
+                            selectedTab = Tab.DASHBOARD
+                        },
+                        onOpenTaskService = {
+                            dashboardVm.setServiceMode(ServiceMode.TASK)
+                            selectedTab = Tab.DASHBOARD
+                        },
+                        onOpenGolikeLogin  = onOpenGolikeLogin,
+                        isGolikeLoggedIn   = golikeState.isLoggedIn,
+                        golikeDisplayName  = golikeState.displayName,
+                    )
+
                     Tab.STATS     -> StatsScreen(
                         vm           = statsVm,
                         onNavigateUp = { selectedTab = Tab.DASHBOARD },

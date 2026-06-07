@@ -26,6 +26,12 @@ class GolikeRepository(private val local: LocalRepository) {
     private suspend fun saveToken(token: String) =
         local.setConfig(KEY_TOKEN, token)
 
+    /**
+     * v1.2.1: Lưu token nhận được từ WebView login (GolikeLoginWebActivity).
+     * Gọi sau khi WebView phát hiện token từ localStorage của app.golike.net.
+     */
+    suspend fun saveWebToken(token: String) = saveToken(token)
+
     suspend fun clearToken() {
         local.setConfig(KEY_TOKEN, "")
         local.setConfig(KEY_USERNAME, "")
@@ -108,6 +114,23 @@ class GolikeRepository(private val local: LocalRepository) {
                 if (r.data.success) GolikeResult.Success(r.data)
                 else GolikeResult.Error(r.data.message.ifEmpty { "Lỗi hoàn thành nhiệm vụ" })
             is GolikeResult.Error -> r
+        }
+    }
+
+    /**
+     * v1.2.1: Overload nhận tham số success — dùng khi cần báo lỗi/bỏ qua job.
+     * `success=false` → server hiểu là job không thực hiện được → cho lấy job tiếp theo.
+     */
+    suspend fun completeTikTokJob(
+        jobId:          Int,
+        uniqueUsername: String,
+        success:        Boolean,
+    ): GolikeResult<CompleteJobResponse> {
+        val token = getSavedToken() ?: return GolikeResult.Error("Chưa đăng nhập", 401)
+        val req   = CompleteJobRequest(jobId = jobId, uniqueUsername = uniqueUsername, success = success)
+        return when (val r = GolikeApi.completeTikTokJob(token, req)) {
+            is GolikeResult.Success -> GolikeResult.Success(r.data)
+            is GolikeResult.Error   -> r
         }
     }
 

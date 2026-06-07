@@ -72,6 +72,7 @@ private enum class Section(val label: String, val icon: ImageVector, val accent:
     TIMING       ("Thời gian",  Icons.Rounded.Timer,                Purple),
     ACTIONS      ("Hành động",  Icons.Rounded.TouchApp,             Pink),
     EARN_GOLIKE  ("Golike",     Icons.Rounded.CurrencyExchange,     Color(0xFFF5A623)),
+    TASK_SETTINGS("Nhiệm vụ",   Icons.Rounded.AssignmentTurnedIn,   Color(0xFF7C3AED)),
 }
 
 /**
@@ -423,6 +424,7 @@ private fun SettingsLayout(
                 Section.TIKTOK        -> TikTokSection(state)
                 Section.PERMISSIONS   -> PermissionsSection(state, onOpenAccessibility, onOpenOverlay, onOpenNotification)
                 Section.EARN_GOLIKE   -> EarnGolikeSection(golikeVm)
+                Section.TASK_SETTINGS -> TaskSettingsSection(state, onSet)
             }
         }
     }
@@ -1982,6 +1984,112 @@ private fun CfgTextField(
                 unfocusedBorderColor    = BorderDark,
                 focusedTextColor        = Color.White,
                 unfocusedTextColor      = Color.White,
+            ),
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Section: Cài đặt nhiệm vụ Golike (v1.2.1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun TaskSettingsSection(
+    state: ConfigUiState,
+    onSet: (ConfigUiState.() -> ConfigUiState) -> Unit,
+) {
+    val AccentTask = androidx.compose.ui.graphics.Color(0xFF7C3AED)
+
+    SectionTitle("Loại nhiệm vụ", Icons.Rounded.AssignmentTurnedIn, AccentTask)
+
+    // Job type selector
+    val jobTypes = listOf("LIKE" to "Tim video ❤️", "FOLLOW" to "Follow 👤", "BOTH" to "Cả hai")
+    Row(
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        jobTypes.forEach { (value, label) ->
+            val selected = state.taskJobType == value
+            Surface(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onSet { copy(taskJobType = value) } },
+                shape  = RoundedCornerShape(10.dp),
+                color  = if (selected) AccentTask.copy(alpha = 0.2f) else BgDeeper,
+                border = BorderStroke(
+                    1.dp,
+                    if (selected) AccentTask.copy(alpha = 0.7f) else BorderDark,
+                ),
+            ) {
+                Text(
+                    text       = label,
+                    color      = if (selected) AccentTask else TextSec,
+                    fontSize   = 11.sp,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                    textAlign  = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier   = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
+                )
+            }
+        }
+    }
+
+    Spacer(Modifier.height(16.dp))
+    SectionTitle("Thời gian & Giới hạn", Icons.Rounded.Timer, AccentTask)
+
+    SettingSliderInt(
+        label    = "Nuôi acc trước mỗi job (giây)",
+        value    = state.taskFarmBeforeJobSecs,
+        min      = 20, max = 300, step = 10,
+        onChange = { onSet { copy(taskFarmBeforeJobSecs = it) } },
+    )
+    SettingSliderInt(
+        label    = "Delay sau khi mở link job (giây)",
+        value    = state.taskJobDelaySecs,
+        min      = 2, max = 15, step = 1,
+        onChange = { onSet { copy(taskJobDelaySecs = it) } },
+    )
+    SettingSliderInt(
+        label    = "Số job mỗi acc trước khi chuyển",
+        value    = state.taskJobsPerAccount,
+        min      = 1, max = 20, step = 1,
+        onChange = { onSet { copy(taskJobsPerAccount = it) } },
+    )
+    SettingSliderInt(
+        label    = "Số lần thất bại liên tiếp tối đa",
+        value    = state.taskMaxConsecFailures,
+        min      = 1, max = 10, step = 1,
+        onChange = { onSet { copy(taskMaxConsecFailures = it) } },
+    )
+}
+
+// Reuse existing helper — simple Int slider row
+@Composable
+private fun SettingSliderInt(
+    label:    String,
+    value:    Int,
+    min:      Int,
+    max:      Int,
+    step:     Int,
+    onChange: (Int) -> Unit,
+) {
+    Column(modifier = Modifier.padding(bottom = 12.dp)) {
+        Row(
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(label, color = TextSec, fontSize = 12.sp)
+            Text("$value", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(4.dp))
+        Slider(
+            value         = value.toFloat(),
+            onValueChange = { onChange(it.toInt()) },
+            valueRange    = min.toFloat()..max.toFloat(),
+            steps         = ((max - min) / step) - 1,
+            modifier      = Modifier.fillMaxWidth(),
+            colors        = SliderDefaults.colors(
+                thumbColor       = Purple,
+                activeTrackColor = Purple,
             ),
         )
     }

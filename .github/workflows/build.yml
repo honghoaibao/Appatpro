@@ -11,11 +11,11 @@ on:
       version:
         description: 'Version (vd: 1.0.7)'
         required: true
-        default:  '1.2.0'
+        default:  '1.2.1'
       build:
         description: 'Build number'
         required: true
-        default:  '20'
+        default:  '23'
 
 permissions:
   contents: write
@@ -101,7 +101,7 @@ jobs:
           VER="${{ github.ref_name }}"; VER="${VER#v}"
           BLD="${{ github.run_number }}"
         else
-          VER="1.2.0"
+          VER="1.2.1"
           BLD="${{ github.run_number }}"
         fi
         echo "version=$VER"  >> $GITHUB_OUTPUT
@@ -110,7 +110,10 @@ jobs:
     - name: Update version in build.gradle
       run: |
         sed -i "s/versionCode [0-9]*/versionCode ${{ steps.ver.outputs.build }}/" android/app/build.gradle
-        sed -i "s/versionName \"[^\"]*\"/versionName \"${{ steps.ver.outputs.version }}\"/" android/app/build.gradle
+        sed -i "s/versionName \"v[^\"]*\"/versionName \"v${{ steps.ver.outputs.version }}\"/" android/app/build.gradle
+        echo "versionCode → ${{ steps.ver.outputs.build }}"
+        echo "versionName → v${{ steps.ver.outputs.version }}"
+        grep -E "versionCode|versionName" android/app/build.gradle
 
     # ── Build ──────────────────────────────────────────────────────────────────
     - name: Build APK

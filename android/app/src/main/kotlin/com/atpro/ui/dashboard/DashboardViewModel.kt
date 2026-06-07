@@ -13,10 +13,15 @@ import androidx.lifecycle.viewModelScope
 import com.atpro.accessibility.TikTokAccessibilityService
 import com.atpro.automation.FarmMode
 import com.atpro.automation.LiveFarmStats
+import com.atpro.automation.ServiceMode
 import com.atpro.data.FarmForegroundService
+import com.atpro.data.LocalRepository
 import com.atpro.db.AtProDatabase
 import com.atpro.db.dao.AccountDao
 import com.atpro.db.entity.AccountEntity
+import com.atpro.golike.GolikeRepository
+import com.atpro.golike.GolikeResult
+import com.atpro.golike.TikTokAccountDto
 import com.atpro.network.UpdateChecker
 import com.atpro.network.UpdateInfo
 import kotlinx.coroutines.Dispatchers
@@ -30,8 +35,9 @@ import java.net.URL
 // ── ViewModel ─────────────────────────────────────────────────────────────────
 
 class DashboardViewModel(
-    private val accountDao: AccountDao,
-    private val appContext: Context,
+    private val accountDao:  AccountDao,
+    private val appContext:  Context,
+    private val golikeRepo:  GolikeRepository? = null,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(DashboardUiState())
@@ -112,6 +118,11 @@ class DashboardViewModel(
         _uiState.update { it.copy(farmMode = mode) }
     }
 
+    /** v1.2.1: Chuyển dashboard sang chế độ farm hoặc task. */
+    fun setServiceMode(mode: ServiceMode) {
+        _uiState.update { it.copy(serviceMode = mode) }
+    }
+
     fun setCustomAccounts(text: String) {
         _uiState.update { it.copy(customAccounts = text) }
     }
@@ -141,6 +152,44 @@ class DashboardViewModel(
         }
 
         engine.startFarm(state.farmMode, inputList)
+    }
+
+    /**
+     * v1.2.1: Khởi động task mode — lấy danh sách acc Golike rồi gọi engine.startTask().
+     */
+    fun startTask() {
+        val engine = TikTokAccessibilityService.instance?.engine ?: return
+        val state  = _uiState.value
+
+        val inputList: List<String> = when (state.farmMode) {
+            FarmMode.ALL_LOCAL     -> emptyList()
+            FarmMode.SELECTED_LIST ->
+                state.customAccounts
+                    .lines()
+                    .map { it.trim().removePrefix("@") }
+                    .filter { it.isNotEmpty() }
+                    .distinct()
+        }
+
+        try {
+            appContext.startForegroundService(FarmForegroundService.buildIntent(appContext))
+        } catch (e: Exception) {
+            Log.w("DashboardVM", "startForegroundService (task) failed: ${e.message}")
+        }
+
+        viewModelScope.launch {
+            val golikeAccounts: List<TikTokAccountDto> = if (golikeRepo != null) {
+                when (val r = golikeRepo.getTikTokAccounts()) {
+                    is GolikeResult.Success -> r.data
+                    is GolikeResult.Error   -> {
+                        Log.w("DashboardVM", "Không lấy được acc Golike: ${r.message}")
+                        emptyList()
+                    }
+                }
+            } else emptyList()
+
+            engine.startTask(state.farmMode, inputList, golikeAccounts)
+        }
     }
 
     fun stop() {
@@ -266,8 +315,10 @@ class DashboardViewModel(
     class Factory(private val context: Context) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            val db = AtProDatabase.getInstance(context.applicationContext)
-            return DashboardViewModel(db.accountDao(), context.applicationContext) as T
+            val db    = AtProDatabase.getInstance(context.applicationContext)
+            val local = LocalRepository.getInstance(context.applicationContext)
+            val golike = GolikeRepository.getInstance(local)
+            return DashboardViewModel(db.accountDao(), context.applicationContext, golike) as T
         }
     }
 }
@@ -282,6 +333,8 @@ data class DashboardUiState(
     val activeAccounts:    List<AccountEntity> = emptyList(),
     val liveStats:         LiveFarmStats       = LiveFarmStats(),
     val farmMode:          FarmMode            = FarmMode.ALL_LOCAL,
+    /** v1.2.1: Chế độ dịch vụ hiện tại — FARM hoặc TASK. Set từ ServicesScreen. */
+    val serviceMode:       ServiceMode         = ServiceMode.FARM,
     val customAccounts:    String              = "",
     val startupStatus:     String              = "",
     // [v1.0.5] Thông tin phiên bản mới từ GitHub — non-null = hiển thị dialog cập nhật

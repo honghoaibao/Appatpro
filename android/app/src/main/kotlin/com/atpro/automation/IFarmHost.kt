@@ -35,6 +35,11 @@ interface IFarmHost {
     /** Mở TikTok Settings cho account-switch flow. */
     fun openTikTokSettings(): Boolean
     /**
+     * v1.2.1 Mở deeplink/URL bất kỳ (TikTok video link, profile link, v.v.).
+     * Dùng trong task mode để mở link nhiệm vụ từ Golike.
+     */
+    fun openDeepLink(url: String): Boolean
+    /**
      * Force-stop TikTok process.
      *
      * Thứ tự: HOME → delay 600ms → killBackgroundProcesses().

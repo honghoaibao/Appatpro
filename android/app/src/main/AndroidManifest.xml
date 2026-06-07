@@ -127,6 +127,13 @@
             android:theme="@style/AppTheme"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- [v1.2.1] WebView login cho Golike — mở app.golike.net để user đăng nhập -->
+        <activity
+            android:name=".ui.golike.GolikeLoginWebActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- Native Compose schedule — TASK-016 -->
         <activity
             android:name=".ui.schedule.ScheduleActivity"

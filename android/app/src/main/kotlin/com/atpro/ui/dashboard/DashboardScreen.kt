@@ -747,12 +747,22 @@ private fun IdleView(state: DashboardUiState, vm: DashboardViewModel, golikeStat
 
             Spacer(Modifier.height(24.dp))
 
-            // ── Start button ──
-            StartButton(
-                enabled = state.canStart,
-                hint    = state.startHint,
-                onClick = vm::startFarm,
-            )
+            // ── Start button — phân nhánh Farm / Task ──
+            // v1.2.1: Nút bắt đầu thay đổi nhãn + action theo serviceMode
+            when (state.serviceMode) {
+                com.atpro.automation.ServiceMode.FARM -> StartButton(
+                    enabled = state.canStart,
+                    hint    = state.startHint,
+                    onClick = vm::startFarm,
+                )
+                com.atpro.automation.ServiceMode.TASK -> StartButton(
+                    enabled    = state.canStart,
+                    hint       = state.startHint,
+                    onClick    = vm::startTask,
+                    labelText  = "Bắt đầu làm nhiệm vụ",
+                    accentColor = androidx.compose.ui.graphics.Color(0xFF7C3AED),
+                )
+            }
 
             Spacer(Modifier.height(20.dp))
 
@@ -1083,7 +1093,13 @@ private fun PulseDot() {
 }
 
 @Composable
-private fun StartButton(enabled: Boolean, hint: String?, onClick: () -> Unit) {
+private fun StartButton(
+    enabled:     Boolean,
+    hint:        String?,
+    onClick:     () -> Unit,
+    labelText:   String                                    = "Bắt đầu farm",
+    accentColor: androidx.compose.ui.graphics.Color       = Purple,
+) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -1103,14 +1119,14 @@ private fun StartButton(enabled: Boolean, hint: String?, onClick: () -> Unit) {
                 .scale(scale),
             shape  = RoundedCornerShape(16.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor         = Purple,
+                containerColor         = accentColor,
                 disabledContainerColor = BorderDark,
             ),
         ) {
             Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
             Text(
-                "Bắt đầu farm",
+                labelText,
                 fontSize   = 16.sp,
                 fontWeight = FontWeight.Bold,
             )
