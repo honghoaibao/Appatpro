@@ -127,6 +127,7 @@ fun MainScreen(
                             selectedTab = Tab.DASHBOARD
                         },
                         onOpenGolikeLogin  = onOpenGolikeLogin,
+                        onGolikeLogout     = golikeVm::logout,
                         isGolikeLoggedIn   = golikeState.isLoggedIn,
                         golikeDisplayName  = golikeState.displayName,
                     )

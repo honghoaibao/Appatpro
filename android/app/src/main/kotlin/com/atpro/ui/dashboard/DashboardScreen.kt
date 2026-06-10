@@ -766,11 +766,15 @@ private fun IdleView(state: DashboardUiState, vm: DashboardViewModel, golikeStat
 
             Spacer(Modifier.height(20.dp))
 
-            // ── [v1.1.9] Golike summary card ──
-            GolikeSummaryCard(
-                state    = golikeState,
-                onSetup  = { context.startActivity(Intent(context, ConfigActivity::class.java)) },
-            )
+            // ── [v1.2.2] Golike card — phân nhánh theo serviceMode ──
+            if (state.serviceMode == com.atpro.automation.ServiceMode.TASK) {
+                GolikeTaskInfoCard(golikeState)
+            } else {
+                // FARM mode: chỉ hiện card khi đã đăng nhập (bỏ prompt đăng nhập)
+                if (golikeState.isLoggedIn) {
+                    GolikeSummaryCard(state = golikeState)
+                }
+            }
 
             Spacer(Modifier.weight(1f))
 
@@ -1267,18 +1271,15 @@ private fun PauseResumeButton(isPaused: Boolean, onPause: () -> Unit, onResume: 
 private val GolikeGold = Color(0xFFF5A623)
 
 @Composable
-private fun GolikeSummaryCard(
-    state:   GolikeUiState,
-    onSetup: () -> Unit,
-) {
-    if (state.isLoading) return  // don't flash empty card on startup
+private fun GolikeSummaryCard(state: GolikeUiState) {
+    if (state.isLoading || !state.isLoggedIn) return
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
             .background(CardDark)
-            .border(1.dp, if (state.isLoggedIn) GolikeGold.copy(alpha = 0.22f) else BorderDark,
+            .border(1.dp, GolikeGold.copy(alpha = 0.22f),
                 androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
             .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
@@ -1296,43 +1297,125 @@ private fun GolikeSummaryCard(
                 Icon(Icons.Rounded.CurrencyExchange, null, tint = GolikeGold, modifier = Modifier.size(17.dp))
             }
 
-            if (!state.isLoggedIn) {
-                Column(Modifier.weight(1f)) {
-                    Text("Golike", color = GolikeGold, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Chưa đăng nhập — bấm để cài đặt", color = TextMuted, fontSize = 11.sp)
-                }
-                androidx.compose.material3.TextButton(
-                    onClick = onSetup,
-                    colors  = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = GolikeGold),
-                ) {
-                    Text("Cài đặt", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                }
-            } else {
-                Column(Modifier.weight(1f)) {
-                    Text(state.displayName.ifEmpty { "Golike" }, color = GolikeGold, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        if (state.rankName.isNotEmpty()) {
-                            Text(state.rankName, color = TextMuted, fontSize = 10.sp)
-                            Text("•", color = TextMuted, fontSize = 10.sp)
-                        }
-                        Text("${state.totalJobCount} nhiệm vụ", color = TextMuted, fontSize = 10.sp)
+            Column(Modifier.weight(1f)) {
+                Text(state.displayName.ifEmpty { "Golike" }, color = GolikeGold, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (state.rankName.isNotEmpty()) {
+                        Text(state.rankName, color = TextMuted, fontSize = 10.sp)
+                        Text("•", color = TextMuted, fontSize = 10.sp)
                     }
+                    Text("${state.totalJobCount} nhiệm vụ", color = TextMuted, fontSize = 10.sp)
                 }
-                // Coin + TikTok stats
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            }
+            // Coin + TikTok stats
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(state.formatCoin(state.coin), color = GolikeGold, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("coin", color = TextMuted, fontSize = 9.sp)
+                }
+                if (state.tiktokHold > 0 || state.tiktokPending > 0) {
                     Column(horizontalAlignment = Alignment.End) {
-                        Text(state.formatCoin(state.coin), color = GolikeGold, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
-                        Text("coin", color = TextMuted, fontSize = 9.sp)
-                    }
-                    if (state.tiktokHold > 0 || state.tiktokPending > 0) {
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text("+${state.formatCoin(state.tiktokHold)}", color = Green, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            Text("hold", color = TextMuted, fontSize = 9.sp)
-                        }
+                        Text("+${state.formatCoin(state.tiktokHold)}", color = Green, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("hold", color = TextMuted, fontSize = 9.sp)
                     }
                 }
             }
         }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  v1.2.2 — Golike Task Info Card (dashboard task mode)
+//  Hiện khi serviceMode == TASK: tên TK, số dư, hold, pending
+// ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun GolikeTaskInfoCard(state: GolikeUiState) {
+    if (state.isLoading) return
+
+    val AccentTask = Color(0xFF7C3AED)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+            .background(CardDark)
+            .border(
+                1.dp,
+                if (state.isLoggedIn) AccentTask.copy(alpha = 0.3f) else BorderDark,
+                androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+            )
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        if (!state.isLoggedIn) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(Icons.Rounded.Warning, null, tint = Amber, modifier = Modifier.size(16.dp))
+                Text(
+                    "Chưa đăng nhập Golike — vào tab Dịch vụ để đăng nhập",
+                    color    = Amber,
+                    fontSize = 12.sp,
+                )
+            }
+            return
+        }
+
+        // Header: icon + tên tài khoản
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(9.dp))
+                    .background(AccentTask.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.AssignmentTurnedIn, null, tint = AccentTask, modifier = Modifier.size(17.dp))
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text       = state.displayName.ifEmpty { "Golike" },
+                    color      = Color(0xFFD4BCFC),
+                    fontSize   = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text("Tài khoản Golike", color = TextMuted, fontSize = 10.sp)
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+        // Divider
+        Box(Modifier.fillMaxWidth().height(0.5.dp).background(AccentTask.copy(alpha = 0.18f)))
+        Spacer(Modifier.height(10.dp))
+
+        // Stats row: coin | hold | pending
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            GolikeStatBox("Số dư",     state.formatCoin(state.coin),           GolikeGold,  Modifier.weight(1f))
+            GolikeStatBox("Đang duyệt", state.formatCoin(state.tiktokHold),    Green,        Modifier.weight(1f))
+            GolikeStatBox("Chờ duyệt", state.formatCoin(state.tiktokPending),  Amber,        Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun GolikeStatBox(label: String, value: String, color: Color, modifier: Modifier) {
+    Column(
+        modifier = modifier
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+            .background(color.copy(alpha = 0.08f))
+            .padding(vertical = 8.dp, horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(value, color = color, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(2.dp))
+        Text(label, color = TextMuted, fontSize = 9.sp)
     }
 }
 

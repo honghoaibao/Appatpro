@@ -46,6 +46,7 @@ class DashboardViewModel(
     init {
         observeAccounts()
         pollEngineState()
+        pollGolikeLoginState()
     }
 
     // ── Data sources ──────────────────────────────────────────────────────────
@@ -57,6 +58,18 @@ class DashboardViewModel(
                 _uiState.update {
                     it.copy(allAccounts = all, activeAccounts = active)
                 }
+            }
+        }
+    }
+
+    /** v1.2.2: Poll trạng thái đăng nhập Golike mỗi 5s để cập nhật canStart. */
+    private fun pollGolikeLoginState() {
+        val repo = golikeRepo ?: return
+        viewModelScope.launch {
+            while (true) {
+                val loggedIn = repo.getSavedToken() != null
+                _uiState.update { it.copy(isGolikeLoggedIn = loggedIn) }
+                delay(5_000)
             }
         }
     }
@@ -337,6 +350,8 @@ data class DashboardUiState(
     val serviceMode:       ServiceMode         = ServiceMode.FARM,
     val customAccounts:    String              = "",
     val startupStatus:     String              = "",
+    /** v1.2.2: Trạng thái đăng nhập Golike — block start task khi chưa đăng nhập. */
+    val isGolikeLoggedIn:  Boolean             = false,
     // [v1.0.5] Thông tin phiên bản mới từ GitHub — non-null = hiển thị dialog cập nhật
     val updateInfo:        UpdateInfo?         = null,
     // [v1.0.9] Tiến độ tải APK: -1=idle, 0–99=đang tải, -2=lỗi
@@ -355,14 +370,18 @@ data class DashboardUiState(
                 .size
     }
 
-    val canStart: Boolean get() = serviceConnected && !isFarming && when (farmMode) {
-        FarmMode.ALL_LOCAL     -> true
-        FarmMode.SELECTED_LIST -> customAccounts.isNotBlank()
-    }
+    val canStart: Boolean get() = serviceConnected && !isFarming &&
+        (serviceMode != ServiceMode.TASK || isGolikeLoggedIn) &&
+        when (farmMode) {
+            FarmMode.ALL_LOCAL     -> true
+            FarmMode.SELECTED_LIST -> customAccounts.isNotBlank()
+        }
 
     val startHint: String? get() = when {
         !serviceConnected ->
             "Bật Accessibility Service trước"
+        serviceMode == ServiceMode.TASK && !isGolikeLoggedIn ->
+            "Đăng nhập Golike trong tab Dịch vụ trước"
         farmMode == FarmMode.SELECTED_LIST && customAccounts.isBlank() ->
             "Nhập danh sách tài khoản cần nuôi"
         else -> null

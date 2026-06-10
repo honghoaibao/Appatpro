@@ -63,10 +63,13 @@ class GolikeRepository(private val local: LocalRepository) {
         return when (val r = GolikeApi.getMe(token)) {
             is GolikeResult.Success -> {
                 val resp = r.data
-                if (resp.success && resp.data != null)
-                    GolikeResult.Success(resp.data)
-                else
-                    GolikeResult.Error(resp.message.ifEmpty { "Lỗi lấy thông tin" }, resp.status)
+                when {
+                    // Có data object → dùng luôn
+                    resp.data != null -> GolikeResult.Success(resp.data)
+                    // HTTP 200 nhưng data null hoặc success field vắng mặt/false
+                    // (JSON format có thể khác model) → vẫn coi là thành công
+                    else              -> GolikeResult.Success(GolikeUserData())
+                }
             }
             is GolikeResult.Error -> r
         }
@@ -96,12 +99,12 @@ class GolikeRepository(private val local: LocalRepository) {
         }
     }
 
-    suspend fun getTikTokJobs(uniqueUsername: String): GolikeResult<List<TikTokJobDto>> {
+    /** accountId: TikTokAccountDto.id (int) — param "account_id" theo smali htool */
+    suspend fun getTikTokJobs(accountId: Int): GolikeResult<List<TikTokJobDto>> {
         val token = getSavedToken() ?: return GolikeResult.Error("Chưa đăng nhập", 401)
-        return when (val r = GolikeApi.getTikTokJobs(token, uniqueUsername)) {
+        return when (val r = GolikeApi.getTikTokJobs(token, accountId)) {
             is GolikeResult.Success ->
-                if (r.data.success) GolikeResult.Success(r.data.data)
-                else GolikeResult.Error("Không có nhiệm vụ")
+                GolikeResult.Success(r.data.data)   // lenient: trả về list dù success=false
             is GolikeResult.Error -> r
         }
     }

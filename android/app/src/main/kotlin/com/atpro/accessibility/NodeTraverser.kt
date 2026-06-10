@@ -349,7 +349,22 @@ object NodeTraverser {
     fun isOnFeedTab(root: AccessibilityNodeInfo?): Boolean {
         root ?: return false
 
-        // ── Tier 0: Live-room exclusion ───────────────────────────────────
+        // ── Tier 0a: Live-in-feed card ────────────────────────────────────
+        // Thẻ Live preview trong feed (KHÔNG phải đang trong live room).
+        // "Nhấn để xem LIVE" / "Tap to watch LIVE" chỉ xuất hiện ở feed card.
+        // Phải kiểm tra TRƯỚC Tier 0b vì feed card có thể có view ID chứa "live"
+        // → nếu để Tier 0b chạy trước, thẻ Live trong feed bị loại nhầm.
+        val allNodesEarly = traverseAll(root)
+        val allTextEarly  = allNodesEarly.mapNotNull {
+            (it.text?.toString() ?: it.contentDescription?.toString())?.lowercase()
+        }
+        val LIVE_CARD_TEXTS = listOf(
+            "nhấn để xem live", "tap to watch live", "tap to join live",
+            "tap to watch", "nhấn để tham gia",
+        )
+        if (LIVE_CARD_TEXTS.any { kw -> allTextEarly.any { it.contains(kw) } }) return true
+
+        // ── Tier 0b: Live-room exclusion ──────────────────────────────────
         // Kiểm tra nhanh resource-ID đặc trưng của live room.
         // Live room hay có text "bạn bè"/"đề xuất" từ recommendation strip
         // → Tier 1/2 dễ false-positive nếu không loại trừ trước.
@@ -408,6 +423,28 @@ object NodeTraverser {
         if (videoTextCount >= 2) return true
 
         return false
+    }
+
+    /**
+     * Phát hiện thẻ Live trong feed (preview trước khi vào live room).
+     *
+     * Khác với detectLive() (đang TRONG live room), hàm này nhận dạng
+     * thẻ video Live đang hiển thị full-screen trong feed scroll:
+     *   - Text "Nhấn để xem LIVE" / "Tap to watch LIVE" chỉ xuất hiện ở đây
+     *
+     * Dùng trong main farming loop để swipe qua thay vì treat như "lạc".
+     */
+    fun isLiveCardInFeed(root: AccessibilityNodeInfo?): Boolean {
+        root ?: return false
+        val all = traverseAll(root)
+        val texts = all.mapNotNull {
+            (it.text?.toString() ?: it.contentDescription?.toString())?.lowercase()
+        }
+        val LIVE_CARD_TEXTS = listOf(
+            "nhấn để xem live", "tap to watch live", "tap to join live",
+            "tap to watch", "nhấn để tham gia",
+        )
+        return LIVE_CARD_TEXTS.any { kw -> texts.any { it.contains(kw) } }
     }
 
     /**

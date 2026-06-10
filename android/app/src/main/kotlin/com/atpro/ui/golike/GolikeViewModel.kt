@@ -32,12 +32,14 @@ class GolikeViewModel(
 
     private fun loadSavedSession() {
         viewModelScope.launch {
-            val token = repo.getSavedToken()
-            if (token != null) {
-                val saved = repo.getSavedUsername()
-                _state.update { it.copy(isLoading = true, savedUsername = saved) }
-                refreshUserInfo()
+            val token = repo.getSavedToken() ?: return@launch
+            val saved = repo.getSavedUsername()
+            // Set isLoggedIn=true ngay — có token hợp lệ trong DB
+            // Không chờ API để tránh flash "chưa đăng nhập" khi app khởi động
+            _state.update {
+                it.copy(isLoggedIn = true, isLoading = true, savedUsername = saved)
             }
+            refreshUserInfo()
         }
     }
 
@@ -86,7 +88,10 @@ class GolikeViewModel(
         if (token.isBlank()) return
         viewModelScope.launch {
             repo.saveWebToken(token)
-            _state.update { it.copy(isLoading = true, loginError = null) }
+            // Set isLoggedIn=true ngay — token đã được validate format trong WebActivity
+            // (startsWith("eyJ") && length > 50). Không chờ API.
+            _state.update { it.copy(isLoggedIn = true, isLoading = true, loginError = null) }
+            // Refresh thông tin user (tên, coin, TikTok accounts) trong background
             refreshUserInfo()
         }
     }
@@ -98,14 +103,24 @@ class GolikeViewModel(
             when (val result = repo.getMe()) {
                 is GolikeResult.Success -> {
                     _state.update {
-                        it.copy(user = result.data, isLoading = false, isLoggedIn = true)
+                        it.copy(
+                            user       = result.data,
+                            isLoading  = false,
+                            isLoggedIn = true,
+                        )
                     }
                     refreshStats()
                     if (_state.value.tikTokAccounts.isEmpty()) loadTikTokAccounts()
                 }
                 is GolikeResult.Error -> {
-                    if (result.code == 401) logout()
-                    else _state.update { it.copy(isLoading = false) }
+                    if (result.code == 401) {
+                        // 401 = token hết hạn/không hợp lệ → logout
+                        logout()
+                    } else {
+                        // Lỗi khác (network, server 5xx, JSON mismatch...) → giữ isLoggedIn
+                        // như cũ, chỉ tắt loading. User vẫn được coi là đã đăng nhập.
+                        _state.update { it.copy(isLoading = false) }
+                    }
                 }
             }
         }
@@ -128,7 +143,8 @@ class GolikeViewModel(
             when (val result = repo.getTikTokAccounts()) {
                 is GolikeResult.Success -> {
                     _state.update { it.copy(tikTokAccounts = result.data, isLoadingAccounts = false) }
-                    result.data.forEach { acc -> loadJobsForAccount(acc.uniqueUsername) }
+                    // Dùng acc.id (Int) cho API call — theo smali htool: account_id={INT}
+                    result.data.forEach { acc -> loadJobsForAccount(acc) }
                 }
                 is GolikeResult.Error ->
                     _state.update { it.copy(isLoadingAccounts = false) }
@@ -136,12 +152,13 @@ class GolikeViewModel(
         }
     }
 
-    private fun loadJobsForAccount(uniqueUsername: String) {
+    private fun loadJobsForAccount(acc: TikTokAccountDto) {
         viewModelScope.launch {
-            when (val result = repo.getTikTokJobs(uniqueUsername)) {
+            // API dùng acc.id (Int), state key dùng acc.uniqueUsername (String)
+            when (val result = repo.getTikTokJobs(acc.id)) {
                 is GolikeResult.Success ->
                     _state.update { s ->
-                        s.copy(tikTokJobs = s.tikTokJobs + (uniqueUsername to result.data))
+                        s.copy(tikTokJobs = s.tikTokJobs + (acc.uniqueUsername to result.data))
                     }
                 is GolikeResult.Error -> { /* no jobs for this account — ok */ }
             }
@@ -151,10 +168,8 @@ class GolikeViewModel(
     /** Báo cáo hoàn thành job về server Golike. Theo dõi trạng thái loading + done. */
     fun completeJob(jobId: Int, uniqueUsername: String) {
         viewModelScope.launch {
-            // Đánh dấu "đang xử lý"
             _state.update { it.copy(completingJobs = it.completingJobs + jobId) }
             val result = repo.completeTikTokJob(jobId, uniqueUsername)
-            // Xong → thêm vào completedJobs, xóa khỏi completingJobs
             _state.update { s ->
                 val success = result is GolikeResult.Success && result.data.success
                 s.copy(
@@ -162,8 +177,9 @@ class GolikeViewModel(
                     completedJobs  = if (success) s.completedJobs + jobId else s.completedJobs,
                 )
             }
-            // Refresh danh sách jobs
-            loadJobsForAccount(uniqueUsername)
+            // Refresh jobs — tìm acc theo uniqueUsername để lấy acc.id cho API
+            val acc = _state.value.tikTokAccounts.find { it.uniqueUsername == uniqueUsername }
+            if (acc != null) loadJobsForAccount(acc)
         }
     }
 

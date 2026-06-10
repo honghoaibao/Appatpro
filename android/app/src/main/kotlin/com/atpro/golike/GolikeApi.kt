@@ -10,7 +10,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 private const val TAG      = "GolikeApi"
-private const val BASE_URL = "https://app.golike.net/"
+private const val BASE_URL = "https://gateway.golike.net/"
 
 private val jsonParser = Json {
     ignoreUnknownKeys = true
@@ -21,7 +21,8 @@ private val jsonParser = Json {
 /**
  * GolikeApi — lightweight HTTP client dùng HttpURLConnection (không cần OkHttp).
  *
- * Endpoints theo tài liệu: .claude/context/golike_api.md
+ * Base URL: https://gateway.golike.net/ (API endpoint thực — theo smali htool)
+ * Web UI:   https://app.golike.net/home (chỉ dùng trong WebView đăng nhập)
  */
 object GolikeApi {
 
@@ -45,10 +46,9 @@ object GolikeApi {
     suspend fun getTikTokAccounts(token: String): GolikeResult<TikTokAccountsResponse> =
         get("api/tiktok-account", token)
 
-    suspend fun getTikTokJobs(token: String, uniqueUsername: String): GolikeResult<TikTokJobsResponse> =
+    suspend fun getTikTokJobs(token: String, accountId: Int): GolikeResult<TikTokJobsResponse> =
         get(
-            "api/advertising/publishers/tiktok/_private/get-jobs" +
-                "?unique_username=${encode(uniqueUsername)}",
+            "api/advertising/publishers/tiktok/jobs?account_id=$accountId&data=null",
             token,
         )
 

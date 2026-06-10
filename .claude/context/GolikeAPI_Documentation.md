@@ -1,7 +1,8 @@
 # 📘 Golike API – Tài liệu tích hợp chi tiết
 
-> **Nguồn:** Reverse-engineered từ `GolikeApi.smali` + toàn bộ DTO trong package `com.autogolike.mobile.core.network.dto`    
-> **Base URL:** `https://golike.net/`
+> **Nguồn:** Reverse-engineered từ `GoLikeLoginActivity.smali` + htool smali package    
+> **Base URL API:** `https://gateway.golike.net/`  ← endpoint thực cho mọi API call
+> **Base URL WebView:** `https://app.golike.net/home`  ← chỉ dùng trong WebView đăng nhập
 > **Content-Type:** `application/json`  
 > **Auth:** Bearer Token trong header `Authorization: Bearer <token>`
 

@@ -3,278 +3,388 @@ package com.atpro.ui.golike
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
-import android.os.Bundle
-import android.webkit.*
-import android.webkit.WebView
-import android.widget.ProgressBar
-import android.widget.RelativeLayout
-import android.widget.TextView
+import android.graphics.Bitmap
 import android.graphics.Color
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.FrameLayout
-import android.webkit.WebViewClient
-import android.webkit.CookieManager
+import android.webkit.*
+import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
-import com.atpro.golike.GolikeRepository
 import com.atpro.data.LocalRepository
+import com.atpro.golike.GolikeRepository
 import kotlinx.coroutines.*
-import android.util.Log
 
 /**
- * GolikeLoginWebActivity — v1.2.1
+ * GolikeLoginWebActivity — v1.2.2 (rewritten from new smali)
  *
- * Thay thế login form thủ công bằng WebView trỏ vào https://app.golike.net.
- * Người dùng đăng nhập bình thường trong trình giả lập web tích hợp.
+ * Đọc từ GoLikeLoginActivity.smali (bản mới):
  *
- * Sau khi đăng nhập, app tự động phát hiện token qua:
- *   1. JavaScript injection đọc localStorage.getItem("token")
- *   2. CookieManager đọc cookie "token" / "access_token"
+ * ── Cờ (fields) ────────────────────────────────────────────────────────────
+ *   C: Boolean  — đã nhận được token (chặn duplicate)
+ *   D: Boolean  — đang trong quá trình tìm token (user đã bấm nút)
+ *   F: Int      — số lần inject JS đã thực hiện (embed vào JS, max 6)
+ *   E: Handler  — mainHandler (Looper.getMainLooper())
  *
- * Khi tìm thấy token → gọi GolikeRepository.saveWebToken() → finish(RESULT_OK).
+ * ── Phương thức ─────────────────────────────────────────────────────────────
+ *   p(String): Boolean  — validate token: startsWith("eyJ") && length > 50
+ *                         HOẶC length > 100 (fallback)
+ *   q(String): Unit     — nhận + lưu token (gọi từ bridge trên bg thread)
+ *   r(): Unit           — inject JS (gọi từ button click VÀ onPageFinished)
  *
- * Caller nhận RESULT_OK → gọi golikeVm.refreshUserInfo() để load thông tin user.
+ * ── JS mới (khác bản cũ) ───────────────────────────────────────────────────
+ *   • sendToken() helper với regex /eyJ[a-zA-Z0-9_\-\.]{50,}/g
+ *   • Retry KHÔNG dùng arguments.callee mà dùng window.location.reload()
+ *   • onPageFinished → gọi r() → inject lại → tạo vòng retry tự nhiên
  *
- * Intent extras đầu vào: (none — mở thẳng base URL)
- * Intent extras đầu ra:
- *   EXTRA_TOKEN (String) — token tìm được (dùng để thông báo thôi; đã lưu DB rồi)
+ * ── Flow ─────────────────────────────────────────────────────────────────────
+ *   1. User bấm "Lấy ATH" → D=true, F=0 → r()
+ *   2. r() inject JS → tìm trong localStorage/sessionStorage/cookie
+ *   3a. Tìm thấy → AndroidTokenReceiver.onTokenReceived(token) → q() → lưu → finish
+ *   3b. Không thấy, F<6 → setTimeout(reload, 2000) → onPageFinished → r() lại
  */
 class GolikeLoginWebActivity : AppCompatActivity() {
 
     companion object {
-        const val TAG          = "GolikeWebLogin"
-        const val BASE_URL     = "https://app.golike.net"
-        const val EXTRA_TOKEN  = "golike_token"
-        const val RESULT_TOKEN = Activity.RESULT_FIRST_USER + 1
+        const val TAG         = "GoLikeLogin"
+        const val BASE_URL    = "https://app.golike.net/home"
+        const val EXTRA_TOKEN = "golike_token"
 
-        // localStorage keys Golike có thể dùng (thử lần lượt)
-        private val LS_KEYS = listOf("token", "access_token", "auth_token", "authToken", "_token")
-        // Cookie keys
-        private val COOKIE_KEYS = listOf("token", "access_token", "Authorization")
+        // ── p(String): Boolean — validator theo smali ─────────────────────
+        fun isValidToken(s: String?): Boolean {
+            if (s.isNullOrEmpty()) return false
+            // (startsWith("eyJ") && length > 50) || length > 100
+            if (s.startsWith("eyJ") && s.length > 50) return true
+            if (s.length > 100) return true
+            return false
+        }
     }
 
-    private lateinit var webView: WebView
-    private lateinit var progressBar: ProgressBar
-    private lateinit var statusText: TextView
+    // ── Fields theo smali ─────────────────────────────────────────────────────
+    @Volatile var C = false          // tokenReceived
+    @Volatile var D = false          // isSearching
+    var F = 0                        // retryCount
+    val E = Handler(Looper.getMainLooper())   // mainHandler
 
-    private val activityScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private var tokenFound     = false
+    // ── Views ─────────────────────────────────────────────────────────────────
+    lateinit var y: WebView          // field y = WebView
+    lateinit var z: ProgressBar      // field z = ProgressBar
+    lateinit var A: Button           // field A = Button (Lấy ATH)
 
-    // ── Lifecycle ─────────────────────────────────────────────────────────────
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
+    // ── onCreate ──────────────────────────────────────────────────────────────
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         buildLayout()
-        setupWebView()
-        webView.loadUrl(BASE_URL)
+
+        // WebView settings theo smali
+        y.settings.apply {
+            javaScriptEnabled    = true
+            setDomStorageEnabled(true)
+            setLoadWithOverviewMode(true)
+            setUseWideViewPort(true)
+            setBuiltInZoomControls(true)
+            displayZoomControls  = false
+            cacheMode            = WebSettings.LOAD_DEFAULT   // -1 = LOAD_DEFAULT
+            databaseEnabled      = true
+            allowFileAccess      = true
+            allowContentAccess   = true
+            mixedContentMode     = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW  // 0
+        }
+
+        // CookieManager.setAcceptThirdPartyCookies
+        CookieManager.getInstance().setAcceptThirdPartyCookies(y, true)
+
+        // addJavascriptInterface(La2/g instance, "AndroidTokenReceiver")
+        y.addJavascriptInterface(TokenBridge(), "AndroidTokenReceiver")
+
+        // setWebViewClient(La2/f instance) — onPageFinished → r()
+        y.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                // La2/f.onPageFinished → gọi r() — tạo retry loop tự nhiên sau reload
+                r()
+            }
+
+            override fun onReceivedError(view: WebView?,
+                req: WebResourceRequest?, err: WebResourceError?) {
+                super.onReceivedError(view, req, err)
+                if (req?.isForMainFrame == true)
+                    updateStatus("Lỗi kết nối — kiểm tra internet")
+            }
+        }
+
+        y.webChromeClient = object : WebChromeClient() {
+            override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                z.progress   = newProgress
+                z.visibility = if (newProgress < 100) View.VISIBLE else View.GONE
+            }
+        }
+
+        // Log + loadUrl theo smali
+        Log.d(TAG, "🚀 Load GoLike: $BASE_URL")
+        y.loadUrl(BASE_URL)
+
+        // Button click → set D=true, reset F, gọi r()
+        A.setOnClickListener {
+            if (!C) {
+                D = true
+                F = 0
+                updateStatus("🔍 Đang tìm token...")
+                A.isEnabled = false
+                A.setBackgroundColor(Color.parseColor("#888888"))
+                A.text = "Đang tìm..."
+                r()
+            }
+        }
+    }
+
+    override fun onBackPressed() {
+        if (y.canGoBack()) y.goBack()
+        else super.onBackPressed()
     }
 
     override fun onDestroy() {
-        activityScope.cancel()
-        webView.destroy()
+        scope.cancel()
+        y.destroy()
         super.onDestroy()
     }
 
-    // ── Layout (programmatic — tránh XML dependency) ──────────────────────────
-
-    private fun buildLayout() {
-        val root = FrameLayout(this).apply {
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-            )
-            setBackgroundColor(Color.parseColor("#0D0D14"))
-        }
-
-        // Header bar
-        val header = RelativeLayout(this).apply {
-            id = View.generateViewId()
-            layoutParams = FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(56),
-            ).also { it.gravity = android.view.Gravity.TOP }
-            setBackgroundColor(Color.parseColor("#13131F"))
-        }
-
-        statusText = TextView(this).apply {
-            text = "Đăng nhập Golike"
-            setTextColor(Color.WHITE)
-            textSize = 16f
-            gravity = android.view.Gravity.CENTER
-            layoutParams = RelativeLayout.LayoutParams(
-                RelativeLayout.LayoutParams.MATCH_PARENT,
-                RelativeLayout.LayoutParams.MATCH_PARENT,
-            )
-        }
-        header.addView(statusText)
-
-        // Progress bar
-        progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(3),
-            ).also {
-                it.gravity = android.view.Gravity.TOP
-                it.topMargin = dpToPx(56)
-            }
-            progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#6C63FF"))
-            max = 100
-        }
-
-        // WebView
-        webView = WebView(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-            ).also { it.topMargin = dpToPx(56) }
-        }
-
-        root.addView(header)
-        root.addView(progressBar)
-        root.addView(webView)
-        setContentView(root)
-    }
-
-    @SuppressLint("SetJavaScriptEnabled")
-    private fun setupWebView() {
-        webView.settings.apply {
-            javaScriptEnabled    = true
-            domStorageEnabled    = true
-            databaseEnabled      = true
-            loadsImagesAutomatically = true
-            setSupportZoom(true)
-            builtInZoomControls  = true
-            displayZoomControls  = false
-            useWideViewPort      = true
-            loadWithOverviewMode = true
-            userAgentString      = "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-        }
-
-        // JavaScript bridge để nhận token từ web page
-        webView.addJavascriptInterface(TokenBridge(), "AndroidBridge")
-
-        webView.webChromeClient = object : WebChromeClient() {
-            override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                progressBar.progress = newProgress
-                progressBar.visibility = if (newProgress < 100) View.VISIBLE else View.GONE
-            }
-        }
-
-        webView.webViewClient = object : WebViewClient() {
-            override fun onPageFinished(view: WebView?, url: String?) {
-                super.onPageFinished(view, url)
-                if (tokenFound) return
-                injectTokenChecker()
-                checkCookiesForToken(url)
-            }
-
-            override fun onReceivedError(
-                view: WebView?,
-                request: android.webkit.WebResourceRequest?,
-                error: android.webkit.WebResourceError?,
-            ) {
-                super.onReceivedError(view, request, error)
-                if (request?.isForMainFrame == true) {
-                    statusText.text = "Lỗi kết nối — kiểm tra internet"
-                }
-            }
-        }
-    }
-
-    // ── Token extraction helpers ──────────────────────────────────────────────
+    // ── r(): inject JS — theo smali ───────────────────────────────────────────
 
     /**
-     * Inject JS để đọc token từ localStorage của app.golike.net.
-     * Thử lần lượt các key phổ biến.
+     * Tương đương hàm r()V trong smali.
+     * Guard: nếu C (done) → skip; nếu !D (chưa bấm nút) → skip.
+     * Tăng F, build JS với F nhúng vào (như smali gốc), evaluateJavascript.
+     *
+     * JS retry: setTimeout(() => window.location.reload(), 2000)
+     * → onPageFinished sẽ gọi r() lại → vòng lặp tự nhiên, max 6 lần.
      */
-    private fun injectTokenChecker() {
-        val jsKeys = LS_KEYS.joinToString(", ") { "\"$it\"" }
-        val js = """
-            (function() {
-                var keys = [$jsKeys];
-                for (var i = 0; i < keys.length; i++) {
-                    var val = localStorage.getItem(keys[i]);
-                    if (val && val.length > 10) {
-                        window.AndroidBridge.onTokenFound(val);
-                        return;
-                    }
-                }
-                // Try sessionStorage
-                for (var i = 0; i < keys.length; i++) {
-                    var val = sessionStorage.getItem(keys[i]);
-                    if (val && val.length > 10) {
-                        window.AndroidBridge.onTokenFound(val);
-                        return;
-                    }
-                }
-                // Try Redux/Vuex state injected into window
-                try {
-                    var state = window.__INITIAL_STATE__ || window.__REDUX_STATE__ || {};
-                    var t = state.token || (state.auth && state.auth.token) || '';
-                    if (t && t.length > 10) { window.AndroidBridge.onTokenFound(t); return; }
-                } catch(e) {}
-            })();
-        """.trimIndent()
-        webView.evaluateJavascript(js, null)
+    fun r() {
+        if (C) return          // đã có token
+        if (!D) return         // chưa bấm nút
+
+        F++
+        Log.d(TAG, "🔍 Lần thứ $F - Inject JavaScript lấy token...")
+
+        // JS EXACT từ smali r()V — chỉ thay F bằng giá trị thực
+        val js = buildString {
+            append("javascript:(function() {")
+            append("   var tokenPattern = /eyJ[a-zA-Z0-9_\\-\\.]{50,}/g;")
+            append("   function sendToken(token) {")
+            append("       if (token && token.length > 50 && token.startsWith('eyJ')) {")
+            append("           AndroidTokenReceiver.onTokenReceived(token);")
+            append("           return true;")
+            append("       }")
+            append("       return false;")
+            append("   }")
+            // localStorage
+            append("   try {")
+            append("       for (var i = 0; i < localStorage.length; i++) {")
+            append("           var val = localStorage.getItem(localStorage.key(i));")
+            append("           if (val) {")
+            append("               if (sendToken(val)) return;")
+            append("               var matches = val.match(tokenPattern);")
+            append("               if (matches && matches.length > 0 && sendToken(matches[0])) return;")
+            append("               try {")
+            append("                   var parsed = JSON.parse(val);")
+            append("                   if (parsed) {")
+            append("                       if (parsed.token && sendToken(parsed.token)) return;")
+            append("                       if (parsed.access_token && sendToken(parsed.access_token)) return;")
+            append("                       if (parsed.authorization && sendToken(parsed.authorization)) return;")
+            append("                   }")
+            append("               } catch(e) {}")
+            append("           }")
+            append("       }")
+            append("   } catch(e) {}")
+            // sessionStorage
+            append("   try {")
+            append("       for (var i = 0; i < sessionStorage.length; i++) {")
+            append("           var val = sessionStorage.getItem(sessionStorage.key(i));")
+            append("           if (val && sendToken(val)) return;")
+            append("       }")
+            append("   } catch(e) {}")
+            // cookies
+            append("   try {")
+            append("       var cookies = document.cookie.split(';');")
+            append("       for (var i = 0; i < cookies.length; i++) {")
+            append("           var parts = cookies[i].trim().split('=');")
+            append("           if (parts.length >= 2) {")
+            append("               var val = parts.slice(1).join('=');")
+            append("               if (sendToken(val)) return;")
+            append("           }")
+            append("       }")
+            append("   } catch(e) {}")
+            // Retry: reload page (KHÔNG dùng arguments.callee)
+            append("   console.log('No token found in attempt ' + $F);")
+            append("   if ($F < 6) {")
+            append("       setTimeout(function() {")
+            append("           window.location.reload();")
+            append("       }, 2000);")
+            append("   }")
+            append("})()")
+        }
+
+        y.evaluateJavascript(js, null)   // null callback theo smali
     }
 
-    /** Đọc cookies của domain hiện tại và tìm token. */
-    private fun checkCookiesForToken(url: String?) {
-        if (url == null) return
-        val domain = try { java.net.URL(url).host } catch (_: Exception) { return }
-        val cookieStr = CookieManager.getInstance().getCookie(domain) ?: return
-        for (key in COOKIE_KEYS) {
-            val regex = Regex("(?:^|;\\s*)${Regex.escape(key)}=([^;]+)")
-            val match = regex.find(cookieStr) ?: continue
-            val value = match.groupValues[1].trim()
-            if (value.length > 10) {
-                Log.d(TAG, "Token tìm thấy trong cookie key=$key")
-                onTokenReceived(value)
-                return
+    // ── q(String): nhận + lưu token — theo smali ─────────────────────────────
+
+    /**
+     * Tương đương hàm q(GoLikeLoginActivity, String)V trong smali.
+     * Gọi từ bridge trên JavaBridge thread → cần runOnUiThread.
+     */
+    fun q(token: String) {
+        if (C) return   // đã nhận rồi — smali: if-eqz v0, :cond_0 → goto_0
+
+        C = true
+        D = false
+
+        // Log theo smali
+        Log.d(TAG, "🎉 LẤY ĐƯỢC TOKEN! Độ dài: ${token.length}")
+        val preview = token.substring(0, minOf(100, token.length))
+        Log.d(TAG, "📝 Token: $preview...")
+
+        // Lưu thẳng — smali không gọi API verify
+        // SharedPreferences("golike_auth", 0) key "golike_token"
+        getSharedPreferences("golike_auth", 0).edit()
+            .putString("golike_token", token)
+            .apply()
+
+        // Lưu thêm qua GolikeRepository (tương đương B.a key "token" trong smali)
+        scope.launch(Dispatchers.IO) {
+            try {
+                val repo = GolikeRepository.getInstance(
+                    LocalRepository.getInstance(this@GolikeLoginWebActivity))
+                repo.saveWebToken(token)
+            } catch (e: Exception) {
+                Log.e(TAG, "saveWebToken: ${e.message}")
             }
+        }
+
+        // runOnUiThread → finish — tương đương m0(activity, 4, token) trong smali
+        runOnUiThread {
+            updateStatus("✓ Đăng nhập thành công!")
+            A.isEnabled = false
+            A.setBackgroundColor(Color.parseColor("#10B981"))
+            A.text = "✓ OK"
+
+            // Delay nhỏ để user thấy trạng thái rồi finish
+            E.postDelayed({
+                setResult(Activity.RESULT_OK,
+                    Intent().putExtra(EXTRA_TOKEN, token))
+                finish()
+            }, 800)
         }
     }
 
-    // ── JavaScript → Kotlin bridge ────────────────────────────────────────────
+    // ── AndroidTokenReceiver (La2/g trong smali) ─────────────────────────────
 
     inner class TokenBridge {
         @JavascriptInterface
-        fun onTokenFound(token: String) {
-            if (tokenFound || token.isBlank() || token.length < 10) return
-            Log.d(TAG, "Token nhận từ JS bridge: ${token.take(20)}...")
-            runOnUiThread { onTokenReceived(token) }
+        fun onTokenReceived(token: String) {
+            Log.d(TAG, "onTokenReceived: len=${token.length}")
+            // Validate theo p(String) từ smali
+            if (!isValidToken(token)) {
+                Log.w(TAG, "Token không hợp lệ, bỏ qua")
+                return
+            }
+            q(token)   // gọi q() theo smali pattern
         }
     }
 
-    // ── Token persistence ──────────────────────────────────────────────────────
+    // ── Layout (programmatic — không dùng XML) ────────────────────────────────
 
-    private fun onTokenReceived(rawToken: String) {
-        if (tokenFound) return
-        tokenFound = true
+    private fun buildLayout() {
+        val root = FrameLayout(this).apply {
+            layoutParams = ViewGroup.LayoutParams(MATCH, MATCH)
+            setBackgroundColor(Color.parseColor("#0D0D14"))
+        }
 
-        // Strip "Bearer " prefix nếu có
-        val cleanToken = rawToken.removePrefix("Bearer ").trim()
-        statusText.text = "Đăng nhập thành công — đang lưu..."
+        val header = RelativeLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(MATCH, dp(56)).also {
+                it.gravity = Gravity.TOP
+            }
+            setBackgroundColor(Color.parseColor("#13131F"))
+        }
 
-        activityScope.launch {
-            try {
-                val local = LocalRepository.getInstance(this@GolikeLoginWebActivity)
-                val repo  = GolikeRepository.getInstance(local)
-                repo.saveWebToken(cleanToken)
-                Log.i(TAG, "Token saved OK")
-                val result = Intent().apply { putExtra(EXTRA_TOKEN, cleanToken) }
-                setResult(Activity.RESULT_OK, result)
-            } catch (e: Exception) {
-                Log.e(TAG, "saveWebToken error: ${e.message}")
-                setResult(Activity.RESULT_CANCELED)
-            } finally {
-                finish()
+        val statusLabel = TextView(this).apply {
+            text     = "Đăng nhập Golike"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            gravity  = Gravity.CENTER_VERTICAL or Gravity.START
+            id       = View.generateViewId()
+            layoutParams = RelativeLayout.LayoutParams(MATCH, MATCH).also {
+                it.setMargins(dp(14), 0, dp(128), 0)
             }
         }
+
+        A = Button(this).apply {
+            text      = "Lấy ATH"
+            textSize  = 12f
+            isAllCaps = false
+            setTextColor(Color.BLACK)
+            setPadding(dp(8), 0, dp(8), 0)
+            setBackgroundColor(Color.parseColor("#F5A623"))
+            layoutParams = RelativeLayout.LayoutParams(dp(108), dp(36)).also {
+                it.addRule(RelativeLayout.ALIGN_PARENT_END)
+                it.addRule(RelativeLayout.CENTER_VERTICAL)
+                it.setMargins(0, 0, dp(10), 0)
+            }
+        }
+
+        header.addView(statusLabel)
+        header.addView(A)
+        // Lưu ref statusText qua tag
+        statusLabel.tag = "status"
+
+        z = ProgressBar(this, null,
+            android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            progressTintList = android.content.res.ColorStateList.valueOf(
+                Color.parseColor("#6C63FF"))
+            layoutParams = FrameLayout.LayoutParams(MATCH, dp(3)).also {
+                it.gravity   = Gravity.TOP
+                it.topMargin = dp(56)
+            }
+        }
+
+        y = WebView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(MATCH, MATCH).also {
+                it.topMargin = dp(56)
+            }
+        }
+
+        root.addView(header)
+        root.addView(z)
+        root.addView(y)
+        setContentView(root)
     }
 
-    // ── Helpers ────────────────────────────────────────────────────────────────
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private fun dpToPx(dp: Int): Int =
-        (dp * resources.displayMetrics.density).toInt()
+    private fun updateStatus(text: String) {
+        E.post {
+            val root = window.decorView as ViewGroup
+            val label = root.findViewWithTag<TextView>("status")
+            label?.text = text
+        }
+    }
+
+    private fun resetButton() {
+        A.isEnabled = true
+        A.setBackgroundColor(Color.parseColor("#F5A623"))
+        A.text = "Lấy ATH"
+        D = false
+    }
+
+    private val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 }

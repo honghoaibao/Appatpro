@@ -108,7 +108,7 @@ private val SETTINGS_GROUPS = listOf(
         label    = "Kiếm tiền",
         icon     = Icons.Rounded.AttachMoney,
         accent   = Color(0xFFF5A623),
-        sections = listOf(Section.EARN_GOLIKE),
+        sections = listOf(Section.EARN_GOLIKE, Section.TASK_SETTINGS),
     ),
 )
 
@@ -1070,8 +1070,32 @@ private fun EarnGolikeSection(golikeVm: GolikeViewModel) {
     ) {
         SectionTitle("Golike - TikTok", Icons.Rounded.CurrencyExchange, GolikeGold)
 
+        // v1.2.2: Bỏ form đăng nhập — đăng nhập qua tab Dịch vụ
         if (!state.isLoggedIn) {
-            GolikeLoginCard(state, GolikeGold, golikeVm)
+            // Chỉ hiện thông báo hướng dẫn, không còn form username/password
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(BgCard)
+                    .border(1.dp, BorderDark, RoundedCornerShape(14.dp))
+                    .padding(horizontal = 14.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                CardLabel("Trạng thái kết nối", Icons.Rounded.AccountCircle, GolikeGold)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(Icons.Rounded.Info, null, tint = GolikeGold, modifier = Modifier.size(16.dp))
+                    Text(
+                        "Chưa đăng nhập Golike.\nVào tab Dịch vụ → Tài khoản Golike để đăng nhập.",
+                        color    = TextSec,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                    )
+                }
+            }
         } else {
             GolikeUserCard(state, GolikeGold, golikeVm)
             if (state.isLoadingAccounts) {
@@ -1998,7 +2022,15 @@ private fun TaskSettingsSection(
     state: ConfigUiState,
     onSet: (ConfigUiState.() -> ConfigUiState) -> Unit,
 ) {
-    val AccentTask = androidx.compose.ui.graphics.Color(0xFF7C3AED)
+    val AccentTask = Color(0xFF7C3AED)
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 14.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
 
     SectionTitle("Loại nhiệm vụ", Icons.Rounded.AssignmentTurnedIn, AccentTask)
 
@@ -2033,7 +2065,6 @@ private fun TaskSettingsSection(
         }
     }
 
-    Spacer(Modifier.height(16.dp))
     SectionTitle("Thời gian & Giới hạn", Icons.Rounded.Timer, AccentTask)
 
     SettingSliderInt(
@@ -2060,6 +2091,8 @@ private fun TaskSettingsSection(
         min      = 1, max = 10, step = 1,
         onChange = { onSet { copy(taskMaxConsecFailures = it) } },
     )
+
+    } // end Column
 }
 
 // Reuse existing helper — simple Int slider row

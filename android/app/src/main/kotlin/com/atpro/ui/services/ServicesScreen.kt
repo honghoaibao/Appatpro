@@ -47,6 +47,7 @@ private val GolikeDark  = Color(0xFF1A1205)
 
 /**
  * v1.2.1: Thêm callbacks để điều hướng tới Dashboard với chế độ tương ứng.
+ * v1.2.2: Thêm onGolikeLogout; block task service khi chưa đăng nhập.
  *
  * @param onOpenFarmService   Người dùng bấm "Mở dịch vụ" card Nuôi acc
  *                            → set ServiceMode.FARM + navigate to Dashboard tab
@@ -54,6 +55,7 @@ private val GolikeDark  = Color(0xFF1A1205)
  *                            → set ServiceMode.TASK + navigate to Dashboard tab
  * @param onOpenGolikeLogin   Người dùng bấm "Đăng nhập Golike"
  *                            → mở GolikeLoginWebActivity
+ * @param onGolikeLogout      Người dùng bấm "Đăng xuất" trong GolikeAccountCard
  * @param isGolikeLoggedIn    True nếu token Golike đã được lưu → hiển thị trạng thái
  * @param golikeDisplayName   Tên hiển thị của tài khoản Golike đang đăng nhập
  */
@@ -62,6 +64,7 @@ fun ServicesScreen(
     onOpenFarmService: () -> Unit  = {},
     onOpenTaskService: () -> Unit  = {},
     onOpenGolikeLogin: () -> Unit  = {},
+    onGolikeLogout:    () -> Unit  = {},
     isGolikeLoggedIn:  Boolean     = false,
     golikeDisplayName: String      = "",
 ) {
@@ -84,9 +87,9 @@ fun ServicesScreen(
         ) {
             // Card 1: Nuôi acc
             TikTokFarmCard(onClick = onOpenFarmService)
-            // Card 2: Làm nhiệm vụ (v1.2.1 mới)
+            // Card 2: Làm nhiệm vụ (v1.2.1 mới) — v1.2.2: block khi chưa đăng nhập
             TikTokTaskCard(
-                onClick         = onOpenTaskService,
+                onClick          = if (isGolikeLoggedIn) onOpenTaskService else onOpenGolikeLogin,
                 isGolikeLoggedIn = isGolikeLoggedIn,
             )
         }
@@ -98,9 +101,10 @@ fun ServicesScreen(
             accent = GolikeGold,
         ) {
             GolikeAccountCard(
-                isLoggedIn   = isGolikeLoggedIn,
-                displayName  = golikeDisplayName,
-                onLoginClick = onOpenGolikeLogin,
+                isLoggedIn    = isGolikeLoggedIn,
+                displayName   = golikeDisplayName,
+                onLoginClick  = onOpenGolikeLogin,
+                onLogoutClick = onGolikeLogout,
             )
         }
 
@@ -353,7 +357,26 @@ private fun TikTokTaskCard(
                 ServiceChip("Golike", GolikeGold)
             }
 
-            OpenServiceRow(AccentTask)
+            // v1.2.2: Khi chưa login → nút chỉ tới trang đăng nhập Golike
+            Row(
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.End,
+                modifier              = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text       = if (isGolikeLoggedIn) "Mở dịch vụ" else "Đăng nhập Golike",
+                    color      = if (isGolikeLoggedIn) AccentTask else Color(0xFFF5A623),
+                    fontSize   = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    imageVector        = Icons.Rounded.ArrowForwardIos,
+                    contentDescription = null,
+                    tint               = if (isGolikeLoggedIn) AccentTask else Color(0xFFF5A623),
+                    modifier           = Modifier.size(12.dp),
+                )
+            }
         }
     }
 }
@@ -364,9 +387,10 @@ private fun TikTokTaskCard(
 
 @Composable
 private fun GolikeAccountCard(
-    isLoggedIn:   Boolean,
-    displayName:  String,
-    onLoginClick: () -> Unit,
+    isLoggedIn:    Boolean,
+    displayName:   String,
+    onLoginClick:  () -> Unit,
+    onLogoutClick: () -> Unit,
 ) {
     Box(
         modifier = Modifier
@@ -424,7 +448,7 @@ private fun GolikeAccountCard(
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        text     = if (isLoggedIn) "Đã đăng nhập: $displayName"
+                        text     = if (isLoggedIn) "Đã đăng nhập — $displayName"
                                    else "Chưa đăng nhập",
                         color    = if (isLoggedIn) Color(0xFF10B981) else TextMuted,
                         fontSize = 12.sp,
@@ -462,30 +486,51 @@ private fun GolikeAccountCard(
                 lineHeight = 18.sp,
             )
 
-            // Login / re-login button
-            Button(
-                onClick = onLoginClick,
-                modifier = Modifier.fillMaxWidth(),
-                shape    = RoundedCornerShape(10.dp),
-                colors   = ButtonDefaults.buttonColors(
-                    containerColor = if (isLoggedIn)
-                        GolikeGold.copy(alpha = 0.15f)
-                    else
-                        GolikeGold.copy(alpha = 0.9f),
-                    contentColor = if (isLoggedIn) GolikeGold else Color.Black,
-                ),
-            ) {
-                Icon(
-                    imageVector = if (isLoggedIn) Icons.Rounded.Refresh else Icons.Rounded.Login,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text       = if (isLoggedIn) "Đăng nhập lại" else "Đăng nhập Golike",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize   = 14.sp,
-                )
+            if (isLoggedIn) {
+                // Khi đã đăng nhập: nút đăng nhập lại + nút đăng xuất
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick  = onLoginClick,
+                        modifier = Modifier.weight(1f),
+                        shape    = RoundedCornerShape(10.dp),
+                        colors   = ButtonDefaults.buttonColors(
+                            containerColor = GolikeGold.copy(alpha = 0.15f),
+                            contentColor   = GolikeGold,
+                        ),
+                    ) {
+                        Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Đăng nhập lại", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    }
+                    Button(
+                        onClick  = onLogoutClick,
+                        modifier = Modifier.weight(1f),
+                        shape    = RoundedCornerShape(10.dp),
+                        colors   = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFEF4444).copy(alpha = 0.12f),
+                            contentColor   = Color(0xFFEF4444),
+                        ),
+                    ) {
+                        Icon(Icons.Rounded.Logout, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Đăng xuất", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    }
+                }
+            } else {
+                // Chưa đăng nhập: nút đăng nhập
+                Button(
+                    onClick  = onLoginClick,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape    = RoundedCornerShape(10.dp),
+                    colors   = ButtonDefaults.buttonColors(
+                        containerColor = GolikeGold.copy(alpha = 0.9f),
+                        contentColor   = Color.Black,
+                    ),
+                ) {
+                    Icon(Icons.Rounded.Login, null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Đăng nhập Golike", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                }
             }
         }
     }

@@ -147,3 +147,30 @@ That means:
 - Android native modules own core behavior
 - Flutter stays minimal and transitional
 - future work should reduce coupling and simplify the stack
+
+---
+
+## External Skills
+
+The following skill sets are included under `.claude/skills/` and should be
+consulted when relevant tasks arise. Read the corresponding SKILL.md before
+starting any related work.
+
+### multica-ai/andrej-karpathy-skills (MIT)
+Source: https://github.com/multica-ai/andrej-karpathy-skills
+
+- **karpathy-guidelines** — Behavioral guidelines to reduce LLM coding mistakes:
+  Think Before Coding, Simplicity First, Surgical Changes, Goal-Driven Execution.
+  Apply always when writing or reviewing code.
+
+### android/skills — Official Google Android Skills (Apache-2.0)
+Source: https://github.com/android/skills
+
+- **agp-9-upgrade** — Migrate Android Gradle Plugin to version 9.
+- **migrate-xml-to-compose** — 10-step workflow to migrate XML layouts to Jetpack Compose.
+- **navigation-3** — Install/migrate to Jetpack Navigation 3; recipes for deep links,
+  scenes, multiple backstacks, conditional navigation, Hilt integration.
+- **r8-analyzer** — Analyze and optimize R8/ProGuard keep rules to reduce APK size.
+- **play-billing-upgrade** — Upgrade Google Play Billing Library to the latest stable version.
+- **edge-to-edge** — Implement edge-to-edge support in Jetpack Compose; fix insets,
+  IME handling, system bar legibility.

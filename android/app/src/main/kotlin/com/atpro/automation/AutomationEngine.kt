@@ -244,8 +244,9 @@ class AutomationEngine(
 
     var isFarming = false; private set
     var isPaused  = false; private set
-    /** True khi engine đang trong giai đoạn nghỉ giữa 2 acc — watchdog bỏ qua để không false-alarm. */
-    private var isResting = false
+    /** True khi engine đang trong giai đoạn nghỉ giữa 2 acc — watchdog bỏ qua để không false-alarm.
+     *  @Volatile: watchdog chạy trên coroutine riêng — cần visibility đảm bảo. */
+    @Volatile private var isResting = false
 
     private val _liveFarmStats = MutableStateFlow(LiveFarmStats())
     val liveFarmStats: StateFlow<LiveFarmStats> = _liveFarmStats.asStateFlow()
@@ -894,6 +895,25 @@ class AutomationEngine(
                 continue
             }
 
+            // ── [2d] Live card trong feed ─────────────────────────────────
+            // Thẻ Live preview xuất hiện trong feed scroll (chưa vào live room).
+            // isOnFeedTab() đã nhận dạng đây là on-feed (Tier 0a), nhưng cần
+            // swipe qua để tiếp tục farm — thẻ Live không có nội dung để xem.
+            // Phải xử lý TRƯỚC isLostWithRetry() vì UI thiếu like/comment/share
+            // → Chiến lược 3 của isOnFeedTab() có thể miss → false "lạc".
+            if (NodeTraverser.isLiveCardInFeed(root)) {
+                log("LIVE-FEED: Thẻ Live trong feed → swipe qua")
+                consecutiveSkipCount++
+                if (consecutiveSkipCount >= MAX_CONSECUTIVE_SKIPS) {
+                    log("WARN: Skip liên tiếp ${consecutiveSkipCount}× (live-feed) → forceSwipeNext")
+                    forceSwipeNext(); delay(2_000); consecutiveSkipCount = 0
+                } else {
+                    swipeNext()
+                }
+                lostStreak = 0
+                continue
+            }
+
             // ── [3] Lost detection ────────────────────────────────────────
             if (isLostWithRetry()) {
                 val dbgTexts = NodeTraverser.dumpScreenTexts(root)
@@ -1458,15 +1478,14 @@ class AutomationEngine(
             delay(1_000L)
         }
 
-        // Về feed
-        val homeTab = NodeTraverser.findHomeTab(host.getRootNode())
-        if (homeTab != null) {
-            host.clickNode(homeTab.node)
+        // Về feed — ưu tiên tab Trang chủ, fallback back loop
+        val backOk = returnToFeedFromTab()
+        if (!backOk) {
+            log("INBOX: returnToFeedFromTab thất bại → recoverToFeed()")
+            recoverToFeed()
         } else {
-            host.pressBack()
+            log("INBOX: Xong → về feed")
         }
-        delay(1_200)
-        log("INBOX: Xong → về feed")
     }
 
     /**
@@ -1511,21 +1530,52 @@ class AutomationEngine(
             Human.delay(1_500, 2_500)
         }
 
-        // Về feed
-        val homeTab = NodeTraverser.findHomeTab(host.getRootNode())
-        if (homeTab != null) {
-            host.clickNode(homeTab.node)
-            delay(1_500)
-        } else {
-            host.pressBack()
-            delay(1_500)
-        }
-        if (!NodeTraverser.isOnFeedTab(host.getRootNode())) {
-            log("SHOP: Chưa về feed → recoverToFeed()")
+        // Về feed — ưu tiên tab Trang chủ, fallback back loop
+        val backOk = returnToFeedFromTab()
+        if (!backOk) {
+            log("SHOP: returnToFeedFromTab thất bại → recoverToFeed()")
             recoverToFeed()
         } else {
             log("SHOP: Xong → về feed")
         }
+    }
+
+    /**
+     * v1.2.2 — Trả về feed từ tab inbox/shop.
+     *
+     * Ưu tiên click tab Trang chủ nếu tìm thấy.
+     * Nếu không: back 1–3 lần, mỗi lần kiểm tra feed + tab Trang chủ.
+     *
+     * @return true nếu đã về feed thành công.
+     */
+    private suspend fun returnToFeedFromTab(): Boolean {
+        // Thử tab Trang chủ trước
+        val homeTab = NodeTraverser.findHomeTab(host.getRootNode())
+        if (homeTab != null) {
+            host.clickNode(homeTab.node)
+            delay(1_000)
+            if (NodeTraverser.isOnFeedTab(host.getRootNode())) return true
+        }
+        // Home tab không thấy hoặc click chưa về — back loop 1–3 lần
+        repeat(3) { attempt ->
+            host.pressBack()
+            delay(900)
+            val root = host.getRootNode()
+            if (NodeTraverser.isOnFeedTab(root)) {
+                log("  returnToFeed: về feed sau ${attempt + 1} lần back ✓")
+                return true
+            }
+            val h = NodeTraverser.findHomeTab(root)
+            if (h != null) {
+                host.clickNode(h.node)
+                delay(1_000)
+                if (NodeTraverser.isOnFeedTab(host.getRootNode())) {
+                    log("  returnToFeed: tab Trang chủ tìm thấy sau back ${attempt + 1} ✓")
+                    return true
+                }
+            }
+        }
+        return false
     }
 
 
@@ -2083,7 +2133,7 @@ class AutomationEngine(
 
             // ── [B] Lấy job từ Golike ─────────────────────────────
             setStatus("TASK: Lấy nhiệm vụ từ server...")
-            val jobsResult = gRepo.getTikTokJobs(golikeAcc.uniqueUsername)
+            val jobsResult = gRepo.getTikTokJobs(golikeAcc.id)
             val job = when (jobsResult) {
                 is GolikeResult.Success -> {
                     // Lọc theo loại job được cấu hình
