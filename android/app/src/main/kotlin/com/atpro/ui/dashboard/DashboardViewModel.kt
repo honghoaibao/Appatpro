@@ -216,6 +216,22 @@ class DashboardViewModel(
         }
     }
 
+    /**
+     * v1.2.3 — Bắt đầu demo nuôi tài khoản Facebook.
+     * Flow: mở Facebook → lướt feed → ngẫu nhiên thích bài đăng → đóng app.
+     */
+    fun startFacebookNurture() {
+        val engine = TikTokAccessibilityService.instance?.engine ?: return
+
+        try {
+            appContext.startForegroundService(FarmForegroundService.buildIntent(appContext))
+        } catch (e: Exception) {
+            Log.w("DashboardVM", "startForegroundService (facebook) failed: ${e.message}")
+        }
+
+        engine.startFacebookNurture()
+    }
+
     fun pause()  { TikTokAccessibilityService.instance?.engine?.pause() }
     fun resume() { TikTokAccessibilityService.instance?.engine?.resume() }
 
@@ -370,19 +386,21 @@ data class DashboardUiState(
                 .size
     }
 
+    // v1.2.3: FACEBOOK_NURTURE không cần farmMode/Golike — chỉ cần service connected.
     val canStart: Boolean get() = serviceConnected && !isFarming &&
         (serviceMode != ServiceMode.TASK || isGolikeLoggedIn) &&
-        when (farmMode) {
+        (serviceMode == ServiceMode.FACEBOOK_NURTURE || when (farmMode) {
             FarmMode.ALL_LOCAL     -> true
             FarmMode.SELECTED_LIST -> customAccounts.isNotBlank()
-        }
+        })
 
     val startHint: String? get() = when {
         !serviceConnected ->
             "Bật Accessibility Service trước"
         serviceMode == ServiceMode.TASK && !isGolikeLoggedIn ->
             "Đăng nhập Golike trong tab Dịch vụ trước"
-        farmMode == FarmMode.SELECTED_LIST && customAccounts.isBlank() ->
+        serviceMode != ServiceMode.FACEBOOK_NURTURE &&
+            farmMode == FarmMode.SELECTED_LIST && customAccounts.isBlank() ->
             "Nhập danh sách tài khoản cần nuôi"
         else -> null
     }

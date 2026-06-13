@@ -51,4 +51,17 @@ interface IFarmHost {
     fun showFarmOverlay()
     /** Ẩn floating overlay. */
     fun hideFarmOverlay()
+
+    /**
+     * v1.2.3 — Mở app bất kỳ theo package name (vd Facebook, Zalo...).
+     * Dùng cho các demo "nuôi acc" ngoài TikTok.
+     * Trả false nếu không cài hoặc launch fail.
+     */
+    fun launchApp(packageName: String): Boolean
+
+    /**
+     * v1.2.3 — Force-stop app bất kỳ theo package name.
+     * Cùng cơ chế với killTikTok(): HOME → delay → killBackgroundProcesses().
+     */
+    suspend fun killApp(packageName: String)
 }

@@ -78,6 +78,8 @@ data class TikTokJobDto(
     val link:     String = "",
     val type:     String = "",
     @SerialName("fix_coin") val fixCoin:  Int    = 0,
+    /** v1.2.3 — golike_api_docs.md §4.2: cần cho body complete-jobs/skip-jobs. */
+    @SerialName("object_id") val objectId: String = "",
 )
 
 @Serializable
@@ -99,6 +101,63 @@ data class CompleteJobResponse(
     val status:  Int     = 0,
     val success: Boolean = false,
     val message: String  = "",
+    /** v1.2.3 — golike_api_docs.md §4.3: số giây phải chờ trước khi retry nếu status=400. */
+    val cooldown: Int     = 0,
+)
+
+// ── TikTok Job Detail / Skip [v1.2.3] ─────────────────────────────────────────
+
+/**
+ * v1.2.3 — golike_api_docs.md §4.4 (POST /api/advertising/publishers/tiktok/skip-jobs).
+ * Doc không show body mẫu — dùng tạm cùng shape với CompleteJobRequest (job_id +
+ * unique_username) theo quy ước chung của publisher API. Cần verify lại bằng HAR
+ * capture thực tế khi có job bị skip.
+ */
+@Serializable
+data class SkipJobRequest(
+    @SerialName("job_id")          val jobId:          Int,
+    @SerialName("unique_username") val uniqueUsername: String,
+)
+
+@Serializable
+data class SkipJobResponse(
+    val status:  Int     = 0,
+    val success: Boolean = false,
+    val message: String  = "",
+)
+
+/**
+ * v1.2.3 — golike_api_docs.md §4.2 (GET /api/jobs/tiktok/job-detail).
+ * `lock.lock_time` = số giây app có để hoàn thành job trước khi tự unlock (vd "120").
+ */
+@Serializable
+data class JobDetailResponse(
+    val status:  Int             = 0,
+    val success: Boolean         = false,
+    val message: String?         = null,
+    val data:    JobDetailDto?    = null,
+    val lock:    JobLockDto?      = null,
+)
+
+@Serializable
+data class JobDetailDto(
+    val id:        Int    = 0,
+    val link:      String = "",
+    @SerialName("object_id") val objectId: String = "",
+    val type:      String = "",
+    val quantity:  Int    = 0,
+    @SerialName("price_per_after_cost") val pricePerAfterCost: Int = 0,
+)
+
+@Serializable
+data class JobLockDto(
+    @SerialName("user_id")    val userId:    Int    = 0,
+    @SerialName("ads_id")     val adsId:     Int    = 0,
+    @SerialName("account_id") val accountId: Int    = 0,
+    @SerialName("object_id")  val objectId:  String = "",
+    val type:      String = "",
+    /** Số giây để publisher hoàn thành job trước khi tự unlock (server trả dạng String, vd "120"). */
+    @SerialName("lock_time")  val lockTime:  String = "0",
 )
 
 // ── Statistics ────────────────────────────────────────────────────────────────

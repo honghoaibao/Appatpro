@@ -208,4 +208,17 @@ data class FarmConfig(
      * Reset về 0 mỗi khi có job thành công.
      */
     val taskMaxConsecFailures: Int = 3,
+
+    // ── Demo nuôi Facebook [v1.2.3] ─────────────────────────────────────────
+
+    /**
+     * `v1.2.3` Thời gian (giây) lướt feed Facebook trong mỗi phiên nuôi acc.
+     * Flow: mở Facebook → lướt feed → ngẫu nhiên thích bài đăng → đóng app.
+     */
+    val facebookNurtureDurationSecs: Int = 180,
+
+    /**
+     * `v1.2.3` Xác suất thích (Like) 1 bài đăng sau mỗi lần lướt feed Facebook (0.0–1.0).
+     */
+    val facebookLikeRate: Float = 0.2f,
 )

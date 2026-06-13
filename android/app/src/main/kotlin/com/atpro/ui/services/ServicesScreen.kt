@@ -40,6 +40,7 @@ private val TikTokCyan  = Color(0xFF69C9D0)
 private val GolikeGold  = Color(0xFFF5A623)
 private val GolikeAmber = Color(0xFFFF6B35)
 private val GolikeDark  = Color(0xFF1A1205)
+private val FacebookBlue = Color(0xFF1877F2)  // v1.2.3 — màu thương hiệu Facebook
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ServicesScreen
@@ -61,12 +62,13 @@ private val GolikeDark  = Color(0xFF1A1205)
  */
 @Composable
 fun ServicesScreen(
-    onOpenFarmService: () -> Unit  = {},
-    onOpenTaskService: () -> Unit  = {},
-    onOpenGolikeLogin: () -> Unit  = {},
-    onGolikeLogout:    () -> Unit  = {},
-    isGolikeLoggedIn:  Boolean     = false,
-    golikeDisplayName: String      = "",
+    onOpenFarmService:     () -> Unit  = {},
+    onOpenTaskService:     () -> Unit  = {},
+    onOpenFacebookService: () -> Unit  = {},
+    onOpenGolikeLogin:     () -> Unit  = {},
+    onGolikeLogout:        () -> Unit  = {},
+    isGolikeLoggedIn:      Boolean     = false,
+    golikeDisplayName:     String      = "",
 ) {
     Column(
         modifier = Modifier
@@ -92,6 +94,15 @@ fun ServicesScreen(
                 onClick          = if (isGolikeLoggedIn) onOpenTaskService else onOpenGolikeLogin,
                 isGolikeLoggedIn = isGolikeLoggedIn,
             )
+        }
+
+        // ── Demo nuôi acc khác [v1.2.3] ──────────────────────────────────────
+        ServiceGroup(
+            title  = "Demo nuôi tài khoản khác",
+            icon   = Icons.Rounded.ThumbUp,
+            accent = FacebookBlue,
+        ) {
+            FacebookNurtureCard(onClick = onOpenFacebookService)
         }
 
         // ── Dịch vụ kiếm tiền ───────────────────────────────────────────────
@@ -377,6 +388,99 @@ private fun TikTokTaskCard(
                     modifier           = Modifier.size(12.dp),
                 )
             }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Card: Demo nuôi tài khoản Facebook (v1.2.3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun FacebookNurtureCard(onClick: () -> Unit) {
+    var pressed by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue   = if (pressed) 0.97f else 1f,
+        animationSpec = tween(120),
+        label         = "fb_card_scale",
+    )
+
+    val AccentFb2 = Color(0xFF42A5F5) // lighter blue
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .scale(scale)
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                Brush.horizontalGradient(
+                    colorStops = arrayOf(
+                        0.0f to Color(0xFF0A0E18),
+                        0.6f to Color(0xFF0D131C),
+                        1.0f to FacebookBlue.copy(alpha = 0.18f),
+                    ),
+                )
+            )
+            .border(
+                width  = 1.dp,
+                brush  = Brush.horizontalGradient(
+                    listOf(FacebookBlue.copy(alpha = 0.4f), AccentFb2.copy(alpha = 0.2f))
+                ),
+                shape  = RoundedCornerShape(16.dp),
+            )
+            .clickable(onClick = onClick, onClickLabel = "Mở demo nuôi tài khoản Facebook")
+            .padding(horizontal = 20.dp, vertical = 18.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            Brush.linearGradient(
+                                listOf(FacebookBlue.copy(alpha = 0.85f), AccentFb2.copy(alpha = 0.6f))
+                            )
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.ThumbUp,
+                        contentDescription = null,
+                        tint     = Color.White,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text          = "Nuôi tài khoản Facebook",
+                        color         = Color(0xFFBFDBFE),
+                        fontSize      = 16.sp,
+                        fontWeight    = FontWeight.Bold,
+                        letterSpacing = 0.2.sp,
+                    )
+                    Text(
+                        text     = "Lướt feed & thích bài viết tự động (demo)",
+                        color    = TextSec,
+                        fontSize = 12.sp,
+                    )
+                }
+                ActiveBadge()
+            }
+
+            HorizontalDivider(FacebookBlue)
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ServiceChip("Mở Facebook", FacebookBlue)
+                ServiceChip("Lướt feed", AccentFb2)
+                ServiceChip("Like", TikTokRed)
+            }
+
+            OpenServiceRow(FacebookBlue)
         }
     }
 }

@@ -2,6 +2,7 @@ package com.atpro.accessibility
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.content.Intent
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Bundle
@@ -129,6 +130,38 @@ class TikTokAccessibilityService : AccessibilityService(), IFarmHost {
 
     override fun showFarmOverlay() { OverlayFarmMonitor.show(this) }
     override fun hideFarmOverlay() { OverlayFarmMonitor.hide() }
+
+    /**
+     * v1.2.3 — Mở app bất kỳ theo package name (vd Facebook).
+     * Dùng FLAGS_DEEP tương tự TikTokDeepLinks để clear back-stack cũ.
+     */
+    override fun launchApp(packageName: String): Boolean = try {
+        val intent = packageManager.getLaunchIntentForPackage(packageName)
+        if (intent != null) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            startActivity(intent)
+            true
+        } else {
+            Log.e(TAG, "launchApp($packageName): không có launch intent — app chưa cài?")
+            false
+        }
+    } catch (e: Exception) {
+        Log.e(TAG, "launchApp($packageName): ${e.message}")
+        false
+    }
+
+    /**
+     * v1.2.3 — Force-stop app bất kỳ. Cùng cơ chế killTikTok():
+     * HOME trước (đưa app vào background) → delay ngắn → killBackgroundProcesses().
+     */
+    override suspend fun killApp(packageName: String) {
+        runCatching { performGlobalAction(GLOBAL_ACTION_HOME) }
+        delay(600)
+        runCatching {
+            getSystemService(android.app.ActivityManager::class.java)
+                ?.killBackgroundProcesses(packageName)
+        }
+    }
 
     // ── Lifecycle ─────────────────────────────────────────────
 

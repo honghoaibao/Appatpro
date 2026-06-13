@@ -6,6 +6,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.atpro.data.LocalRepository
 import com.atpro.golike.*
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -26,6 +28,12 @@ class GolikeViewModel(
     private val _state = MutableStateFlow(GolikeUiState())
     val state: StateFlow<GolikeUiState> = _state.asStateFlow()
 
+    /**
+     * v1.2.3 — Job poll thông tin tài khoản Golike mỗi 15s (tên, số dư,
+     * chờ duyệt...) sau khi đã có Auth + T-token hợp lệ (đăng nhập xong).
+     */
+    private var pollingJob: Job? = null
+
     init { loadSavedSession() }
 
     // ── Session ───────────────────────────────────────────────────────────────
@@ -40,6 +48,7 @@ class GolikeViewModel(
                 it.copy(isLoggedIn = true, isLoading = true, savedUsername = saved)
             }
             refreshUserInfo()
+            startPolling()
         }
     }
 
@@ -65,6 +74,7 @@ class GolikeViewModel(
                     }
                     refreshStats()
                     loadTikTokAccounts()
+                    startPolling()
                 }
                 is GolikeResult.Error ->
                     _state.update { it.copy(isLoggingIn = false, loginError = result.message) }
@@ -74,6 +84,7 @@ class GolikeViewModel(
 
     fun logout() {
         viewModelScope.launch {
+            stopPolling()
             repo.clearToken()
             _state.value = GolikeUiState()
         }
@@ -93,6 +104,7 @@ class GolikeViewModel(
             _state.update { it.copy(isLoggedIn = true, isLoading = true, loginError = null) }
             // Refresh thông tin user (tên, coin, TikTok accounts) trong background
             refreshUserInfo()
+            startPolling()
         }
     }
 
@@ -133,6 +145,37 @@ class GolikeViewModel(
                 is GolikeResult.Error   -> { /* silent — stats not critical */ }
             }
         }
+    }
+
+    /**
+     * v1.2.3 — Sau khi Auth + T-token hợp lệ (đăng nhập xong / token đã lưu),
+     * poll lại getMe() (→ kéo theo refreshStats()) mỗi 15 giây để cập nhật
+     * tên tài khoản, số dư (coin), số dư đang chờ duyệt (hold/pending coin).
+     *
+     * GolikeApi tự đính kèm Authorization: Bearer + G-Auth + T (mã hoá session
+     * time x3) + G-Device-Id cho mọi request — không cần truyền lại ở đây.
+     *
+     * Nếu refreshUserInfo() gặp 401 → logout() được gọi → stopPolling().
+     */
+    private fun startPolling() {
+        stopPolling()
+        pollingJob = viewModelScope.launch {
+            while (true) {
+                delay(15_000L)
+                if (!_state.value.isLoggedIn) break
+                refreshUserInfo()
+            }
+        }
+    }
+
+    private fun stopPolling() {
+        pollingJob?.cancel()
+        pollingJob = null
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        stopPolling()
     }
 
     // ── TikTok accounts + jobs ────────────────────────────────────────────────

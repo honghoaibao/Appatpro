@@ -137,6 +137,9 @@ private fun StatsContent(state: StatsUiState) {
     ) {
         item { SummaryCard(state.totals) }
 
+        // v1.2.3: Card tỷ lệ % tương tác — like/follow/comment trên mỗi video xem.
+        item { EngagementRateCard(state.totals) }
+
         if (state.dailyStats.isNotEmpty()) {
             item {
                 Text(
@@ -202,6 +205,74 @@ private fun SummaryMetric(value: String, label: String, icon: ImageVector, color
 }
 
 // ─────────────────────────────────────────────────────────────
+//  Engagement rate card [v1.2.3] — tỷ lệ % like/follow/comment trên mỗi video
+// ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun EngagementRateCard(totals: TotalsRow) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(CardDark)
+            .border(1.dp, BorderDark, RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.Percent, null, tint = TextSec, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "Tỷ lệ tương tác / video",
+                color = TextSec, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                "TB ${formatRate(totals.avgVideosPerSession)} video/phiên",
+                color = TextMuted, fontSize = 11.sp,
+            )
+        }
+
+        RateBar("Thích",      totals.likeRate,    Pink,  Icons.Rounded.Favorite)
+        RateBar("Theo dõi",   totals.followRate,  Green, Icons.Rounded.PersonAdd)
+        RateBar("Bình luận",  totals.commentRate, Blue,  Icons.Rounded.ChatBubble)
+    }
+}
+
+/** Thanh tiến trình hiển thị tỷ lệ % (0–100), kẹp ở 100% nếu vượt (vd nhiều like/video). */
+@Composable
+private fun RateBar(label: String, percent: Float, color: Color, icon: ImageVector) {
+    val clamped = (percent / 100f).coerceIn(0f, 1f)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = color.copy(alpha = 0.8f), modifier = Modifier.size(13.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(label, color = TextSec, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            Text(
+                "${formatRate(percent)}%",
+                color = color, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+            )
+        }
+        LinearProgressIndicator(
+            progress   = { clamped },
+            modifier   = Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .clip(RoundedCornerShape(3.dp)),
+            color      = color,
+            trackColor = color.copy(alpha = 0.12f),
+        )
+    }
+}
+
+/** Format 1 chữ số sau dấu phẩy, bỏ ".0" thừa (vd 12.0 → "12", 12.5 → "12.5"). */
+private fun formatRate(value: Float): String {
+    val rounded = Math.round(value * 10f) / 10f
+    return if (rounded == rounded.toLong().toFloat()) rounded.toLong().toString()
+    else rounded.toString()
+}
+
+// ─────────────────────────────────────────────────────────────
 //  Day group
 // ─────────────────────────────────────────────────────────────
 
@@ -219,13 +290,24 @@ private fun DayGroup(date: String, rows: List<DailyStatRow>) {
         val dayTotalVideos   = rows.sumOf { it.videosWatched }
         val dayTotalLikes    = rows.sumOf { it.likes }
         val dayTotalFollows  = rows.sumOf { it.follows }
+        val dayLikeRate      = if (dayTotalVideos > 0) dayTotalLikes * 100f / dayTotalVideos else 0f
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 date,
                 color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
             )
+            Spacer(Modifier.width(8.dp))
+            // v1.2.3: tỷ lệ % like trong ngày — chip nhỏ cạnh ngày.
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Pink.copy(alpha = 0.12f))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            ) {
+                Text("${formatRate(dayLikeRate)}% thích", color = Pink, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(Modifier.weight(1f))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment     = Alignment.CenterVertically,

@@ -35,6 +35,10 @@ object AppConstants {
     val tiktokPackages: List<String> get() = listOf(
         tiktokPackage, tiktokPackageAlt, "com.ss.android.ugc.aweme"
     )
+
+    /** v1.2.3 — Package Facebook chính thức (Facebook app). Dùng cho demo nuôi acc Facebook. */
+    const val FACEBOOK_PKG = "com.facebook.katana"
+
     const val WS_PORT    = 8765
     const val DB_VERSION = 1
 }

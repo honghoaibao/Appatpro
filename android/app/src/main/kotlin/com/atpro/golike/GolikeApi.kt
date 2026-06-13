@@ -33,40 +33,100 @@ object GolikeApi {
 
     // ── User ─────────────────────────────────────────────────────────────────
 
-    suspend fun getMe(token: String): GolikeResult<MeResponse> =
-        get("api/users/me", token)
+    suspend fun getMe(token: String, deviceId: String? = null): GolikeResult<MeResponse> =
+        get("api/users/me", token, deviceId)
 
     // ── Statistics ────────────────────────────────────────────────────────────
 
-    suspend fun getStatistics(token: String): GolikeResult<StatisticsResponse> =
-        get("api/statistics/report", token)
+    suspend fun getStatistics(token: String, deviceId: String? = null): GolikeResult<StatisticsResponse> =
+        get("api/statistics/report", token, deviceId)
 
     // ── TikTok ────────────────────────────────────────────────────────────────
 
-    suspend fun getTikTokAccounts(token: String): GolikeResult<TikTokAccountsResponse> =
-        get("api/tiktok-account", token)
+    suspend fun getTikTokAccounts(token: String, deviceId: String? = null): GolikeResult<TikTokAccountsResponse> =
+        get("api/tiktok-account", token, deviceId)
 
-    suspend fun getTikTokJobs(token: String, accountId: Int): GolikeResult<TikTokJobsResponse> =
+    suspend fun getTikTokJobs(token: String, accountId: Int, deviceId: String? = null): GolikeResult<TikTokJobsResponse> =
         get(
             "api/advertising/publishers/tiktok/jobs?account_id=$accountId&data=null",
             token,
+            deviceId,
         )
 
-    suspend fun completeTikTokJob(token: String, request: CompleteJobRequest): GolikeResult<CompleteJobResponse> =
+    /**
+     * v1.2.3 [FIX]: Endpoint đúng theo golike_api_docs.md §4.2 là
+     * `api/jobs/tiktok/job-detail` (KHÔNG có `/advertising/publishers/`).
+     * Trả về detail + lock (account_id, ads_id, object_id, type, lock_time).
+     * `adsId` = `job_id` lấy từ getTikTokJobs().
+     */
+    suspend fun getTikTokJobDetail(token: String, adsId: Int, deviceId: String? = null): GolikeResult<JobDetailResponse> =
+        get("api/jobs/tiktok/job-detail?ads_id=$adsId", token, deviceId)
+
+    /**
+     * v1.2.3 [FIX]: Endpoint đúng theo golike_api_docs.md §4.3 +
+     * Image 3 (DevTools capture) là
+     * `api/advertising/publishers/tiktok/complete-jobs` —
+     * KHÔNG có tiền tố `_private/` (path cũ gây HTTP 404/lỗi không mong đợi).
+     */
+    suspend fun completeTikTokJob(token: String, request: CompleteJobRequest, deviceId: String? = null): GolikeResult<CompleteJobResponse> =
         post(
-            "api/advertising/publishers/tiktok/_private/complete-jobs",
+            "api/advertising/publishers/tiktok/complete-jobs",
             jsonParser.encodeToString(request),
             token,
+            deviceId,
+        )
+
+    /**
+     * v1.2.3 — golike_api_docs.md §4.4: bỏ qua (skip) 1 job — dùng khi job
+     * không thực hiện được (vd: acc bị block, hết quota...) thay vì gọi lại
+     * complete-jobs với success=false (endpoint riêng, không phải tham số).
+     */
+    suspend fun skipTikTokJob(token: String, request: SkipJobRequest, deviceId: String? = null): GolikeResult<SkipJobResponse> =
+        post(
+            "api/advertising/publishers/tiktok/skip-jobs",
+            jsonParser.encodeToString(request),
+            token,
+            deviceId,
         )
 
     // ── HTTP helpers ──────────────────────────────────────────────────────────
 
     private fun encode(s: String): String = java.net.URLEncoder.encode(s, "UTF-8")
 
-    private suspend inline fun <reified T> get(endpoint: String, token: String?): GolikeResult<T> =
+    /**
+     * v1.2.3 — T token: thời gian phiên hiện tại (Unix epoch giây, dạng chuỗi)
+     * được mã hoá Base64 LIÊN TIẾP 3 lần.
+     *
+     * Xác minh bằng cách giải mã ngược mẫu T token người dùng cung cấp:
+     *   base64(base64(base64("1781173114"))) ⇒ "VFZSak5FMVVSVE5OZWtWNFRrRTlQUT09"
+     *   (trùng ~13 ký tự đầu với mẫu thực tế "VFZSak5FMVVSVT..." / "VFZSak5FMVVSVES...")
+     * → 13 ký tự đầu của T LUÔN là "VFZSak5FMVVSVE" vì các timestamp gần nhau
+     *   (cùng đơn vị "178...") cho base64 prefix giống nhau.
+     */
+    private fun generateTToken(): String {
+        val sessionTimeSecs = (System.currentTimeMillis() / 1000L).toString()
+        var encoded = sessionTimeSecs
+        repeat(3) {
+            encoded = android.util.Base64.encodeToString(
+                encoded.toByteArray(Charsets.UTF_8),
+                android.util.Base64.NO_WRAP,
+            )
+        }
+        return encoded
+    }
+
+    /**
+     * v1.2.3 — Device id fallback nếu GolikeRepository không truyền vào
+     * (vd gọi trực tiếp GolikeApi không qua repository). Sinh 1 lần / process
+     * lifetime — KHÔNG persist (repository nên truyền deviceId đã lưu để
+     * G-Device-Id ổn định giữa các lần mở app).
+     */
+    private val fallbackDeviceId: String by lazy { java.util.UUID.randomUUID().toString() }
+
+    private suspend inline fun <reified T> get(endpoint: String, token: String?, deviceId: String? = null): GolikeResult<T> =
         withContext(Dispatchers.IO) {
             try {
-                val conn = openConnection(endpoint, token).apply {
+                val conn = openConnection(endpoint, token, deviceId).apply {
                     requestMethod = "GET"
                 }
                 readResponse<T>(conn)
@@ -80,9 +140,10 @@ object GolikeApi {
         endpoint: String,
         body:     String,
         token:    String?,
+        deviceId: String? = null,
     ): GolikeResult<T> = withContext(Dispatchers.IO) {
         try {
-            val conn = openConnection(endpoint, token).apply {
+            val conn = openConnection(endpoint, token, deviceId).apply {
                 requestMethod = "POST"
                 doOutput      = true
             }
@@ -94,11 +155,19 @@ object GolikeApi {
         }
     }
 
-    private fun openConnection(endpoint: String, token: String?): HttpURLConnection =
+    private fun openConnection(endpoint: String, token: String?, deviceId: String?): HttpURLConnection =
         (URL("$BASE_URL$endpoint").openConnection() as HttpURLConnection).apply {
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("Accept",       "application/json")
-            if (token != null) setRequestProperty("Authorization", "Bearer $token")
+            if (token != null) {
+                setRequestProperty("Authorization", "Bearer $token")
+                // v1.2.3 — golike_api_docs.md §2.2: header phụ song song Authorization.
+                setRequestProperty("G-Auth", token)
+            }
+            // v1.2.3 — golike_api_docs.md §2.2: bắt buộc cho mọi request gateway.golike.net,
+            // nếu không có server có thể trả 400 dù Authorization hợp lệ.
+            setRequestProperty("T", generateTToken())
+            setRequestProperty("G-Device-Id", deviceId ?: fallbackDeviceId)
             connectTimeout = 15_000
             readTimeout    = 20_000
         }

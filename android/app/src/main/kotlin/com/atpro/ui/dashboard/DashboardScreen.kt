@@ -724,31 +724,38 @@ private fun IdleView(state: DashboardUiState, vm: DashboardViewModel, golikeStat
 
             Spacer(Modifier.height(24.dp))
 
-            // ── Farm mode toggle ──
-            FarmModeToggle(
-                selected  = state.farmMode,
-                onSelect  = vm::setFarmMode,
-            )
-
-            // ── Account list input — SELECTED_LIST mode only ──
+            // ── Farm mode toggle — ẩn ở chế độ Demo nuôi Facebook [v1.2.3] ──
             AnimatedVisibility(
-                visible = state.farmMode == FarmMode.SELECTED_LIST,
-                enter   = fadeIn(tween(250)) + expandVertically(tween(300, easing = EaseOut)),
-                exit    = fadeOut(tween(200)) + shrinkVertically(tween(250, easing = EaseIn)),
+                visible = state.serviceMode != com.atpro.automation.ServiceMode.FACEBOOK_NURTURE,
             ) {
                 Column {
-                    Spacer(Modifier.height(12.dp))
-                    AccountListInput(
-                        value     = state.customAccounts,
-                        onChanged = vm::setCustomAccounts,
+                    FarmModeToggle(
+                        selected  = state.farmMode,
+                        onSelect  = vm::setFarmMode,
                     )
+
+                    // ── Account list input — SELECTED_LIST mode only ──
+                    AnimatedVisibility(
+                        visible = state.farmMode == FarmMode.SELECTED_LIST,
+                        enter   = fadeIn(tween(250)) + expandVertically(tween(300, easing = EaseOut)),
+                        exit    = fadeOut(tween(200)) + shrinkVertically(tween(250, easing = EaseIn)),
+                    ) {
+                        Column {
+                            Spacer(Modifier.height(12.dp))
+                            AccountListInput(
+                                value     = state.customAccounts,
+                                onChanged = vm::setCustomAccounts,
+                            )
+                        }
+                    }
                 }
             }
 
             Spacer(Modifier.height(24.dp))
 
-            // ── Start button — phân nhánh Farm / Task ──
+            // ── Start button — phân nhánh Farm / Task / Facebook nurture ──
             // v1.2.1: Nút bắt đầu thay đổi nhãn + action theo serviceMode
+            // v1.2.3: thêm FACEBOOK_NURTURE — demo nuôi acc Facebook
             when (state.serviceMode) {
                 com.atpro.automation.ServiceMode.FARM -> StartButton(
                     enabled = state.canStart,
@@ -762,17 +769,26 @@ private fun IdleView(state: DashboardUiState, vm: DashboardViewModel, golikeStat
                     labelText  = "Bắt đầu làm nhiệm vụ",
                     accentColor = androidx.compose.ui.graphics.Color(0xFF7C3AED),
                 )
+                com.atpro.automation.ServiceMode.FACEBOOK_NURTURE -> StartButton(
+                    enabled    = state.canStart,
+                    hint       = state.startHint,
+                    onClick    = vm::startFacebookNurture,
+                    labelText  = "Bắt đầu nuôi Facebook",
+                    accentColor = androidx.compose.ui.graphics.Color(0xFF1877F2),
+                )
             }
 
             Spacer(Modifier.height(20.dp))
 
             // ── [v1.2.2] Golike card — phân nhánh theo serviceMode ──
-            if (state.serviceMode == com.atpro.automation.ServiceMode.TASK) {
-                GolikeTaskInfoCard(golikeState)
-            } else {
-                // FARM mode: chỉ hiện card khi đã đăng nhập (bỏ prompt đăng nhập)
-                if (golikeState.isLoggedIn) {
-                    GolikeSummaryCard(state = golikeState)
+            when (state.serviceMode) {
+                com.atpro.automation.ServiceMode.TASK -> GolikeTaskInfoCard(golikeState)
+                com.atpro.automation.ServiceMode.FACEBOOK_NURTURE -> { /* không hiện card Golike */ }
+                else -> {
+                    // FARM mode: chỉ hiện card khi đã đăng nhập (bỏ prompt đăng nhập)
+                    if (golikeState.isLoggedIn) {
+                        GolikeSummaryCard(state = golikeState)
+                    }
                 }
             }
 

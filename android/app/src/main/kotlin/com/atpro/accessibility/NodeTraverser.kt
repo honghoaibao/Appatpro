@@ -350,19 +350,28 @@ object NodeTraverser {
         root ?: return false
 
         // ── Tier 0a: Live-in-feed card ────────────────────────────────────
-        // Thẻ Live preview trong feed (KHÔNG phải đang trong live room).
-        // "Nhấn để xem LIVE" / "Tap to watch LIVE" chỉ xuất hiện ở feed card.
-        // Phải kiểm tra TRƯỚC Tier 0b vì feed card có thể có view ID chứa "live"
-        // → nếu để Tier 0b chạy trước, thẻ Live trong feed bị loại nhầm.
+        // Thẻ Live preview TOÀN MÀN HÌNH trong feed.
+        // Phải kiểm tra TRƯỚC Tier 0b vì feed card có thể có view ID chứa "live".
+        // CHỈ dùng cụm từ xuất hiện trên nút lớn của thẻ full-screen live card.
+        // KHÔNG dùng "tap to watch" vì cũng xuất hiện trên LIVE badge nhỏ của video thường.
         val allNodesEarly = traverseAll(root)
         val allTextEarly  = allNodesEarly.mapNotNull {
             (it.text?.toString() ?: it.contentDescription?.toString())?.lowercase()
         }
         val LIVE_CARD_TEXTS = listOf(
-            "nhấn để xem live", "tap to watch live", "tap to join live",
-            "tap to watch", "nhấn để tham gia",
+            "nhấn để xem live",    // VI — chỉ xuất hiện trên thẻ full-screen
+            "tap to watch live",   // EN — full phrase, không bị nhầm với badge
+            "tap to join live",    // EN — alternative phrasing
         )
-        if (LIVE_CARD_TEXTS.any { kw -> allTextEarly.any { it.contains(kw) } }) return true
+        // Thêm guard: thẻ live toàn màn hình KHÔNG có nút like/share/comment
+        val hasInteractionButtons = allNodesEarly.any { node ->
+            val id = node.viewIdResourceName?.lowercase() ?: ""
+            id.contains("like_btn") || id.contains("comment_btn") ||
+            id.contains("share_btn") || id.contains("digg_btn") ||
+            id.contains("like_count") || id.contains("comment_count")
+        }
+        val hasLiveCardText = LIVE_CARD_TEXTS.any { kw -> allTextEarly.any { it.contains(kw) } }
+        if (hasLiveCardText && !hasInteractionButtons) return true
 
         // ── Tier 0b: Live-room exclusion ──────────────────────────────────
         // Kiểm tra nhanh resource-ID đặc trưng của live room.
@@ -426,25 +435,37 @@ object NodeTraverser {
     }
 
     /**
-     * Phát hiện thẻ Live trong feed (preview trước khi vào live room).
+     * Phát hiện thẻ Live TOÀN MÀN HÌNH trong feed (preview trước khi vào live room).
      *
-     * Khác với detectLive() (đang TRONG live room), hàm này nhận dạng
-     * thẻ video Live đang hiển thị full-screen trong feed scroll:
-     *   - Text "Nhấn để xem LIVE" / "Tap to watch LIVE" chỉ xuất hiện ở đây
+     * Khác với LIVE badge nhỏ trên video thường:
+     *   - Thẻ full-screen: "Nhấn để xem LIVE" lớn + KHÔNG có nút like/share/comment
+     *   - LIVE badge: text nhỏ bên cạnh video thường CÓ nút like/share/comment
      *
-     * Dùng trong main farming loop để swipe qua thay vì treat như "lạc".
+     * Guard kép = tránh false positive trên video thường có LIVE badge.
      */
     fun isLiveCardInFeed(root: AccessibilityNodeInfo?): Boolean {
         root ?: return false
-        val all = traverseAll(root)
+        val all   = traverseAll(root)
         val texts = all.mapNotNull {
             (it.text?.toString() ?: it.contentDescription?.toString())?.lowercase()
         }
         val LIVE_CARD_TEXTS = listOf(
-            "nhấn để xem live", "tap to watch live", "tap to join live",
-            "tap to watch", "nhấn để tham gia",
+            "nhấn để xem live",
+            "tap to watch live",
+            "tap to join live",
         )
-        return LIVE_CARD_TEXTS.any { kw -> texts.any { it.contains(kw) } }
+        val hasLiveText = LIVE_CARD_TEXTS.any { kw -> texts.any { it.contains(kw) } }
+        if (!hasLiveText) return false
+
+        // Guard: thẻ live toàn màn hình KHÔNG có nút like/share/comment
+        // (các nút này chỉ xuất hiện trên video thường)
+        val hasInteractionButtons = all.any { node ->
+            val id = node.viewIdResourceName?.lowercase() ?: ""
+            id.contains("like_btn") || id.contains("comment_btn") ||
+            id.contains("share_btn") || id.contains("digg_btn") ||
+            id.contains("like_count") || id.contains("comment_count")
+        }
+        return !hasInteractionButtons
     }
 
     /**

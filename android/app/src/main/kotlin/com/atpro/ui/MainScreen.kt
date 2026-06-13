@@ -126,6 +126,11 @@ fun MainScreen(
                             dashboardVm.setServiceMode(ServiceMode.TASK)
                             selectedTab = Tab.DASHBOARD
                         },
+                        // v1.2.3: Demo nuôi acc Facebook
+                        onOpenFacebookService = {
+                            dashboardVm.setServiceMode(ServiceMode.FACEBOOK_NURTURE)
+                            selectedTab = Tab.DASHBOARD
+                        },
                         onOpenGolikeLogin  = onOpenGolikeLogin,
                         onGolikeLogout     = golikeVm::logout,
                         isGolikeLoggedIn   = golikeState.isLoggedIn,

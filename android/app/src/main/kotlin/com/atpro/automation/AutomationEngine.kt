@@ -14,6 +14,7 @@ import com.atpro.golike.TikTokJobDto
 import com.atpro.golike.GolikeResult
 import com.atpro.network.LanWebSocketServer
 import com.atpro.notification.AtProNotificationManager
+import com.atpro.security.AppConstants
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,7 +29,8 @@ import kotlin.random.Random
 enum class FarmMode { ALL_LOCAL, SELECTED_LIST }
 
 /** v1.2.1 — Chế độ dịch vụ: nuôi tài khoản hoặc làm nhiệm vụ Golike. */
-enum class ServiceMode { FARM, TASK }
+/** v1.2.3: thêm FACEBOOK_NURTURE — demo nuôi acc Facebook (mở app → lướt feed → like → đóng). */
+enum class ServiceMode { FARM, TASK, FACEBOOK_NURTURE }
 
 /** v1.2.1 — Kết quả thao tác follow từ hồ sơ. */
 internal enum class FollowResult {
@@ -125,6 +127,21 @@ private object Human {
     }
 
     /**
+     * v1.2.3 [FIX] — Khoảng nghỉ giữa 2 tap của double-tap LIKE.
+     *
+     * Trước v1.2.3, doLike()/doLikeTask() dùng microPause() cho khoảng nghỉ
+     * này — đôi khi rơi vào nhánh "đọc caption" (800–2500ms) hoặc gần
+     * ngưỡng 300ms, vượt quá double-tap timeout của Android/TikTok
+     * (~300ms). Khi đó 2 tap bị nhận diện là 2 SINGLE-TAP riêng lẻ:
+     * tap 1 → pause video, tap 2 → resume → video bị "dừng" (giật khung)
+     * và KHÔNG có animation tim/like.
+     *
+     * doubleTapGap() luôn nằm trong 60–150ms — đủ tự nhiên (không phải
+     * 0ms tuyệt đối) nhưng chắc chắn dưới ngưỡng double-tap.
+     */
+    suspend fun doubleTapGap() = kotlinx.coroutines.delay(Random.nextLong(60, 150))
+
+    /**
      * Thỉnh thoảng dừng lại lâu — mô phỏng người dùng bị phân tâm.
      * Mặc định 6% cơ hội, dừng 3–9s.
      */
@@ -191,6 +208,47 @@ private suspend fun <T> retry(
         }
     }
     return null
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// safeStep — v1.2.3
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * v1.2.3 — Bọc 1 "bước" (action) trong farm loop với timeout + try/catch.
+ *
+ * Lý do: trước v1.2.3, một exception (vd: AccessibilityNodeInfo đã stale/
+ * "view is detached from window") ném ra từ giữa 1 action (LIKE, FOLLOW,
+ * COMMENT, diversion, swipe...) sẽ:
+ *   - propagate lên tới startFarm()'s catch(Exception) → log "Lỗi không
+ *     mong đợi" → finally → stopInternal() → TOÀN BỘ farm dừng, dù mới
+ *     chỉ lỗi ở 1 hành động của 1 video.
+ *   - hoặc nếu 1 gesture/IPC bị treo (không bao giờ resume callback),
+ *     coroutine bị "đứng" vô hạn ở bước đó — log cuối cùng người dùng thấy
+ *     là hành động đang treo (vd "LIKE: Thích") và farm không tiến tiếp.
+ *
+ * safeStep() đảm bảo MỌI bước:
+ *   - Có timeout [timeoutMs] (mặc định 45s) — quá hạn → log cảnh báo, trả null.
+ *   - Exception (trừ CancellationException) được bắt + log, KHÔNG propagate.
+ *
+ * → Farm luôn tiến tới bước tiếp theo (vd: swipeNext() sau LIKE) bất kể
+ *   bước hiện tại thành công, lỗi, hay timeout.
+ */
+private suspend fun <T> safeStep(
+    stepName:  String,
+    timeoutMs: Long = 45_000L,
+    block:     suspend () -> T,
+): T? = try {
+    val result = withTimeoutOrNull(timeoutMs) { block() }
+    if (result == null) {
+        Log.w(AutomationEngine.TAG, "safeStep[$stepName]: timeout ${timeoutMs}ms — bỏ qua, tiếp tục")
+    }
+    result
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Exception) {
+    Log.e(AutomationEngine.TAG, "safeStep[$stepName]: ${e.javaClass.simpleName} — ${e.message}")
+    null
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -271,6 +329,36 @@ class AutomationEngine(
     @Volatile private var watchdogStuckFlag  = false
 
     // ─────────────────────────────────────────────────────────────────────────
+    // [v1.2.3] Pause-aware time tracking
+    //
+    // Trước v1.2.3: countdown (sessionSecsLeft/totalSecsLeft) được tính từ
+    // deadline tĩnh (now + duration) → khi engine bị "kẹt" ở một bước nào đó
+    // (vd: hành động sau LIKE bị treo), thời gian thực vẫn trôi nhưng UI vẫn
+    // hiển thị số đếm cũ vì không có code nào update — người dùng thấy
+    // countdown "đứng yên". Ngược lại, khi pause() bị gọi, deadline KHÔNG bị
+    // dịch lại → thời gian pause vẫn bị trừ vào countdown (sai theo hướng khác).
+    //
+    // v1.2.3: Track tổng thời gian đã pause (pauseAccumMs) + thời điểm pause
+    // hiện tại (pauseStartedAt). currentPauseMs() trả tổng pause tới hiện tại.
+    // Mọi countdown được tính = (sessionTotalMs - (wallElapsed - pauseElapsed)) —
+    // luôn giảm đều theo thời gian thực, CHỈ đứng yên khi đang pause.
+    // ─────────────────────────────────────────────────────────────────────────
+    @Volatile private var pauseAccumMs   = 0L
+    @Volatile private var pauseStartedAt = 0L  // 0 = hiện không pause
+
+    /** Tổng thời gian đã pause tính đến hiện tại (kể cả pause đang diễn ra). */
+    private fun currentPauseMs(): Long {
+        val ongoing = if (pauseStartedAt > 0L) System.currentTimeMillis() - pauseStartedAt else 0L
+        return pauseAccumMs + ongoing
+    }
+
+    /** Reset bộ đếm pause — gọi khi bắt đầu một phiên farm/task/nurture mới. */
+    private fun resetPauseTracking() {
+        pauseAccumMs   = 0L
+        pauseStartedAt = 0L
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Public API
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -279,6 +367,7 @@ class AutomationEngine(
         isFarming = true
         isPaused  = false
         isResting = false
+        resetPauseTracking()
 
         farmJob = host.scope.launch {
             config = repo.loadFarmConfig()
@@ -322,6 +411,7 @@ class AutomationEngine(
         isFarming = true
         isPaused  = false
         isResting = false
+        resetPauseTracking()
 
         farmJob = host.scope.launch {
             config = repo.loadFarmConfig()
@@ -343,16 +433,70 @@ class AutomationEngine(
         }
     }
 
+    /**
+     * v1.2.3 — Demo nuôi acc Facebook (gói: com.facebook.katana).
+     *
+     * Flow đơn giản:
+     *   1. Mở Facebook
+     *   2. Lướt feed (swipe lên) trong `config.facebookNurtureDurationSecs` giây
+     *   3. Ngẫu nhiên thích bài đăng theo `config.facebookLikeRate`
+     *   4. Đóng app → kết thúc phiên nuôi
+     *
+     * Không dùng FarmPhase state machine (chỉ 1 phase đơn giản) — chạy trực
+     * tiếp trong farmJob coroutine, tái sử dụng isFarming/isPaused/pause-aware
+     * timing + safeStep() như farm TikTok.
+     */
+    fun startFacebookNurture() {
+        if (isFarming) return
+        isFarming = true
+        isPaused  = false
+        isResting = false
+        resetPauseTracking()
+
+        farmJob = host.scope.launch {
+            config = repo.loadFarmConfig()
+            host.showFarmOverlay()
+
+            try {
+                runFacebookNurtureSession()
+            } catch (e: CancellationException) {
+                log("Nuôi Facebook bị hủy bởi người dùng")
+                throw e
+            } catch (e: Exception) {
+                log("ERR: Nuôi Facebook lỗi không mong đợi: ${e.javaClass.simpleName} — ${e.message}")
+            } finally {
+                host.hideFarmOverlay()
+                setStatus("")
+                stopInternal("facebook_completed")
+            }
+        }
+    }
+
+    /**
+     * v1.2.3 — pause/resume: track [pauseAccumMs] để countdown luôn chính xác.
+     * Guard `if (!isPaused)` / `if (isPaused)` tránh double-counting nếu
+     * pause()/resume() bị gọi nhiều lần liên tiếp (vd: từ UI + Accessibility
+     * onInterrupt() cùng lúc).
+     */
     fun pause() {
-        isPaused = true
-        OverlayFarmMonitor.syncPausedState(true)
-        LanWebSocketServer.broadcast("pauseStatus", mapOf("paused" to true))
+        if (!isPaused) {
+            isPaused       = true
+            pauseStartedAt = System.currentTimeMillis()
+            OverlayFarmMonitor.syncPausedState(true)
+            LanWebSocketServer.broadcast("pauseStatus", mapOf("paused" to true))
+        }
     }
 
     fun resume() {
-        isPaused = false
-        OverlayFarmMonitor.syncPausedState(false)
-        LanWebSocketServer.broadcast("pauseStatus", mapOf("paused" to false))
+        if (isPaused) {
+            isPaused = false
+            if (pauseStartedAt > 0L) {
+                pauseAccumMs  += System.currentTimeMillis() - pauseStartedAt
+                pauseStartedAt = 0L
+            }
+            OverlayFarmMonitor.syncPausedState(false)
+            LanWebSocketServer.broadcast("pauseStatus", mapOf("paused" to false))
+        }
     }
 
     fun stop() {
@@ -494,9 +638,29 @@ class AutomationEngine(
      * `v2.0` Tích lũy stats toàn session → notifyFarmCompleted() báo chính xác.
      */
     private suspend fun phaseFarmLoop(farmList: List<String>): FarmPhase {
-        val totalSecs = farmList.size.toLong() * config.minutesPerAccount * 60L
+        // v1.2.3: Tổng thời gian ước tính của TOÀN BỘ phiên farm, bao gồm cả
+        // thời gian nghỉ giữa các acc (yêu cầu: "tính thời gian tổng thì
+        // cộng thêm thời gian nghỉ"). Trước đây totalSecs chỉ tính
+        // farmList.size * minutesPerAccount, không cộng restDurationMinutes
+        // → totalSecsLeft hiển thị sai (chạy hết acc cuối nhưng vẫn còn lệch
+        // so với thực tế nếu có nghỉ giữa acc).
+        val restSecsEach = if (config.enableRestBetweenAccounts) config.restDurationMinutes * 60L else 0L
+        val restCount    = (farmList.size - 1).coerceAtLeast(0)
+        val totalSecs    = farmList.size.toLong() * config.minutesPerAccount * 60L + restCount * restSecsEach
+
+        // v1.2.3: Mốc thời gian bắt đầu TOÀN phiên farm (wall-clock) + pause đã
+        // tích lũy tại mốc đó. totalSecsLeftFn() = totalSecs trừ đi thời gian
+        // thực đã trôi (loại trừ thời gian pause) — luôn giảm đều theo thời
+        // gian thực kể cả trong lúc nghỉ giữa acc, CHỈ đứng yên khi pause.
+        val farmStartWall    = System.currentTimeMillis()
+        val farmStartPauseMs = currentPauseMs()
+        val totalSecsLeftFn: () -> Long = {
+            val elapsedMs = (System.currentTimeMillis() - farmStartWall) -
+                (currentPauseMs() - farmStartPauseMs)
+            maxOf(0L, totalSecs - elapsedMs / 1_000L)
+        }
+
         val farmedSet = mutableSetOf<String>()
-        var elapsed   = 0L
 
         var sessionLikes    = 0
         var sessionFollows  = 0
@@ -527,20 +691,28 @@ class AutomationEngine(
             farmedSet.add(account.lowercase())
             resetWatchdog()
 
-            val secsLeft = maxOf(0L, totalSecs - elapsed)
-            val result   = farmOneAccount(account, idx, farmList.size, secsLeft)
+            // v1.2.3 [FIX] Một exception trong farmOneAccount() (lỗi node stale,
+            // IPC fail...) không còn làm sập toàn bộ farm — log lỗi, tính acc
+            // này là "completed" rỗng, và TIẾP TỤC sang acc kế / nghỉ giữa acc.
+            val result = try {
+                farmOneAccount(account, idx, farmList.size, totalSecsLeftFn)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log("ERR: farmOneAccount(@$account) lỗi: ${e.javaClass.simpleName} — ${e.message} → bỏ qua, sang acc tiếp")
+                AccountResult(account, reason = "error")
+            }
 
             sessionLikes   += result.likes
             sessionFollows += result.follows
             sessionVideos  += result.videos
-            elapsed        += config.minutesPerAccount * 60L
 
             AtProNotificationManager.notifySessionDone(
                 account, result.likes, result.follows, result.videos)
 
             // Nghỉ giữa acc (không nghỉ sau acc cuối)
             if (config.enableRestBetweenAccounts && idx < farmList.size - 1) {
-                val restSecs = config.restDurationMinutes * 60L
+                val restSecs = restSecsEach
                 log("REST: Nghỉ ${config.restDurationMinutes}m trước acc tiếp...")
 
                 // [v1.1.8] Báo watchdog: đang nghỉ — không phải stuck, không cần recovery.
@@ -783,10 +955,10 @@ class AutomationEngine(
      *   9. Emit LiveFarmStats
      */
     private suspend fun farmOneAccount(
-        account:       String,
-        idx:           Int,
-        total:         Int,
-        totalSecsLeft: Long,
+        account:         String,
+        idx:             Int,
+        total:           Int,
+        totalSecsLeftFn: () -> Long,
     ): AccountResult {
         val sessionId = repo.startSession(account)
 
@@ -804,7 +976,17 @@ class AutomationEngine(
         }
         setStatus("")
 
-        val deadline = System.currentTimeMillis() + config.minutesPerAccount * 60_000L
+        // v1.2.3: sessionSecsLeftNow() pause-aware — xem mô tả ở khu vực
+        // "Pause-aware time tracking" phía trên. Countdown của acc này luôn
+        // giảm đều theo thời gian thực, chỉ đứng yên khi isPaused = true.
+        val sessionTotalMs      = config.minutesPerAccount * 60_000L
+        val accountStartWall    = System.currentTimeMillis()
+        val accountStartPauseMs = currentPauseMs()
+        fun sessionSecsLeftNow(): Long {
+            val elapsedMs = (System.currentTimeMillis() - accountStartWall) -
+                (currentPauseMs() - accountStartPauseMs)
+            return maxOf(0L, (sessionTotalMs - elapsedMs) / 1_000L)
+        }
 
         var videos   = 0; var likes = 0; var follows = 0; var comments = 0
         var lostStreak         = 0  // Số lần isLostWithRetry() liên tiếp
@@ -833,7 +1015,7 @@ class AutomationEngine(
             accountTotal    = total,
             accountId       = account,
             sessionSecsLeft = initSessionSecs,
-            totalSecsLeft   = totalSecsLeft,
+            totalSecsLeft   = totalSecsLeftFn(),
             action          = "Khởi động...",
         )
         LanWebSocketServer.broadcast("currentAccount", mapOf(
@@ -842,9 +1024,9 @@ class AutomationEngine(
             "total"   to total,
         ))
 
-        while (System.currentTimeMillis() < deadline && isFarming) {
+        while (sessionSecsLeftNow() > 0L && isFarming) {
             awaitResumed()
-            val secsLeft = maxOf(0L, (deadline - System.currentTimeMillis()) / 1_000L)
+            val secsLeft = sessionSecsLeftNow()
 
             // [v1.1.8] getRootNode() là IPC call qua accessibility service.
             // Cache 1 lần mỗi iteration để tái sử dụng ở steps 1–6.
@@ -895,22 +1077,16 @@ class AutomationEngine(
                 continue
             }
 
-            // ── [2d] Live card trong feed ─────────────────────────────────
-            // Thẻ Live preview xuất hiện trong feed scroll (chưa vào live room).
-            // isOnFeedTab() đã nhận dạng đây là on-feed (Tier 0a), nhưng cần
-            // swipe qua để tiếp tục farm — thẻ Live không có nội dung để xem.
-            // Phải xử lý TRƯỚC isLostWithRetry() vì UI thiếu like/comment/share
-            // → Chiến lược 3 của isOnFeedTab() có thể miss → false "lạc".
+            // ── [2d] Live card toàn màn hình trong feed ───────────────────
+            // Thẻ Live preview full-screen (chưa vào live room) — không có
+            // like/share buttons → engine không thể farm, cần swipe qua.
+            // Phải xử lý TRƯỚC isLostWithRetry() để không bị tính là "lạc".
             if (NodeTraverser.isLiveCardInFeed(root)) {
-                log("LIVE-FEED: Thẻ Live trong feed → swipe qua")
-                consecutiveSkipCount++
-                if (consecutiveSkipCount >= MAX_CONSECUTIVE_SKIPS) {
-                    log("WARN: Skip liên tiếp ${consecutiveSkipCount}× (live-feed) → forceSwipeNext")
-                    forceSwipeNext(); delay(2_000); consecutiveSkipCount = 0
-                } else {
-                    swipeNext()
-                }
+                log("LIVE-FEED: Thẻ Live full-screen trong feed → swipe qua")
+                swipeNext()
+                delay(1_200)
                 lostStreak = 0
+                resetWatchdog()   // tránh watchdog fire sau swipe
                 continue
             }
 
@@ -955,8 +1131,7 @@ class AutomationEngine(
 
             // ── [4] Update overlay ────────────────────────────────────────
             val sessionSecsRemain = secsLeft
-            val totalSecsRemain   = maxOf(0L,
-                totalSecsLeft - (config.minutesPerAccount * 60L - sessionSecsRemain))
+            val totalSecsRemain   = totalSecsLeftFn()
             OverlayFarmMonitor.update(
                 accountIndex    = idx + 1,
                 accountTotal    = total,
@@ -1020,27 +1195,39 @@ class AutomationEngine(
             // che phủ, hoặc người dùng vô tình chạm màn hình → kịp dừng sớm thay vì
             // đợi hết watchSecs rồi mới phát hiện ở isLostWithRetry() vòng sau.
             // IPC cost: ~1 getRootNode() / 5s — chấp nhận được, rẻ hơn recovery loop.
-            var driftedDuringWatch = false
-            for (w in watchSecs downTo 1L) {
-                OverlayFarmMonitor.update(
-                    accountIndex    = idx + 1,
-                    accountTotal    = total,
-                    accountId       = account,
-                    sessionSecsLeft = maxOf(0L, (deadline - System.currentTimeMillis()) / 1_000L),
-                    totalSecsLeft   = maxOf(0L, totalSecsLeft - (config.minutesPerAccount * 60L - maxOf(0L, (deadline - System.currentTimeMillis()) / 1_000L))),
-                    action          = if (videos == 0) "Chuẩn bị..." else "Xem video (${w}s)",
-                )
-                delay(1_000L)
+            //
+            // v1.2.3 [FIX]: Bọc bằng safeStep() — nếu getRootNode()/IPC trong vòng
+            // lặp xem video bị treo (nguyên nhân khiến log "đứng" ở "Xem video (Ns)"
+            // không tiến tiếp), timeout sau watchSecs*1.5s + 10s sẽ tự thoát thay vì
+            // treo vô hạn. sessionSecsLeftNow()/totalSecsLeftFn() pause-aware → countdown
+            // hiển thị luôn giảm đều theo thời gian thực.
+            val driftedDuringWatch = safeStep(
+                "watch_video",
+                timeoutMs = (watchSecs * 1_500L) + 10_000L,
+            ) {
+                var drifted = false
+                for (w in watchSecs downTo 1L) {
+                    OverlayFarmMonitor.update(
+                        accountIndex    = idx + 1,
+                        accountTotal    = total,
+                        accountId       = account,
+                        sessionSecsLeft = sessionSecsLeftNow(),
+                        totalSecsLeft   = totalSecsLeftFn(),
+                        action          = if (videos == 0) "Chuẩn bị..." else "Xem video (${w}s)",
+                    )
+                    delay(1_000L)
 
-                // Kiểm tra drift mỗi 5 giây (không phải mỗi giây — tránh IPC quá nhiều)
-                if (w % FEED_CHECK_INTERVAL_SECS == 0L) {
-                    if (!NodeTraverser.isOnFeedTab(host.getRootNode())) {
-                        log("WATCH: Rời feed khi xem (${w}s còn lại) — dừng sớm, chờ recovery")
-                        driftedDuringWatch = true
-                        break
+                    // Kiểm tra drift mỗi 5 giây (không phải mỗi giây — tránh IPC quá nhiều)
+                    if (w % FEED_CHECK_INTERVAL_SECS == 0L) {
+                        if (!NodeTraverser.isOnFeedTab(host.getRootNode())) {
+                            log("WATCH: Rời feed khi xem (${w}s còn lại) — dừng sớm, chờ recovery")
+                            drifted = true
+                            break
+                        }
                     }
                 }
-            }
+                drifted
+            } ?: true  // timeout/lỗi → coi như drift, để isLostWithRetry() xử lý vòng sau
             // Nếu drift, bỏ qua toàn bộ action bước [8]-[11],
             // quay đầu vòng lặp → isLostWithRetry() sẽ xử lý.
             if (driftedDuringWatch) { lostStreak++; continue }
@@ -1094,8 +1281,11 @@ class AutomationEngine(
                         sessionSecsRemain, totalSecsRemain, action)
                     // [v1.2.0] Micro-pause trước like — người thật dừng ngắn khi thích video
                     Human.delay(450, 1_200)
-                    doLike()
-                    likes++
+                    // v1.2.3 [FIX]: Bọc safeStep() — nếu doLike() bị treo (gesture
+                    // callback không resume), timeout 15s sẽ tự bỏ qua thay vì
+                    // làm log "đứng" ở LIKE và không vuốt sang video tiếp theo.
+                    val likeOk = safeStep("like_action", timeoutMs = 15_000L) { doLike() }
+                    if (likeOk != null) likes++
                 } else if (isLiveContent) {
                     log("LIKE SKIP: Không like live")
                 } else if (isAdContent) {
@@ -1109,8 +1299,14 @@ class AutomationEngine(
             if (!isLiveContent && !isAdContent && Random.nextFloat() < config.followRate) {
                 OverlayFarmMonitor.update(idx + 1, total, account,
                     sessionSecsRemain, totalSecsRemain, "FOLLOW: Theo dõi")
-                val fr = doFollowFromProfile()
+                // v1.2.3 [FIX]: timeout 30s — nếu treo giữa lúc swipe vào profile /
+                // bấm Follow, tự thoát + recoverToFeed() để không kẹt ở "FOLLOW".
+                val fr = safeStep("follow_action", timeoutMs = 30_000L) { doFollowFromProfile() }
                 if (fr == FollowResult.SUCCESS || fr == FollowResult.UNCONFIRMED) follows++
+                if (fr == null && !NodeTraverser.isOnFeedTab(host.getRootNode())) {
+                    log("WARN: Follow timeout/lỗi — recoverToFeed()")
+                    recoverToFeed()
+                }
                 // doFollowFromProfile() luôn back về feed trước khi trả kết quả
             }
 
@@ -1121,37 +1317,55 @@ class AutomationEngine(
             ) {
                 OverlayFarmMonitor.update(idx + 1, total, account,
                     sessionSecsRemain, totalSecsRemain, "CMT: Bình luận")
-                if (doComment(config.commentTexts)) comments++
+                // v1.2.3 [FIX]: timeout 25s — panel comment đôi khi không mở/đóng đúng.
+                val commentOk = safeStep("comment_action", timeoutMs = 25_000L) {
+                    doComment(config.commentTexts)
+                }
+                if (commentOk == true) comments++
+                if (commentOk == null && !NodeTraverser.isOnFeedTab(host.getRootNode())) {
+                    log("WARN: Comment timeout/lỗi — recoverToFeed()")
+                    recoverToFeed()
+                }
             }
 
             // ── [10b] Diversion: Hộp thư / Cửa hàng [v1.1.9+] ────────────
             // Thỉnh thoảng ghé thăm tab phụ trước khi lướt — hành vi tự nhiên hơn.
             // Chỉ 1 tab mỗi lần (ưu tiên inbox). Các hàm doView* tự về feed.
-            run diversion@{
-                val curSecs  = maxOf(0L, (deadline - System.currentTimeMillis()) / 1_000L)
-                val curTotal = maxOf(0L, totalSecsLeft -
-                    (config.minutesPerAccount * 60L - curSecs))
-                if (config.inboxViewRate > 0f && Random.nextFloat() < config.inboxViewRate) {
-                    doViewInbox(idx + 1, total, account, curSecs, curTotal)
-                    return@diversion
+            // v1.2.3 [FIX]: timeout 90s — các phiên inbox/shop/search có nhiều
+            // bước con; nếu 1 bước treo, không để toàn bộ farm bị kẹt ở đó.
+            val diversionResult = safeStep("diversion_step", timeoutMs = 90_000L) {
+                run diversion@{
+                    val secsFn  = { sessionSecsLeftNow() }
+                    val totalFn = totalSecsLeftFn
+                    if (config.inboxViewRate > 0f && Random.nextFloat() < config.inboxViewRate) {
+                        doViewInbox(idx + 1, total, account, secsFn, totalFn)
+                        return@diversion
+                    }
+                    if (config.shopViewRate > 0f && Random.nextFloat() < config.shopViewRate) {
+                        doViewShop(idx + 1, total, account, secsFn, totalFn)
+                        return@diversion
+                    }
+                    // [v1.2.0] Phiên tìm kiếm từ khoá — độc lập với inbox/shop
+                    if (config.searchEnabled
+                        && config.searchKeywords.isNotEmpty()
+                        && Random.nextFloat() < config.searchRate
+                    ) {
+                        doSearchSession(idx + 1, total, account, secsFn, totalFn)
+                    }
                 }
-                if (config.shopViewRate > 0f && Random.nextFloat() < config.shopViewRate) {
-                    doViewShop(idx + 1, total, account, curSecs, curTotal)
-                    return@diversion
-                }
-                // [v1.2.0] Phiên tìm kiếm từ khoá — độc lập với inbox/shop
-                if (config.searchEnabled
-                    && config.searchKeywords.isNotEmpty()
-                    && Random.nextFloat() < config.searchRate
-                ) {
-                    doSearchSession(idx + 1, total, account, curSecs, curTotal)
-                }
+            }
+            if (diversionResult == null && !NodeTraverser.isOnFeedTab(host.getRootNode())) {
+                log("WARN: Diversion (Hộp thư/Cửa hàng/Tìm kiếm) timeout/lỗi — recoverToFeed()")
+                recoverToFeed()
             }
 
             // ── [11] Swipe next ───────────────────────────────────────────
             // swipeNext() dùng swipeStartFactor(68–82%) + swipeEndFactor(18–30%) ngẫu nhiên
             // → tự nhiên tránh thanh dot •••• của image carousel mà không cần detect.
-            swipeNext()
+            // v1.2.3 [FIX]: timeout 10s — đây là bước CUỐI mỗi vòng lặp; nếu gesture
+            // bị treo ở đây, log sẽ "đứng" mãi ở action trước đó (LIKE/FOLLOW/CMT)
+            // mà không chuyển video tiếp theo. Timeout đảm bảo loop luôn quay lại.
+            safeStep("swipe_next", timeoutMs = 10_000L) { swipeNext() }
 
             // ── [12] Emit live stats ──────────────────────────────────────
             _liveFarmStats.update {
@@ -1195,7 +1409,10 @@ class AutomationEngine(
         val cx = screenW / 2 + Human.jitter(25)
         val cy = (screenH * 0.55).toInt() + Human.jitter(20)
         host.clickSuspend(cx, cy)
-        Human.microPause()
+        // v1.2.3 [FIX]: doubleTapGap() (60–150ms) thay microPause() —
+        // đảm bảo 2 tap được TikTok nhận là double-tap LIKE, không phải
+        // 2 single-tap (pause/resume video).
+        Human.doubleTapGap()
         host.clickSuspend(cx + Human.jitter(8), cy + Human.jitter(8))
         Human.likeAnimDelay()
         delay((config.delayAfterLike * 1_000).toLong())
@@ -1433,11 +1650,11 @@ class AutomationEngine(
      * Gọi từ step [10b] trong farmOneAccount(), sau khi đã xem + tương tác xong.
      */
     private suspend fun doViewInbox(
-        idx:         Int,
-        total:       Int,
-        account:     String,
-        sessionSecs: Long,
-        totalSecs:   Long,
+        idx:     Int,
+        total:   Int,
+        account: String,
+        secsFn:  () -> Long,
+        totalFn: () -> Long,
     ) {
         // [v1.2.1] Nếu không tìm thấy tab Hộp thư ngay → có thể không ở feed.
         // Thử back về feed rồi tìm lại 1 lần. Shop KHÔNG áp dụng quy tắc này vì
@@ -1471,8 +1688,8 @@ class AutomationEngine(
                 accountIndex    = idx,
                 accountTotal    = total,
                 accountId       = account,
-                sessionSecsLeft = maxOf(0L, sessionSecs - (viewSecs - s)),
-                totalSecsLeft   = maxOf(0L, totalSecs   - (viewSecs - s)),
+                sessionSecsLeft = secsFn(),
+                totalSecsLeft   = totalFn(),
                 action          = "Hộp thư (${s}s)",
             )
             delay(1_000L)
@@ -1498,11 +1715,11 @@ class AutomationEngine(
      * Khác với Hộp thư (tab Inbox có trên mọi acc) → bỏ qua yên lặng là đúng.
      */
     private suspend fun doViewShop(
-        idx:         Int,
-        total:       Int,
-        account:     String,
-        sessionSecs: Long,
-        totalSecs:   Long,
+        idx:     Int,
+        total:   Int,
+        account: String,
+        secsFn:  () -> Long,
+        totalFn: () -> Long,
     ) {
         val shopTab = NodeTraverser.findShopTab(host.getRootNode()) ?: run {
             log("WARN: Không tìm thấy tab Cửa hàng — bỏ qua")
@@ -1518,8 +1735,8 @@ class AutomationEngine(
                 accountIndex    = idx,
                 accountTotal    = total,
                 accountId       = account,
-                sessionSecsLeft = sessionSecs,
-                totalSecsLeft   = totalSecs,
+                sessionSecsLeft = secsFn(),
+                totalSecsLeft   = totalFn(),
                 action          = "Cửa hàng (${i + 1}/${scrollCount})",
             )
             host.swipeSuspend(
@@ -1591,11 +1808,11 @@ class AutomationEngine(
      * 6. Back từng bước, kiểm tra isOnFeedTab() sau mỗi back đến khi về feed.
      */
     private suspend fun doSearchSession(
-        idx:         Int,
-        total:       Int,
-        account:     String,
-        sessionSecs: Long,
-        totalSecs:   Long,
+        idx:     Int,
+        total:   Int,
+        account: String,
+        secsFn:  () -> Long,
+        totalFn: () -> Long,
     ) {
         val keyword = config.searchKeywords.randomOrNull() ?: return
         log("SEARCH: Bắt đầu tìm kiếm \"$keyword\"")
@@ -1638,7 +1855,7 @@ class AutomationEngine(
 
         // 4. Click video đầu tiên trong kết quả
         //    TikTok search result: grid 2 cột — click cột trái, hàng đầu (~35–42% chiều cao)
-        OverlayFarmMonitor.update(idx, total, account, sessionSecs, totalSecs, "SEARCH: \"$keyword\"")
+        OverlayFarmMonitor.update(idx, total, account, secsFn(), totalFn(), "SEARCH: \"$keyword\"")
         host.clickSuspend(
             screenW / 4 + Human.jitter(20),
             (screenH * (0.36 + Random.nextDouble() * 0.06)).toInt(),
@@ -1652,8 +1869,8 @@ class AutomationEngine(
                 accountIndex    = idx,
                 accountTotal    = total,
                 accountId       = account,
-                sessionSecsLeft = sessionSecs,
-                totalSecsLeft   = totalSecs,
+                sessionSecsLeft = secsFn(),
+                totalSecsLeft   = totalFn(),
                 action          = "SEARCH: Video ${i + 1}/$videoCount",
             )
             val watchMs = randomWatchTimeMs()
@@ -2232,53 +2449,70 @@ class AutomationEngine(
      * Trả số video đã xem.
      */
     private suspend fun doSimpleFarm(durationSecs: Int): Int {
-        val deadline = System.currentTimeMillis() + durationSecs * 1_000L
-        var videos   = 0
+        // v1.2.3: pause-aware deadline — đồng bộ cách tính với farmOneAccount().
+        val totalMs      = durationSecs * 1_000L
+        val startWall    = System.currentTimeMillis()
+        val startPauseMs = currentPauseMs()
+        fun secsLeftNow(): Long {
+            val elapsedMs = (System.currentTimeMillis() - startWall) - (currentPauseMs() - startPauseMs)
+            return maxOf(0L, (totalMs - elapsedMs) / 1_000L)
+        }
 
-        while (System.currentTimeMillis() < deadline && isFarming) {
+        var videos = 0
+
+        while (secsLeftNow() > 0L && isFarming) {
             awaitResumed()
-            val root = host.getRootNode()
 
-            // Popup + wellbeing + daily limit
-            val popupResult = popup.handleIfPresent()
-            if (popupResult.handled) { delay(500); continue }
+            // v1.2.3 [FIX]: bọc toàn bộ 1 vòng lặp trong safeStep — exception/treo
+            // ở 1 bước (vd doLike) không làm dừng cả doSimpleFarm/task.
+            val iterationOk = safeStep("simple_farm_iter", timeoutMs = 60_000L) {
+                val root = host.getRootNode()
 
-            val wellbeingBtn = NodeTraverser.findReturnFromWellbeingButton(root)
-            if (wellbeingBtn != null) {
-                host.clickNode(wellbeingBtn.node); delay(1_500); continue
+                // Popup + wellbeing + daily limit
+                val popupResult = popup.handleIfPresent()
+                if (popupResult.handled) { delay(500); return@safeStep }
+
+                val wellbeingBtn = NodeTraverser.findReturnFromWellbeingButton(root)
+                if (wellbeingBtn != null) {
+                    host.clickNode(wellbeingBtn.node); delay(1_500); return@safeStep
+                }
+                if (NodeTraverser.detectDailyLimitScreen(root)) { delay(2_000); return@safeStep }
+
+                // Skip live / ad / diary
+                if (config.skipAds && NodeTraverser.detectAd(root))   { swipeNext(); return@safeStep }
+                if (config.skipLive && NodeTraverser.detectLive(root)) { swipeNext(); return@safeStep }
+                if (NodeTraverser.detectDiary(root))                   { swipeNext(); return@safeStep }
+
+                // Lost detection
+                if (isLostWithRetry()) { recoverToFeed(); return@safeStep }
+
+                // Xem video
+                val watchMs   = randomWatchTimeMs()
+                val secsLeft  = maxOf(1L, secsLeftNow())
+                val watchSecs = minOf(watchMs / 1_000L, secsLeft).coerceAtLeast(1L)
+                for (w in watchSecs downTo 1L) {
+                    delay(1_000L)
+                    if (!isFarming) break
+                }
+                videos++
+
+                Human.occasionalPause(config.occasionalPauseChance)
+
+                // Like theo likeRate (không follow trong simplified farm)
+                val freshRoot     = host.getRootNode()
+                val isLiveContent = NodeTraverser.detectLive(freshRoot)
+                val isAdContent   = !isLiveContent && NodeTraverser.detectAd(freshRoot)
+                if (!isLiveContent && !isAdContent && Random.nextFloat() < config.likeRate) {
+                    Human.delay(450, 1_200)
+                    safeStep("simple_farm_like", timeoutMs = 15_000L) { doLike() }
+                }
+
+                safeStep("simple_farm_swipe", timeoutMs = 10_000L) { swipeNext() }
             }
-            if (NodeTraverser.detectDailyLimitScreen(root)) { delay(2_000); continue }
-
-            // Skip live / ad / diary
-            if (config.skipAds && NodeTraverser.detectAd(root))   { swipeNext(); continue }
-            if (config.skipLive && NodeTraverser.detectLive(root)) { swipeNext(); continue }
-            if (NodeTraverser.detectDiary(root))                   { swipeNext(); continue }
-
-            // Lost detection
-            if (isLostWithRetry()) { recoverToFeed(); continue }
-
-            // Xem video
-            val watchMs = randomWatchTimeMs()
-            val secsLeft = maxOf(1L, (deadline - System.currentTimeMillis()) / 1_000L)
-            val watchSecs = minOf(watchMs / 1_000L, secsLeft).coerceAtLeast(1L)
-            for (w in watchSecs downTo 1L) {
-                delay(1_000L)
-                if (!isFarming) break
+            if (iterationOk == null) {
+                // Timeout/lỗi toàn vòng — đảm bảo vẫn đang ở feed trước khi lặp lại.
+                if (!NodeTraverser.isOnFeedTab(host.getRootNode())) recoverToFeed()
             }
-            videos++
-
-            Human.occasionalPause(config.occasionalPauseChance)
-
-            // Like theo likeRate (không follow trong simplified farm)
-            val freshRoot     = host.getRootNode()
-            val isLiveContent = NodeTraverser.detectLive(freshRoot)
-            val isAdContent   = !isLiveContent && NodeTraverser.detectAd(freshRoot)
-            if (!isLiveContent && !isAdContent && Random.nextFloat() < config.likeRate) {
-                Human.delay(450, 1_200)
-                doLike()
-            }
-
-            swipeNext()
         }
         return videos
     }
@@ -2291,7 +2525,8 @@ class AutomationEngine(
         val cx = screenW / 2 + Human.jitter(25)
         val cy = (screenH * 0.55).toInt() + Human.jitter(20)
         host.clickSuspend(cx, cy)
-        Human.microPause()
+        // v1.2.3 [FIX]: doubleTapGap() thay microPause() — xem doLike().
+        Human.doubleTapGap()
         host.clickSuspend(cx + Human.jitter(8), cy + Human.jitter(8))
         Human.likeAnimDelay()
         delay((config.delayAfterLike * 1_000).toLong())
@@ -2313,6 +2548,109 @@ class AutomationEngine(
             }
             FollowResult.BLOCKED, FollowResult.NO_BUTTON -> false
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Demo nuôi acc Facebook — v1.2.3
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * v1.2.3 — Phiên nuôi acc Facebook đơn giản.
+     *
+     * Flow: mở Facebook → lướt feed → ngẫu nhiên thích bài đăng → đóng app.
+     *
+     * Mỗi vòng lặp được bọc safeStep() (giống farmOneAccount) — exception/treo
+     * ở 1 bước (vd Like) không làm dừng cả phiên, luôn tiến tới swipe feed tiếp.
+     */
+    private suspend fun runFacebookNurtureSession() {
+        val pkg = AppConstants.FACEBOOK_PKG
+
+        log(">> [Facebook] Bắt đầu phiên nuôi acc Facebook")
+        setStatus(">> Đang mở Facebook...")
+        if (!host.launchApp(pkg)) {
+            log("ERR: Không mở được Facebook (gói: $pkg) — kiểm tra đã cài đặt trên thiết bị")
+            setStatus("")
+            return
+        }
+        delay(4_000)  // chờ app khởi động + feed load
+
+        val durationSecs = config.facebookNurtureDurationSecs.toLong()
+        val totalMs      = durationSecs * 1_000L
+        val startWall    = System.currentTimeMillis()
+        val startPauseMs = currentPauseMs()
+        fun secsLeftNow(): Long {
+            val elapsedMs = (System.currentTimeMillis() - startWall) - (currentPauseMs() - startPauseMs)
+            return maxOf(0L, (totalMs - elapsedMs) / 1_000L)
+        }
+
+        var scrolled = 0
+        var liked    = 0
+
+        log("FB: Lướt feed Facebook trong ${durationSecs}s (likeRate=${config.facebookLikeRate})")
+
+        while (secsLeftNow() > 0L && isFarming) {
+            awaitResumed()
+            val secsLeft = secsLeftNow()
+
+            OverlayFarmMonitor.update(
+                accountIndex    = 1,
+                accountTotal    = 1,
+                accountId       = "Facebook",
+                sessionSecsLeft = secsLeft,
+                totalSecsLeft   = secsLeft,
+                action          = "FB: Lướt feed (${secsLeft}s)",
+            )
+
+            val iterationOk = safeStep("facebook_iter", timeoutMs = 30_000L) {
+                // Ngẫu nhiên thích bài đăng — tìm node "Thích"/"Like" trên màn hình.
+                if (Random.nextFloat() < config.facebookLikeRate) {
+                    val root = host.getRootNode()
+                    val likeBtn = NodeTraverser.findByText(root, "thích", ignoreCase = true)
+                        ?: NodeTraverser.findByText(root, "like", ignoreCase = true)
+                    if (likeBtn != null) {
+                        val label = likeBtn.text?.lowercase() ?: ""
+                        // Bỏ qua nếu đã "Bỏ thích" / "Unlike" (đã like rồi)
+                        if ("bỏ thích" !in label && "unlike" !in label) {
+                            Human.microPause()
+                            host.clickNode(likeBtn.node)
+                            liked++
+                            log("FB: Đã thích bài đăng (#$liked)")
+                            OverlayFarmMonitor.update(
+                                accountIndex    = 1,
+                                accountTotal    = 1,
+                                accountId       = "Facebook",
+                                sessionSecsLeft = secsLeftNow(),
+                                totalSecsLeft   = secsLeftNow(),
+                                action          = "FB: Đã thích bài #$liked",
+                            )
+                            Human.delay(800, 1_500)
+                        }
+                    }
+                }
+
+                // Lướt feed lên — random duration giống TikTok swipeNext().
+                val xOff = Human.jitter(12)
+                val x    = screenW / 2 + xOff
+                host.swipeSuspend(
+                    x, (screenH * 0.78).toInt(),
+                    x, (screenH * 0.25).toInt(),
+                    Human.swipeDuration(450),
+                )
+                scrolled++
+                Human.delay(1_200, 2_500)
+                Human.occasionalPause(config.occasionalPauseChance)
+            }
+            if (iterationOk == null) {
+                // Timeout/lỗi — vẫn tiếp tục, đợi 1 nhịp rồi thử lại.
+                delay(1_000)
+            }
+        }
+
+        log("FB: Hoàn thành — lướt $scrolled lần, thích $liked bài đăng")
+        setStatus("FB: Đang đóng Facebook...")
+        delay(500)
+        host.killApp(pkg)
+        setStatus("")
     }
 }
 
