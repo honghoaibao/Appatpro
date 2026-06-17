@@ -224,6 +224,19 @@ class LocalRepository(context: Context) : IFarmRepository {
         taskJobDelaySecs          = getConfigInt   ("task_job_delay_secs",         4),
         taskJobsPerAccount        = getConfigInt   ("task_jobs_per_account",       5),
         taskMaxConsecFailures     = getConfigInt   ("task_max_consec_failures",    3),
+        // [v1.2.4] Demo nuôi acc
+        facebookNurtureDurationSecs = getConfigInt   ("fb_nurture_duration_secs",     180),
+        facebookLikeRate            = getConfigDouble("fb_like_rate",                 0.2).toFloat(),
+        xNurtureDurationSecs        = getConfigInt   ("x_nurture_duration_secs",      120),
+        xLikeRate                   = getConfigDouble("x_like_rate",                  0.25).toFloat(),
+        xRetweetRate                = getConfigDouble("x_retweet_rate",               0.05).toFloat(),
+        instagramNurtureDurationSecs= getConfigInt   ("ig_nurture_duration_secs",     180),
+        instagramLikeRate           = getConfigDouble("ig_like_rate",                 0.30).toFloat(),
+        instagramFollowRate         = getConfigDouble("ig_follow_rate",               0.08).toFloat(),
+        threadsNurtureDurationSecs  = getConfigInt   ("threads_nurture_duration_secs", 120),
+        threadsLikeRate             = getConfigDouble("threads_like_rate",             0.20).toFloat(),
+        snapchatNurtureDurationSecs = getConfigInt   ("snap_nurture_duration_secs",    90),
+        snapchatStoryViewSecs       = getConfigInt   ("snap_story_view_secs",          8),
     )
 
     /** Lưu danh sách comment, phân cách bằng "||" trong DB. */

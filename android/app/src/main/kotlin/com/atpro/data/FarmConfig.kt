@@ -221,4 +221,42 @@ data class FarmConfig(
      * `v1.2.3` Xác suất thích (Like) 1 bài đăng sau mỗi lần lướt feed Facebook (0.0–1.0).
      */
     val facebookLikeRate: Float = 0.2f,
+
+    // ── Demo nuôi X (Twitter) [v1.2.4] ──────────────────────────────────────
+
+    /** `v1.2.4` Thời gian (giây) lướt timeline X trong mỗi phiên nuôi acc. */
+    val xNurtureDurationSecs: Int = 120,
+
+    /** `v1.2.4` Xác suất like tweet khi lướt timeline X (0.0–1.0). */
+    val xLikeRate: Float = 0.25f,
+
+    /** `v1.2.4` Xác suất repost tweet khi lướt timeline X (0.0–1.0). */
+    val xRetweetRate: Float = 0.05f,
+
+    // ── Demo nuôi Instagram [v1.2.4] ────────────────────────────────────────
+
+    /** `v1.2.4` Thời gian (giây) lướt Reels / feed Instagram trong mỗi phiên. */
+    val instagramNurtureDurationSecs: Int = 180,
+
+    /** `v1.2.4` Xác suất like bài đăng / reel trên Instagram (0.0–1.0). */
+    val instagramLikeRate: Float = 0.30f,
+
+    /** `v1.2.4` Xác suất follow tác giả reel trên Instagram (0.0–1.0). */
+    val instagramFollowRate: Float = 0.08f,
+
+    // ── Demo nuôi Threads [v1.2.4] ──────────────────────────────────────────
+
+    /** `v1.2.4` Thời gian (giây) lướt feed Threads trong mỗi phiên nuôi acc. */
+    val threadsNurtureDurationSecs: Int = 120,
+
+    /** `v1.2.4` Xác suất like bài trên Threads (0.0–1.0). */
+    val threadsLikeRate: Float = 0.20f,
+
+    // ── Demo nuôi Snapchat [v1.2.4] ─────────────────────────────────────────
+
+    /** `v1.2.4` Thời gian (giây) xem Spotlight / Stories trên Snapchat. */
+    val snapchatNurtureDurationSecs: Int = 90,
+
+    /** `v1.2.4` Số giây xem mỗi Story / Spotlight trước khi swipe tiếp. */
+    val snapchatStoryViewSecs: Int = 8,
 )

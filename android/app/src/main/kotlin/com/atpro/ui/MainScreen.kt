@@ -131,6 +131,23 @@ fun MainScreen(
                             dashboardVm.setServiceMode(ServiceMode.FACEBOOK_NURTURE)
                             selectedTab = Tab.DASHBOARD
                         },
+                        // v1.2.4: Demo nuôi acc X, Instagram, Threads, Snapchat
+                        onOpenXService = {
+                            dashboardVm.setServiceMode(ServiceMode.X_NURTURE)
+                            selectedTab = Tab.DASHBOARD
+                        },
+                        onOpenInstagramService = {
+                            dashboardVm.setServiceMode(ServiceMode.INSTAGRAM_NURTURE)
+                            selectedTab = Tab.DASHBOARD
+                        },
+                        onOpenThreadsService = {
+                            dashboardVm.setServiceMode(ServiceMode.THREADS_NURTURE)
+                            selectedTab = Tab.DASHBOARD
+                        },
+                        onOpenSnapchatService = {
+                            dashboardVm.setServiceMode(ServiceMode.SNAPCHAT_NURTURE)
+                            selectedTab = Tab.DASHBOARD
+                        },
                         onOpenGolikeLogin  = onOpenGolikeLogin,
                         onGolikeLogout     = golikeVm::logout,
                         isGolikeLoggedIn   = golikeState.isLoggedIn,
@@ -139,6 +156,7 @@ fun MainScreen(
 
                     Tab.STATS     -> StatsScreen(
                         vm           = statsVm,
+                        golikeVm     = golikeVm,
                         onNavigateUp = { selectedTab = Tab.DASHBOARD },
                     )
                     Tab.ACCOUNTS  -> AccountsScreen(

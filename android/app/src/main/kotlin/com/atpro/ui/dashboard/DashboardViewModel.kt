@@ -222,14 +222,41 @@ class DashboardViewModel(
      */
     fun startFacebookNurture() {
         val engine = TikTokAccessibilityService.instance?.engine ?: return
-
-        try {
-            appContext.startForegroundService(FarmForegroundService.buildIntent(appContext))
-        } catch (e: Exception) {
-            Log.w("DashboardVM", "startForegroundService (facebook) failed: ${e.message}")
-        }
-
+        try { appContext.startForegroundService(FarmForegroundService.buildIntent(appContext)) }
+        catch (e: Exception) { Log.w("DashboardVM", "startForegroundService (facebook) failed: ${e.message}") }
         engine.startFacebookNurture()
+    }
+
+    /** v1.2.4 — Demo nuôi tài khoản X (Twitter). */
+    fun startXNurture() {
+        val engine = TikTokAccessibilityService.instance?.engine ?: return
+        try { appContext.startForegroundService(FarmForegroundService.buildIntent(appContext)) }
+        catch (e: Exception) { Log.w("DashboardVM", "startForegroundService (x) failed: ${e.message}") }
+        engine.startXNurture()
+    }
+
+    /** v1.2.4 — Demo nuôi tài khoản Instagram. */
+    fun startInstagramNurture() {
+        val engine = TikTokAccessibilityService.instance?.engine ?: return
+        try { appContext.startForegroundService(FarmForegroundService.buildIntent(appContext)) }
+        catch (e: Exception) { Log.w("DashboardVM", "startForegroundService (instagram) failed: ${e.message}") }
+        engine.startInstagramNurture()
+    }
+
+    /** v1.2.4 — Demo nuôi tài khoản Threads. */
+    fun startThreadsNurture() {
+        val engine = TikTokAccessibilityService.instance?.engine ?: return
+        try { appContext.startForegroundService(FarmForegroundService.buildIntent(appContext)) }
+        catch (e: Exception) { Log.w("DashboardVM", "startForegroundService (threads) failed: ${e.message}") }
+        engine.startThreadsNurture()
+    }
+
+    /** v1.2.4 — Demo nuôi tài khoản Snapchat. */
+    fun startSnapchatNurture() {
+        val engine = TikTokAccessibilityService.instance?.engine ?: return
+        try { appContext.startForegroundService(FarmForegroundService.buildIntent(appContext)) }
+        catch (e: Exception) { Log.w("DashboardVM", "startForegroundService (snapchat) failed: ${e.message}") }
+        engine.startSnapchatNurture()
     }
 
     fun pause()  { TikTokAccessibilityService.instance?.engine?.pause() }
@@ -387,9 +414,15 @@ data class DashboardUiState(
     }
 
     // v1.2.3: FACEBOOK_NURTURE không cần farmMode/Golike — chỉ cần service connected.
+    // v1.2.4: Tương tự cho X_NURTURE, INSTAGRAM_NURTURE, THREADS_NURTURE, SNAPCHAT_NURTURE.
+    val isDemoMode: Boolean get() = serviceMode in listOf(
+        ServiceMode.FACEBOOK_NURTURE, ServiceMode.X_NURTURE,
+        ServiceMode.INSTAGRAM_NURTURE, ServiceMode.THREADS_NURTURE, ServiceMode.SNAPCHAT_NURTURE,
+    )
+
     val canStart: Boolean get() = serviceConnected && !isFarming &&
         (serviceMode != ServiceMode.TASK || isGolikeLoggedIn) &&
-        (serviceMode == ServiceMode.FACEBOOK_NURTURE || when (farmMode) {
+        (isDemoMode || when (farmMode) {
             FarmMode.ALL_LOCAL     -> true
             FarmMode.SELECTED_LIST -> customAccounts.isNotBlank()
         })
@@ -399,8 +432,7 @@ data class DashboardUiState(
             "Bật Accessibility Service trước"
         serviceMode == ServiceMode.TASK && !isGolikeLoggedIn ->
             "Đăng nhập Golike trong tab Dịch vụ trước"
-        serviceMode != ServiceMode.FACEBOOK_NURTURE &&
-            farmMode == FarmMode.SELECTED_LIST && customAccounts.isBlank() ->
+        !isDemoMode && farmMode == FarmMode.SELECTED_LIST && customAccounts.isBlank() ->
             "Nhập danh sách tài khoản cần nuôi"
         else -> null
     }

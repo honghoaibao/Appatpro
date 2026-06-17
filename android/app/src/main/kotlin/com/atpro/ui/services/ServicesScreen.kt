@@ -40,7 +40,14 @@ private val TikTokCyan  = Color(0xFF69C9D0)
 private val GolikeGold  = Color(0xFFF5A623)
 private val GolikeAmber = Color(0xFFFF6B35)
 private val GolikeDark  = Color(0xFF1A1205)
-private val FacebookBlue = Color(0xFF1877F2)  // v1.2.3 — màu thương hiệu Facebook
+private val FacebookBlue = Color(0xFF1877F2)   // v1.2.3
+private val XBlack       = Color(0xFF14171A)   // v1.2.4 X (Twitter)
+private val XGray        = Color(0xFF536471)
+private val InstaGradA   = Color(0xFF833AB4)   // v1.2.4 Instagram purple
+private val InstaGradB   = Color(0xFFFD1D1D)   // Instagram red
+private val InstaGradC   = Color(0xFFF77737)   // Instagram orange
+private val ThreadsBlack = Color(0xFF101010)   // v1.2.4 Threads
+private val SnapYellow   = Color(0xFFFFFC00)   // v1.2.4 Snapchat
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ServicesScreen
@@ -49,22 +56,17 @@ private val FacebookBlue = Color(0xFF1877F2)  // v1.2.3 — màu thương hiệu
 /**
  * v1.2.1: Thêm callbacks để điều hướng tới Dashboard với chế độ tương ứng.
  * v1.2.2: Thêm onGolikeLogout; block task service khi chưa đăng nhập.
- *
- * @param onOpenFarmService   Người dùng bấm "Mở dịch vụ" card Nuôi acc
- *                            → set ServiceMode.FARM + navigate to Dashboard tab
- * @param onOpenTaskService   Người dùng bấm "Mở dịch vụ" card Làm nhiệm vụ
- *                            → set ServiceMode.TASK + navigate to Dashboard tab
- * @param onOpenGolikeLogin   Người dùng bấm "Đăng nhập Golike"
- *                            → mở GolikeLoginWebActivity
- * @param onGolikeLogout      Người dùng bấm "Đăng xuất" trong GolikeAccountCard
- * @param isGolikeLoggedIn    True nếu token Golike đã được lưu → hiển thị trạng thái
- * @param golikeDisplayName   Tên hiển thị của tài khoản Golike đang đăng nhập
+ * v1.2.4: Thêm callbacks cho X, Instagram, Threads, Snapchat demo.
  */
 @Composable
 fun ServicesScreen(
     onOpenFarmService:     () -> Unit  = {},
     onOpenTaskService:     () -> Unit  = {},
     onOpenFacebookService: () -> Unit  = {},
+    onOpenXService:        () -> Unit  = {},
+    onOpenInstagramService:() -> Unit  = {},
+    onOpenThreadsService:  () -> Unit  = {},
+    onOpenSnapchatService: () -> Unit  = {},
     onOpenGolikeLogin:     () -> Unit  = {},
     onGolikeLogout:        () -> Unit  = {},
     isGolikeLoggedIn:      Boolean     = false,
@@ -96,13 +98,18 @@ fun ServicesScreen(
             )
         }
 
-        // ── Demo nuôi acc khác [v1.2.3] ──────────────────────────────────────
+        // ── Demo nuôi acc khác [v1.2.3/v1.2.4] ──────────────────────────────────────
         ServiceGroup(
             title  = "Demo nuôi tài khoản khác",
             icon   = Icons.Rounded.ThumbUp,
             accent = FacebookBlue,
         ) {
+            DemoNoticeBanner()
             FacebookNurtureCard(onClick = onOpenFacebookService)
+            XNurtureCard(onClick = onOpenXService)
+            InstagramNurtureCard(onClick = onOpenInstagramService)
+            ThreadsNurtureCard(onClick = onOpenThreadsService)
+            SnapchatNurtureCard(onClick = onOpenSnapchatService)
         }
 
         // ── Dịch vụ kiếm tiền ───────────────────────────────────────────────
@@ -388,6 +395,228 @@ private fun TikTokTaskCard(
                     modifier           = Modifier.size(12.dp),
                 )
             }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Banner lưu ý demo [v1.2.4]
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun DemoNoticeBanner() {
+    val Amber = Color(0xFFF59E0B)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(Amber.copy(alpha = 0.08f))
+            .border(0.5.dp, Amber.copy(alpha = 0.30f), RoundedCornerShape(10.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(
+            Icons.Rounded.Info,
+            contentDescription = null,
+            tint     = Amber,
+            modifier = Modifier.size(16.dp).padding(top = 1.dp),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                "Chế độ Demo",
+                color      = Amber,
+                fontSize   = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "Các nền tảng dưới đây ở chế độ Demo — mở app, lướt feed và tương tác cơ bản. " +
+                "Cần cài đặt app tương ứng trên thiết bị. Accessibility Service phải đang bật.",
+                color      = Amber.copy(alpha = 0.8f),
+                fontSize   = 11.sp,
+                lineHeight = 16.sp,
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Card: Demo nuôi X (Twitter) [v1.2.4]
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun XNurtureCard(onClick: () -> Unit) {
+    val AccentX = Color(0xFFE7E9EA)  // X text color (light on dark)
+    PlatformDemoCard(
+        onClick     = onClick,
+        bgFrom      = XBlack,
+        bgTo        = Color(0xFF1D9BF0).copy(alpha = 0.10f),
+        borderColor = Color(0xFF536471),
+        iconContent = {
+            // X logo — simple X mark
+            Text("𝕏", color = AccentX, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        },
+        title       = "Nuôi tài khoản X",
+        subtitle    = "Lướt timeline & like tweet (demo)",
+        titleColor  = AccentX,
+        accent      = Color(0xFF1D9BF0),
+        chips       = listOf("Like tweet" to Color(0xFF1D9BF0), "Lướt timeline" to XGray, "Repost" to Color(0xFF00BA7C)),
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Card: Demo nuôi Instagram [v1.2.4]
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun InstagramNurtureCard(onClick: () -> Unit) {
+    val igAccent = InstaGradA
+    PlatformDemoCard(
+        onClick     = onClick,
+        bgFrom      = Color(0xFF0D0818),
+        bgTo        = InstaGradA.copy(alpha = 0.12f),
+        borderColor = InstaGradA.copy(alpha = 0.35f),
+        iconContent = {
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(
+                        Brush.linearGradient(listOf(InstaGradA, InstaGradB, InstaGradC))
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.CameraAlt, null, tint = Color.White, modifier = Modifier.size(13.dp))
+            }
+        },
+        title       = "Nuôi tài khoản Instagram",
+        subtitle    = "Lướt Reels & like bài đăng (demo)",
+        titleColor  = Color(0xFFF9C8FF),
+        accent      = igAccent,
+        chips       = listOf("Reels" to InstaGradA, "Like" to InstaGradB, "Follow" to InstaGradC),
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Card: Demo nuôi Threads [v1.2.4]
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ThreadsNurtureCard(onClick: () -> Unit) {
+    val tAccent = Color(0xFFCCCCCC)
+    PlatformDemoCard(
+        onClick     = onClick,
+        bgFrom      = ThreadsBlack,
+        bgTo        = Color(0xFF333333).copy(alpha = 0.20f),
+        borderColor = Color(0xFF444444),
+        iconContent = {
+            Text("@", color = tAccent, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        },
+        title       = "Nuôi tài khoản Threads",
+        subtitle    = "Lướt feed & like bài viết (demo)",
+        titleColor  = tAccent,
+        accent      = Color(0xFFAAAAAA),
+        chips       = listOf("Lướt feed" to Color(0xFF888888), "Like" to Color(0xFFCC4444), "Threads" to Color(0xFFAAAAAA)),
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Card: Demo nuôi Snapchat [v1.2.4]
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun SnapchatNurtureCard(onClick: () -> Unit) {
+    PlatformDemoCard(
+        onClick     = onClick,
+        bgFrom      = Color(0xFF141200),
+        bgTo        = SnapYellow.copy(alpha = 0.12f),
+        borderColor = SnapYellow.copy(alpha = 0.40f),
+        iconContent = {
+            Icon(Icons.Rounded.CameraAlt, null, tint = SnapYellow, modifier = Modifier.size(22.dp))
+        },
+        title       = "Nuôi tài khoản Snapchat",
+        subtitle    = "Xem Spotlight & Stories (demo)",
+        titleColor  = SnapYellow,
+        accent      = SnapYellow,
+        chips       = listOf("Spotlight" to SnapYellow, "Stories" to SnapYellow.copy(alpha = 0.7f), "Xem story" to Color(0xFFFFA500)),
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Shared demo card template [v1.2.4]
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun PlatformDemoCard(
+    onClick:     () -> Unit,
+    bgFrom:      Color,
+    bgTo:        Color,
+    borderColor: Color,
+    iconContent: @Composable () -> Unit,
+    title:       String,
+    subtitle:    String,
+    titleColor:  Color,
+    accent:      Color,
+    chips:       List<Pair<String, Color>>,
+) {
+    var pressed by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue   = if (pressed) 0.97f else 1f,
+        animationSpec = tween(120),
+        label         = "demo_card_scale_$title",
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .scale(scale)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Brush.horizontalGradient(listOf(bgFrom, bgTo)))
+            .border(1.dp, borderColor, RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.Black.copy(alpha = 0.4f)),
+                    contentAlignment = Alignment.Center,
+                ) { iconContent() }
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(title, color = titleColor, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(subtitle, color = TextSec, fontSize = 12.sp)
+                }
+
+                // DEMO badge
+                Surface(
+                    shape  = RoundedCornerShape(20.dp),
+                    color  = accent.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, accent.copy(alpha = 0.4f)),
+                ) {
+                    Text(
+                        "DEMO",
+                        color      = accent,
+                        fontSize   = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier   = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                    )
+                }
+            }
+
+            HorizontalDivider(accent)
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                chips.forEach { (label, color) -> ServiceChip(label, color) }
+            }
+
+            OpenServiceRow(accent)
         }
     }
 }

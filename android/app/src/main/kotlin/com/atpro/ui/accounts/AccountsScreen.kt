@@ -26,7 +26,7 @@ import android.app.Activity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.atpro.db.entity.AccountEntity
 
-// ── Design tokens (shared palette) ───────────────────────────
+// ── Design tokens ──────────────────────────────────────────────
 private val BgDark     = Color(0xFF0D0D14)
 private val CardDark   = Color(0xFF1A1A2E)
 private val BorderDark = Color(0xFF374151)
@@ -37,6 +37,16 @@ private val RedBad     = Color(0xFFEF4444)
 private val TextSec    = Color(0xFF9CA3AF)
 private val TextMuted  = Color(0xFF6B7280)
 
+// ── Nền tảng tài khoản [v1.2.4] ───────────────────────────────
+private enum class AccPlatform(val label: String, val color: Color, val isDemo: Boolean = false) {
+    TIKTOK   ("TikTok",    Color(0xFF69C9D0), false),
+    FACEBOOK ("Facebook",  Color(0xFF1877F2), true),
+    X        ("X",         Color(0xFF1D9BF0), true),
+    INSTAGRAM("Instagram", Color(0xFF833AB4), true),
+    THREADS  ("Threads",   Color(0xFFAAAAAA), true),
+    SNAPCHAT ("Snapchat",  Color(0xFFFFFC00), true),
+}
+
 // ─────────────────────────────────────────────────────────────
 //  Root screen
 // ─────────────────────────────────────────────────────────────
@@ -46,6 +56,7 @@ fun AccountsScreen(vm: AccountsViewModel, onNavigateUp: (() -> Unit)? = null) {
     val accounts by vm.accounts.collectAsStateWithLifecycle()
     var query    by remember { mutableStateOf("") }
     var filter   by remember { mutableStateOf("all") }
+    var platform by remember { mutableStateOf(AccPlatform.TIKTOK) }
     val activity = LocalContext.current as? Activity
 
     val filtered = remember(accounts, query, filter) {
@@ -75,82 +86,38 @@ fun AccountsScreen(vm: AccountsViewModel, onNavigateUp: (() -> Unit)? = null) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = { onNavigateUp?.invoke() ?: activity?.finish() }) {
-                Icon(Icons.Rounded.ArrowBackIosNew, contentDescription = "Quay lại", tint = Color.White, modifier = Modifier.size(20.dp))
+                Icon(Icons.Rounded.ArrowBackIosNew, "Quay lại", tint = Color.White, modifier = Modifier.size(20.dp))
             }
             Column(Modifier.weight(1f)) {
+                Text("Tài khoản", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Text(
-                    "Tài khoản",
-                    color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    "${accounts.size} tài khoản · tự động lưu khi farm",
+                    if (platform == AccPlatform.TIKTOK) "${accounts.size} tài khoản · tự động lưu khi farm"
+                    else "${platform.label} · Chế độ Demo",
                     color = TextMuted, fontSize = 11.sp,
                 )
             }
         }
 
-        // ── Search ──
-        OutlinedTextField(
-            value       = query,
-            onValueChange = { query = it },
-            modifier    = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            placeholder = { Text("@username", color = Color(0xFF4B5563)) },
-            leadingIcon = {
-                Icon(Icons.Rounded.Search, null, tint = TextMuted, modifier = Modifier.size(18.dp))
-            },
-            trailingIcon = if (query.isNotEmpty()) {{
-                IconButton(onClick = { query = "" }) {
-                    Icon(Icons.Rounded.Clear, null, tint = TextMuted, modifier = Modifier.size(16.dp))
-                }
-            }} else null,
-            singleLine = true,
-            shape      = RoundedCornerShape(12.dp),
-            colors     = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor   = CardDark,
-                unfocusedContainerColor = CardDark,
-                focusedBorderColor      = Purple,
-                unfocusedBorderColor    = Color.Transparent,
-                focusedTextColor        = Color.White,
-                unfocusedTextColor      = Color.White,
-            ),
-        )
-
-        Spacer(Modifier.height(8.dp))
-
-        // ── Filter chips ──
+        // ── Platform tabs [v1.2.4] ──
         LazyRow(
-            contentPadding      = PaddingValues(horizontal = 16.dp),
+            contentPadding        = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            val chips = listOf(
-                "all"        to "Tất cả",
-                "active"     to "Hoạt động",
-                "checkpoint" to "Checkpoint",
-                "banned"     to "Bị khóa",
-            )
-            items(chips) { (key, label) ->
-                val count = when (key) {
-                    "active"     -> accounts.count { it.status == "active" && !it.checkpoint }
-                    "checkpoint" -> accounts.count { it.checkpoint }
-                    "banned"     -> accounts.count { it.status == "banned" }
-                    else         -> accounts.size
-                }
+            items(AccPlatform.entries.toList()) { p ->
                 FilterChip(
-                    selected = filter == key,
-                    onClick  = { filter = key },
-                    label    = { Text("$label ($count)", fontSize = 12.sp) },
+                    selected = platform == p,
+                    onClick  = { platform = p; query = ""; filter = "all" },
+                    label    = { Text(p.label, fontSize = 12.sp) },
                     colors   = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor  = Purple.copy(alpha = 0.15f),
-                        selectedLabelColor      = Purple,
-                        containerColor          = CardDark,
-                        labelColor              = TextSec,
+                        selectedContainerColor = p.color.copy(alpha = 0.15f),
+                        selectedLabelColor     = p.color,
+                        containerColor         = CardDark,
+                        labelColor             = TextSec,
                     ),
                     border = FilterChipDefaults.filterChipBorder(
                         borderColor         = BorderDark,
-                        selectedBorderColor = Purple.copy(alpha = 0.5f),
-                        enabled = true, selected = filter == key,
+                        selectedBorderColor = p.color.copy(alpha = 0.5f),
+                        enabled = true, selected = platform == p,
                     ),
                 )
             }
@@ -158,18 +125,142 @@ fun AccountsScreen(vm: AccountsViewModel, onNavigateUp: (() -> Unit)? = null) {
 
         Spacer(Modifier.height(4.dp))
 
-        // ── Account list ──
-        if (accounts.isEmpty()) {
-            EmptyAccountsView()
+        if (platform.isDemo) {
+            DemoPlatformAccountsView(platform)
         } else {
-            LazyColumn(
-                contentPadding        = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement   = Arrangement.spacedBy(8.dp),
-            ) {
-                items(filtered, key = { it.username }) { account ->
-                    SwipeToDeleteAccountRow(account, onDelete = { vm.delete(account.username) })
-                }
+            TikTokAccountsBody(
+                accounts = accounts,
+                filtered = filtered,
+                query    = query,
+                filter   = filter,
+                onQuery  = { query = it },
+                onFilter = { filter = it },
+                onDelete = vm::delete,
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  TikTok accounts body
+// ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun TikTokAccountsBody(
+    accounts: List<AccountEntity>,
+    filtered: List<AccountEntity>,
+    query:    String,
+    filter:   String,
+    onQuery:  (String) -> Unit,
+    onFilter: (String) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    OutlinedTextField(
+        value         = query,
+        onValueChange = onQuery,
+        modifier      = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        placeholder   = { Text("@username", color = Color(0xFF4B5563)) },
+        leadingIcon   = { Icon(Icons.Rounded.Search, null, tint = TextMuted, modifier = Modifier.size(18.dp)) },
+        trailingIcon  = if (query.isNotEmpty()) {{
+            IconButton(onClick = { onQuery("") }) {
+                Icon(Icons.Rounded.Clear, null, tint = TextMuted, modifier = Modifier.size(16.dp))
             }
+        }} else null,
+        singleLine    = true,
+        shape         = RoundedCornerShape(12.dp),
+        colors        = OutlinedTextFieldDefaults.colors(
+            focusedContainerColor   = CardDark,
+            unfocusedContainerColor = CardDark,
+            focusedBorderColor      = Purple,
+            unfocusedBorderColor    = Color.Transparent,
+            focusedTextColor        = Color.White,
+            unfocusedTextColor      = Color.White,
+        ),
+    )
+
+    Spacer(Modifier.height(8.dp))
+
+    LazyRow(
+        contentPadding        = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        val chips = listOf(
+            "all" to "Tất cả", "active" to "Hoạt động",
+            "checkpoint" to "Checkpoint", "banned" to "Bị khóa",
+        )
+        items(chips) { (key, label) ->
+            val count = when (key) {
+                "active"     -> accounts.count { it.status == "active" && !it.checkpoint }
+                "checkpoint" -> accounts.count { it.checkpoint }
+                "banned"     -> accounts.count { it.status == "banned" }
+                else         -> accounts.size
+            }
+            FilterChip(
+                selected = filter == key,
+                onClick  = { onFilter(key) },
+                label    = { Text("$label ($count)", fontSize = 12.sp) },
+                colors   = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = Purple.copy(alpha = 0.15f),
+                    selectedLabelColor     = Purple,
+                    containerColor         = CardDark,
+                    labelColor             = TextSec,
+                ),
+                border = FilterChipDefaults.filterChipBorder(
+                    borderColor         = BorderDark,
+                    selectedBorderColor = Purple.copy(alpha = 0.5f),
+                    enabled = true, selected = filter == key,
+                ),
+            )
+        }
+    }
+
+    Spacer(Modifier.height(4.dp))
+
+    if (accounts.isEmpty()) {
+        EmptyAccountsView()
+    } else {
+        LazyColumn(
+            contentPadding      = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(filtered, key = { it.username }) { account ->
+                SwipeToDeleteAccountRow(account, onDelete = { onDelete(account.username) })
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Demo platform placeholder [v1.2.4]
+// ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun DemoPlatformAccountsView(platform: AccPlatform) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(horizontal = 32.dp),
+        ) {
+            Icon(Icons.Rounded.AccountCircle, null, tint = platform.color.copy(alpha = 0.4f), modifier = Modifier.size(56.dp))
+            Text(platform.label, color = platform.color, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(platform.color.copy(alpha = 0.08f))
+                    .border(0.5.dp, platform.color.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 12.dp, vertical = 5.dp),
+            ) { Text("DEMO", color = platform.color, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+            Text(
+                "Chế độ Demo — tài khoản ${platform.label} được tự động phát hiện khi chạy phiên nuôi acc. Không cần thêm tài khoản thủ công.",
+                color = TextMuted, fontSize = 13.sp, lineHeight = 20.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            Text(
+                "Cần cài đặt ứng dụng ${platform.label} trên thiết bị và đăng nhập sẵn tài khoản.",
+                color = TextSec, fontSize = 12.sp, lineHeight = 18.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
         }
     }
 }
@@ -247,17 +338,13 @@ private fun AccountRow(account: AccountEntity) {
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Status dot
         Box(
             Modifier
                 .size(8.dp)
                 .clip(CircleShape)
                 .background(statusColor(account))
         )
-
         Spacer(Modifier.width(12.dp))
-
-        // Username + stats
         Column(Modifier.weight(1f)) {
             Text(
                 "@${account.username}",
@@ -266,12 +353,10 @@ private fun AccountRow(account: AccountEntity) {
             Spacer(Modifier.height(2.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 MiniStat("${account.sessionsCount}", "phiên")
-                MiniStat("${account.totalLikes}",    Icons.Rounded.Favorite,  iconTint = Color(0xFFE57373))
-                MiniStat("${account.totalFollows}",  Icons.Rounded.Group,     iconTint = Color(0xFF90CAF9))
+                MiniStat("${account.totalLikes}",   Icons.Rounded.Favorite, iconTint = Color(0xFFE57373))
+                MiniStat("${account.totalFollows}", Icons.Rounded.Group,    iconTint = Color(0xFF90CAF9))
             }
         }
-
-        // Status badge
         StatusBadge(account)
     }
 }
@@ -284,7 +369,7 @@ private fun MiniStat(value: String, label: String) {
 @Composable
 private fun MiniStat(value: String, icon: ImageVector, iconTint: Color = TextMuted) {
     Row(
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         Text(value, color = TextMuted, fontSize = 11.sp)
@@ -295,9 +380,9 @@ private fun MiniStat(value: String, icon: ImageVector, iconTint: Color = TextMut
 @Composable
 private fun StatusBadge(account: AccountEntity) {
     val (label, color) = when {
-        account.checkpoint       -> "Checkpoint" to Amber
-        account.status == "banned" -> "Bị khóa" to RedBad
-        else                       -> "Hoạt động" to Green
+        account.checkpoint         -> "Checkpoint" to Amber
+        account.status == "banned" -> "Bị khóa"   to RedBad
+        else                       -> "Hoạt động"  to Green
     }
     Box(
         modifier = Modifier
@@ -329,15 +414,11 @@ private fun EmptyAccountsView() {
             modifier = Modifier.size(56.dp),
         )
         Spacer(Modifier.height(16.dp))
-        Text(
-            "Chưa có tài khoản nào",
-            color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
-        )
+        Text("Chưa có tài khoản nào", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
         Text(
             "Tài khoản sẽ tự động được lưu\nkhi bạn bắt đầu farm",
-            color = TextMuted, fontSize = 13.sp,
-            lineHeight = 20.sp,
+            color = TextMuted, fontSize = 13.sp, lineHeight = 20.sp,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
     }

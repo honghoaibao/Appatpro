@@ -54,13 +54,29 @@ class GolikeLoginWebActivity : AppCompatActivity() {
         const val BASE_URL    = "https://app.golike.net/home"
         const val EXTRA_TOKEN = "golike_token"
 
-        // ── p(String): Boolean — validator theo smali ─────────────────────
+        /**
+         * v1.2.5 — Đồng bộ CHÍNH XÁC theo golike.py `_validate_jwt()`:
+         * JWT hợp lệ = đúng 3 phần ngăn bởi "." (header.payload.signature),
+         * KHÔNG phần nào rỗng. Thay cho check cũ (startsWith eyJ && length>50)
+         * vốn chỉ là heuristic — giờ dùng tiêu chuẩn cấu trúc JWT thật.
+         */
         fun isValidToken(s: String?): Boolean {
             if (s.isNullOrEmpty()) return false
-            // (startsWith("eyJ") && length > 50) || length > 100
-            if (s.startsWith("eyJ") && s.length > 50) return true
-            if (s.length > 100) return true
-            return false
+            val parts = s.split(".")
+            return parts.size == 3 && parts.all { it.isNotEmpty() }
+        }
+
+        /**
+         * v1.2.5 — Theo golike.py `_sanitize_jwt()`: bỏ khoảng trắng đầu/cuối
+         * và tiền tố "Bearer "/"bearer " nếu người dùng dán cả header đầy đủ.
+         * Áp dụng TRƯỚC khi gọi [isValidToken] — cả ở auto-extract VÀ nhập thủ công.
+         */
+        fun sanitizeToken(raw: String): String {
+            var t = raw.trim()
+            if (t.startsWith("Bearer ", ignoreCase = true)) {
+                t = t.substring(7).trim()
+            }
+            return t
         }
     }
 
@@ -74,6 +90,7 @@ class GolikeLoginWebActivity : AppCompatActivity() {
     lateinit var y: WebView          // field y = WebView
     lateinit var z: ProgressBar      // field z = ProgressBar
     lateinit var A: Button           // field A = Button (Lấy ATH)
+    lateinit var M: Button           // v1.2.5 — Button "Nhập thủ công"
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -144,6 +161,9 @@ class GolikeLoginWebActivity : AppCompatActivity() {
                 r()
             }
         }
+
+        // v1.2.5 — Nút "Nhập thủ công": fallback khi tự động lấy token thất bại.
+        M.setOnClickListener { showManualTokenDialog() }
     }
 
     override fun onBackPressed() {
@@ -174,7 +194,9 @@ class GolikeLoginWebActivity : AppCompatActivity() {
         F++
         Log.d(TAG, "🔍 Lần thứ $F - Inject JavaScript lấy token...")
 
-        // JS EXACT từ smali r()V — chỉ thay F bằng giá trị thực
+        // JS — dựa trên smali, cải tiến v1.2.5: tìm đệ quy trong JSON
+        // (fix lỗi "không lấy được token" khi Golike lưu lồng sâu, VD:
+        //  {state:{auth:{token:"eyJ..."}}} — bản cũ chỉ tìm top-level key)
         val js = buildString {
             append("javascript:(function() {")
             append("   var tokenPattern = /eyJ[a-zA-Z0-9_\\-\\.]{50,}/g;")
@@ -184,6 +206,26 @@ class GolikeLoginWebActivity : AppCompatActivity() {
             append("           return true;")
             append("       }")
             append("       return false;")
+            append("   }")
+            // v1.2.5: tìm đệ quy mọi string trong object JSON (tối đa 5 cấp,
+            // tránh vòng lặp vô hạn / object quá lớn).
+            append("   function deepFind(obj, depth) {")
+            append("       if (!obj || depth > 5) return null;")
+            append("       if (typeof obj === 'string') {")
+            append("           if (obj.startsWith('eyJ') && obj.length > 50) return obj;")
+            append("           var m = obj.match(tokenPattern);")
+            append("           if (m && m.length > 0) return m[0];")
+            append("           return null;")
+            append("       }")
+            append("       if (typeof obj === 'object') {")
+            append("           for (var k in obj) {")
+            append("               try {")
+            append("                   var r = deepFind(obj[k], depth + 1);")
+            append("                   if (r) return r;")
+            append("               } catch(e) {}")
+            append("           }")
+            append("       }")
+            append("       return null;")
             append("   }")
             // localStorage
             append("   try {")
@@ -196,19 +238,29 @@ class GolikeLoginWebActivity : AppCompatActivity() {
             append("               try {")
             append("                   var parsed = JSON.parse(val);")
             append("                   if (parsed) {")
+            // v1.2.5: thử key cụ thể trước (nhanh), sau đó deepFind() toàn object
             append("                       if (parsed.token && sendToken(parsed.token)) return;")
             append("                       if (parsed.access_token && sendToken(parsed.access_token)) return;")
             append("                       if (parsed.authorization && sendToken(parsed.authorization)) return;")
+            append("                       var deep = deepFind(parsed, 0);")
+            append("                       if (deep && sendToken(deep)) return;")
             append("                   }")
             append("               } catch(e) {}")
             append("           }")
             append("       }")
             append("   } catch(e) {}")
-            // sessionStorage
+            // sessionStorage — v1.2.5: cũng thử deepFind nếu là JSON
             append("   try {")
             append("       for (var i = 0; i < sessionStorage.length; i++) {")
             append("           var val = sessionStorage.getItem(sessionStorage.key(i));")
-            append("           if (val && sendToken(val)) return;")
+            append("           if (val) {")
+            append("               if (sendToken(val)) return;")
+            append("               try {")
+            append("                   var parsedS = JSON.parse(val);")
+            append("                   var deepS = deepFind(parsedS, 0);")
+            append("                   if (deepS && sendToken(deepS)) return;")
+            append("               } catch(e) {}")
+            append("           }")
             append("       }")
             append("   } catch(e) {}")
             // cookies
@@ -222,12 +274,26 @@ class GolikeLoginWebActivity : AppCompatActivity() {
             append("           }")
             append("       }")
             append("   } catch(e) {}")
+            // v1.2.5: quét window.__NUXT__ / window.__INITIAL_STATE__ nếu site dùng SSR state
+            append("   try {")
+            append("       if (window.__NUXT__) {")
+            append("           var dn = deepFind(window.__NUXT__, 0);")
+            append("           if (dn && sendToken(dn)) return;")
+            append("       }")
+            append("       if (window.__INITIAL_STATE__) {")
+            append("           var di = deepFind(window.__INITIAL_STATE__, 0);")
+            append("           if (di && sendToken(di)) return;")
+            append("       }")
+            append("   } catch(e) {}")
             // Retry: reload page (KHÔNG dùng arguments.callee)
             append("   console.log('No token found in attempt ' + $F);")
             append("   if ($F < 6) {")
             append("       setTimeout(function() {")
             append("           window.location.reload();")
             append("       }, 2000);")
+            append("   } else {")
+            // v1.2.5: hết 6 lần retry → báo cho Android biết để gợi ý nhập thủ công
+            append("       try { AndroidTokenReceiver.onSearchExhausted(); } catch(e) {}")
             append("   }")
             append("})()")
         }
@@ -291,12 +357,28 @@ class GolikeLoginWebActivity : AppCompatActivity() {
         @JavascriptInterface
         fun onTokenReceived(token: String) {
             Log.d(TAG, "onTokenReceived: len=${token.length}")
-            // Validate theo p(String) từ smali
-            if (!isValidToken(token)) {
+            // v1.2.5 — sanitize trước khi validate (đồng bộ golike.py)
+            val clean = sanitizeToken(token)
+            if (!isValidToken(clean)) {
                 Log.w(TAG, "Token không hợp lệ, bỏ qua")
                 return
             }
-            q(token)   // gọi q() theo smali pattern
+            q(clean)   // gọi q() theo smali pattern
+        }
+
+        /**
+         * v1.2.5 — JS gọi khi đã thử hết 6 lần (F >= 6) mà không tìm thấy token.
+         * Gợi ý người dùng dùng nút "Nhập thủ công" thay vì tiếp tục chờ.
+         */
+        @JavascriptInterface
+        fun onSearchExhausted() {
+            Log.w(TAG, "Đã thử $F lần — không tìm thấy token tự động")
+            runOnUiThread {
+                if (!C) {
+                    updateStatus("⚠ Không tìm thấy token — thử 'Nhập thủ công'")
+                    resetButton()
+                }
+            }
         }
     }
 
@@ -345,6 +427,42 @@ class GolikeLoginWebActivity : AppCompatActivity() {
         // Lưu ref statusText qua tag
         statusLabel.tag = "status"
 
+        // v1.2.5 — Sub-bar chứa nút "Nhập thủ công" (fallback khi lấy auto thất bại)
+        val subBar = RelativeLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(MATCH, dp(34)).also {
+                it.gravity   = Gravity.TOP
+                it.topMargin = dp(56)
+            }
+            setBackgroundColor(Color.parseColor("#0F0F1A"))
+        }
+
+        val hintLabel = TextView(this).apply {
+            text     = "Không lấy được token tự động?"
+            textSize = 11f
+            setTextColor(Color.parseColor("#6B7280"))
+            gravity  = Gravity.CENTER_VERTICAL or Gravity.START
+            layoutParams = RelativeLayout.LayoutParams(MATCH, MATCH).also {
+                it.setMargins(dp(14), 0, dp(118), 0)
+            }
+        }
+
+        M = Button(this).apply {
+            text      = "✎ Nhập thủ công"
+            textSize  = 11f
+            isAllCaps = false
+            setTextColor(Color.parseColor("#F5A623"))
+            setBackgroundColor(Color.parseColor("#1A1A2E"))
+            setPadding(dp(8), 0, dp(8), 0)
+            layoutParams = RelativeLayout.LayoutParams(dp(112), dp(26)).also {
+                it.addRule(RelativeLayout.ALIGN_PARENT_END)
+                it.addRule(RelativeLayout.CENTER_VERTICAL)
+                it.setMargins(0, 0, dp(10), 0)
+            }
+        }
+
+        subBar.addView(hintLabel)
+        subBar.addView(M)
+
         z = ProgressBar(this, null,
             android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
@@ -352,20 +470,76 @@ class GolikeLoginWebActivity : AppCompatActivity() {
                 Color.parseColor("#6C63FF"))
             layoutParams = FrameLayout.LayoutParams(MATCH, dp(3)).also {
                 it.gravity   = Gravity.TOP
-                it.topMargin = dp(56)
+                it.topMargin = dp(90)   // header(56) + subBar(34)
             }
         }
 
         y = WebView(this).apply {
             layoutParams = FrameLayout.LayoutParams(MATCH, MATCH).also {
-                it.topMargin = dp(56)
+                it.topMargin = dp(90)   // header(56) + subBar(34)
             }
         }
 
         root.addView(header)
+        root.addView(subBar)
         root.addView(z)
         root.addView(y)
         setContentView(root)
+    }
+
+    // ── v1.2.5: Nhập token thủ công ──────────────────────────────────────────
+
+    /**
+     * Dialog cho phép người dùng dán token JWT lấy được từ nguồn khác
+     * (VD: DevTools trình duyệt, app khác) khi tự động lấy token thất bại.
+     * Dùng lại y nguyên flow q(token) — lưu SharedPreferences + GolikeRepository,
+     * cùng tiêu chuẩn validate isValidToken() như flow tự động.
+     */
+    private fun showManualTokenDialog() {
+        val input = EditText(this).apply {
+            hint = "Dán token (bắt đầu bằng eyJ...)"
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.parseColor("#6B7280"))
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            maxLines = 4
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                        android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+        }
+
+        val container = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+            addView(TextView(this@GolikeLoginWebActivity).apply {
+                text = "Mở DevTools (F12) trên trình duyệt đã đăng nhập Golike → " +
+                       "Application/Storage → Local Storage → tìm key chứa 'token' → " +
+                       "copy giá trị bắt đầu bằng 'eyJ' và dán vào đây."
+                textSize = 12f
+                setTextColor(Color.parseColor("#9CA3AF"))
+                setPadding(dp(8), 0, dp(8), dp(8))
+            })
+            addView(input)
+        }
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Nhập token thủ công")
+            .setView(container)
+            .setPositiveButton("Lưu") { _, _ ->
+                val raw   = input.text.toString()
+                val clean = sanitizeToken(raw)   // v1.2.5 — bỏ "Bearer " + trim, đồng bộ golike.py
+                when {
+                    clean.isEmpty() ->
+                        updateStatus("⚠ Chưa nhập token")
+                    !isValidToken(clean) ->
+                        updateStatus("⚠ Token không hợp lệ (cần đúng 3 phần header.payload.signature)")
+                    else -> {
+                        Log.d(TAG, "Token nhập thủ công: len=${clean.length}")
+                        q(clean)   // dùng lại flow lưu + finish giống auto-detect
+                    }
+                }
+            }
+            .setNegativeButton("Hủy", null)
+            .setCancelable(true)
+            .show()
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

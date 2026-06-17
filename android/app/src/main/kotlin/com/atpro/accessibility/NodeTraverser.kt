@@ -25,6 +25,126 @@ object NodeTraverser {
     ) {
         val centerX: Int get() = (bounds.left + bounds.right) / 2
         val centerY: Int get() = (bounds.top + bounds.bottom) / 2
+        /** Lấy text hiển thị — fallback sang contentDescription nếu text null. */
+        val displayText: String? get() = text ?: node.contentDescription?.toString()
+    }
+
+    /**
+     * v1.2.5 — Entry trong switch popup kèm node gốc để click.
+     *
+     * @param displayText     Text TikTok hiển thị (có thể là username hợp lệ,
+     *                        ID thuần số, hoặc display name như "Bảo Hoài1502").
+     * @param node            Node accessibility để click (trigger switch).
+     * @param isNeedsNormalize  true = entry này KHÔNG phải username hợp lệ
+     *                        → cần click để lấy username thực sau khi TikTok switch.
+     */
+    data class AccountEntry(
+        val displayText:       String,
+        val node:              AccessibilityNodeInfo,
+        val isNeedsNormalize:  Boolean,
+    )
+
+    /**
+     * v1.2.5 — Kiểm tra chuỗi có phải TikTok unique_username hợp lệ không.
+     *
+     * Hợp lệ   : chỉ gồm ASCII [a-zA-Z0-9_.], dài ≥3, có ít nhất 1 chữ cái,
+     *            KHÔNG phải toàn chữ số (numeric ID bị lỗi hiển thị).
+     * Không hợp lệ:
+     *   - Toàn số          → "6784523189328"  (TikTok internal ID bị lộ)
+     *   - Chứa ký tự Unicode → "Bảo Hoài1502" (display name hiện thay username)
+     *   - Chứa dấu cách    → "Ảo vãi"
+     *   - Quá ngắn (< 3)
+     */
+    fun isValidTikTokUsername(s: String): Boolean {
+        if (s.length < 3) return false
+        if (s.all { it.isDigit() }) return false            // pure numeric ID
+        if (s.any { it == ' ' || it.code > 127 }) return false  // spaces / Unicode (display name)
+        return s.all { it.isLetterOrDigit() || it == '_' || it == '.' }
+    }
+
+    /**
+     * v1.2.5 — Phân tích danh sách tài khoản trong switch popup, kèm node gốc.
+     *
+     * Khác với [parseAccountList], method này:
+     * - Giữ lại node của TỪNG entry (để AutomationEngine click normalize).
+     * - Phân loại entry: username hợp lệ vs. cần chuẩn hoá (ID số / display name).
+     * - **Pass 3** bắt thêm display name Unicode (VD: "Bảo Hoài1502", "Ảo vãi")
+     *   mà Pass 2 (regex ASCII) bỏ sót — đây là lỗi hiển thị phổ biến.
+     *
+     * Cách dùng:
+     * ```kotlin
+     * val entries = NodeTraverser.parseAccountListWithNodes(root)
+     * val valid   = entries.filter { !it.isNeedsNormalize }
+     * val invalid = entries.filter {  it.isNeedsNormalize }
+     * ```
+     */
+    fun parseAccountListWithNodes(root: AccessibilityNodeInfo?): List<AccountEntry> {
+        root ?: return emptyList()
+
+        val UI_LABELS = setOf(
+            "thêm tài khoản", "chuyển đổi tài khoản", "đăng nhập",
+            "add account", "switch account", "log in", "login",
+            "manage accounts", "quản lý tài khoản",
+        )
+        val FALSE_POSITIVES = setOf("tiktok", "app", "ok", "yes", "no", "cancel", "hủy")
+        val BADGE_REGEX     = Regex("""^\d+\+?$""")          // "9+", "12" – notification badge
+
+        val entries = mutableListOf<AccountEntry>()
+        val seen    = mutableSetOf<String>()
+
+        val allNodes = traverseAll(root).map { it.toResult() }
+        // Bắt "@hoaibao.209.12" → "hoaibao.209.12" (có/không hợp lệ đều capture)
+        val withAtNodes = allNodes.mapNotNull { nr ->
+            val raw   = nr.displayText ?: return@mapNotNull null
+            val clean = raw.trim().replace(" ", "")
+            if (clean.startsWith("@") && clean.length > 2)
+                Pair(clean.removePrefix("@"), nr.node)
+            else null
+        }
+        if (withAtNodes.isNotEmpty()) {
+            withAtNodes.forEach { (u, n) ->
+                if (seen.add(u.lowercase()))
+                    entries.add(AccountEntry(u, n, isNeedsNormalize = !isValidTikTokUsername(u)))
+            }
+            return entries   // Pass 1 thành công — bỏ qua Pass 2/3
+        }
+
+        // ── Pass 2: ASCII username (TikTok Trill / biến thể) ────────────────
+        val usernameRegex = Regex("^[a-zA-Z0-9_.]{3,24}$")
+        allNodes.forEach { nr ->
+            val raw   = nr.displayText ?: return@forEach
+            val clean = raw.trim().replace(" ", "")
+            if (usernameRegex.matches(clean)
+                && clean.lowercase() !in UI_LABELS
+                && clean.lowercase() !in FALSE_POSITIVES
+                && !BADGE_REGEX.matches(clean)
+            ) {
+                if (seen.add(clean.lowercase()))
+                    entries.add(AccountEntry(clean, nr.node, isNeedsNormalize = !isValidTikTokUsername(clean)))
+            }
+        }
+
+        // ── Pass 3: Display name Unicode (VD: "Bảo Hoài1502", "Ảo vãi") ────
+        // TikTok đôi khi hiển thị nickname thay @unique_username → Pass 2 bỏ sót.
+        // Dấu hiệu: chứa ký tự Unicode (ã, ả, ô...) hoặc dấu cách.
+        allNodes.forEach { nr ->
+            val raw   = nr.displayText ?: return@forEach
+            val clean = raw.trim()
+            if (clean.length < 2 || clean.length > 60) return@forEach
+            if (clean.lowercase() in UI_LABELS) return@forEach
+            if (clean.lowercase() in FALSE_POSITIVES) return@forEach
+            if (BADGE_REGEX.matches(clean)) return@forEach
+            if (seen.contains(clean.lowercase())) return@forEach
+            // Phải có ký tự Unicode hoặc dấu cách (đây là display name, không phải username)
+            val hasUnicode = clean.any { it.code > 127 }
+            val hasSpace   = clean.contains(' ')
+            if (hasUnicode || hasSpace) {
+                if (seen.add(clean.lowercase()))
+                    entries.add(AccountEntry(clean, nr.node, isNeedsNormalize = true))
+            }
+        }
+
+        return entries
     }
 
     // ── Core Finders ─────────────────────────────────────────────────

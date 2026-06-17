@@ -39,6 +39,12 @@ object AppConstants {
     /** v1.2.3 — Package Facebook chính thức (Facebook app). Dùng cho demo nuôi acc Facebook. */
     const val FACEBOOK_PKG = "com.facebook.katana"
 
+    /** v1.2.4 — Packages demo nuôi acc các nền tảng mới. */
+    const val X_PKG         = "com.twitter.android"
+    const val INSTAGRAM_PKG = "com.instagram.android"
+    const val THREADS_PKG   = "com.instagram.barcelona"
+    const val SNAPCHAT_PKG  = "com.snapchat.android"
+
     const val WS_PORT    = 8765
     const val DB_VERSION = 1
 }

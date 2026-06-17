@@ -199,20 +199,36 @@ class GolikeViewModel(
         viewModelScope.launch {
             // API dùng acc.id (Int), state key dùng acc.uniqueUsername (String)
             when (val result = repo.getTikTokJobs(acc.id)) {
-                is GolikeResult.Success ->
+                is GolikeResult.Success -> {
+                    // v1.2.5 — server trả MỘT job (hoặc null) mỗi lần, không phải list.
+                    // Wrap thành List 0-1 phần tử để tương thích UI cũ (ConfigScreen/StatsScreen
+                    // vẫn duyệt tikTokJobs[username] như danh sách).
+                    val jobs = result.data.data?.let { listOf(it) } ?: emptyList()
                     _state.update { s ->
-                        s.copy(tikTokJobs = s.tikTokJobs + (acc.uniqueUsername to result.data))
+                        s.copy(tikTokJobs = s.tikTokJobs + (acc.uniqueUsername to jobs))
                     }
+                }
                 is GolikeResult.Error -> { /* no jobs for this account — ok */ }
             }
         }
     }
 
-    /** Báo cáo hoàn thành job về server Golike. Theo dõi trạng thái loading + done. */
-    fun completeJob(jobId: Int, uniqueUsername: String) {
+    /**
+     * Báo cáo hoàn thành job về server Golike. Theo dõi trạng thái loading + done.
+     * v1.2.5 — Nhận thẳng [job] (TikTokJobDto) + accountId để build đủ 5 field
+     * theo golike.py (account_id, ads_id, object_id, type, link).
+     */
+    fun completeJob(job: com.atpro.golike.TikTokJobDto, accountId: Int, uniqueUsername: String) {
         viewModelScope.launch {
+            val jobId = job.jobId
             _state.update { it.copy(completingJobs = it.completingJobs + jobId) }
-            val result = repo.completeTikTokJob(jobId, uniqueUsername)
+            val result = repo.completeTikTokJob(
+                accountId = accountId,
+                adsId     = jobId,
+                objectId  = job.objectId,
+                type      = job.type,
+                link      = job.link,
+            )
             _state.update { s ->
                 val success = result is GolikeResult.Success && result.data.success
                 s.copy(

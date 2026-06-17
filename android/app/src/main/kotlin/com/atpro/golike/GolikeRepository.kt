@@ -117,77 +117,55 @@ class GolikeRepository(private val local: LocalRepository) {
         }
     }
 
-    /** accountId: TikTokAccountDto.id (int) — param "account_id" theo smali htool */
-    suspend fun getTikTokJobs(accountId: Int): GolikeResult<List<TikTokJobDto>> {
-        val token    = getSavedToken() ?: return GolikeResult.Error("Chưa đăng nhập", 401)
+    /**
+     * v1.2.5 — Theo golike.py `get_next_job()`: trả về MỘT job + lock CÙNG lúc
+     * (không phải list). `data == null` trong response nghĩa là không có job
+     * khả dụng lúc này cho account này.
+     */
+    suspend fun getTikTokJobs(accountId: Int): GolikeResult<TikTokJobsResponse> {
+        val token    = getSavedToken() ?: return GolikeResult.Error("Chưa đăng nhập", 401, isAuthError = true)
         val deviceId = getDeviceId()
-        return when (val r = GolikeApi.getTikTokJobs(token, accountId, deviceId)) {
-            is GolikeResult.Success ->
-                GolikeResult.Success(r.data.data)   // lenient: trả về list dù success=false
-            is GolikeResult.Error -> r
-        }
+        return GolikeApi.getTikTokJobs(token, accountId, deviceId)
     }
 
     /**
-     * v1.2.3 — golike_api_docs.md §4.2: GET /api/jobs/tiktok/job-detail?ads_id=<job_id>.
-     * Trả về detail job + lock (account_id, ads_id, object_id, type, lock_time).
-     * Dùng để verify/refresh object_id trước khi gọi completeTikTokJob/skipTikTokJob
-     * nếu TikTokJobDto.objectId từ getTikTokJobs() trống.
+     * v1.2.5 — Theo golike.py `complete_job()`: body 5 field, KHÔNG có "success".
+     * @param accountId TikTokAccountDto.id
+     * @param adsId     TikTokJobDto.jobId (field JSON gốc là "id")
+     * @param objectId  ưu tiên lock.objectId, fallback job.objectId
+     * @param type      TikTokJobDto.type
+     * @param link      TikTokJobDto.link
      */
-    suspend fun getTikTokJobDetail(adsId: Int): GolikeResult<JobDetailResponse> {
-        val token    = getSavedToken() ?: return GolikeResult.Error("Chưa đăng nhập", 401)
+    suspend fun completeTikTokJob(
+        accountId: Int,
+        adsId:     Int,
+        objectId:  String,
+        type:      String,
+        link:      String,
+    ): GolikeResult<CompleteJobResponse> {
+        val token    = getSavedToken() ?: return GolikeResult.Error("Chưa đăng nhập", 401, isAuthError = true)
         val deviceId = getDeviceId()
-        return when (val r = GolikeApi.getTikTokJobDetail(token, adsId, deviceId)) {
-            is GolikeResult.Success -> GolikeResult.Success(r.data)
-            is GolikeResult.Error   -> r
-        }
-    }
-
-    suspend fun completeTikTokJob(jobId: Int, uniqueUsername: String): GolikeResult<CompleteJobResponse> {
-        val token    = getSavedToken() ?: return GolikeResult.Error("Chưa đăng nhập", 401)
-        val deviceId = getDeviceId()
-        val req      = CompleteJobRequest(jobId = jobId, uniqueUsername = uniqueUsername)
+        val req      = CompleteJobRequest(accountId = accountId, adsId = adsId, objectId = objectId, type = type, link = link)
         return when (val r = GolikeApi.completeTikTokJob(token, req, deviceId)) {
             is GolikeResult.Success ->
                 if (r.data.success) GolikeResult.Success(r.data)
-                else GolikeResult.Error(r.data.message.ifEmpty { "Lỗi hoàn thành nhiệm vụ" })
+                else GolikeResult.Error(r.data.message.ifEmpty { "Lỗi hoàn thành nhiệm vụ" }, cooldown = r.data.cooldown)
             is GolikeResult.Error -> r
         }
     }
 
     /**
-     * v1.2.1: Overload nhận tham số success — dùng khi cần báo lỗi/bỏ qua job.
-     * `success=false` → server hiểu là job không thực hiện được → cho lấy job tiếp theo.
-     *
-     * v1.2.3 [FIX]: Theo golike_api_docs.md, "report lỗi job" và "skip job" là
-     * 2 endpoint KHÁC NHAU (§4.3 vs §4.4) — không phải cùng complete-jobs với
-     * cờ success khác nhau. `success=false` giờ gọi skipTikTokJob() (endpoint
-     * /skip-jobs) thay vì gửi lại complete-jobs với success=false.
+     * v1.2.5 — Theo golike.py `skip_job()`: body 3 field (account_id, ads_id, object_id).
+     * Dùng khi job không thực hiện được trên thiết bị (acc bị block, lock hết hạn...).
      */
-    suspend fun completeTikTokJob(
-        jobId:          Int,
-        uniqueUsername: String,
-        success:        Boolean,
-    ): GolikeResult<CompleteJobResponse> {
-        if (!success) {
-            return when (val r = skipTikTokJob(jobId, uniqueUsername)) {
-                is GolikeResult.Success -> GolikeResult.Success(
-                    CompleteJobResponse(status = r.data.status, success = r.data.success, message = r.data.message)
-                )
-                is GolikeResult.Error -> r
-            }
-        }
-        return completeTikTokJob(jobId, uniqueUsername)
-    }
-
-    /**
-     * v1.2.3 — golike_api_docs.md §4.4 (POST /api/advertising/publishers/tiktok/skip-jobs).
-     * Dùng khi job không thực hiện được (acc bị block, hết quota, lock hết hạn...).
-     */
-    suspend fun skipTikTokJob(jobId: Int, uniqueUsername: String): GolikeResult<SkipJobResponse> {
-        val token    = getSavedToken() ?: return GolikeResult.Error("Chưa đăng nhập", 401)
+    suspend fun skipTikTokJob(
+        accountId: Int,
+        adsId:     Int,
+        objectId:  String,
+    ): GolikeResult<SkipJobResponse> {
+        val token    = getSavedToken() ?: return GolikeResult.Error("Chưa đăng nhập", 401, isAuthError = true)
         val deviceId = getDeviceId()
-        val req      = SkipJobRequest(jobId = jobId, uniqueUsername = uniqueUsername)
+        val req      = SkipJobRequest(accountId = accountId, adsId = adsId, objectId = objectId)
         return when (val r = GolikeApi.skipTikTokJob(token, req, deviceId)) {
             is GolikeResult.Success -> GolikeResult.Success(r.data)
             is GolikeResult.Error   -> r

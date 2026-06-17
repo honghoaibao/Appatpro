@@ -73,6 +73,7 @@ private enum class Section(val label: String, val icon: ImageVector, val accent:
     ACTIONS      ("Hành động",  Icons.Rounded.TouchApp,             Pink),
     EARN_GOLIKE  ("Golike",     Icons.Rounded.CurrencyExchange,     Color(0xFFF5A623)),
     TASK_SETTINGS("Nhiệm vụ",   Icons.Rounded.AssignmentTurnedIn,   Color(0xFF7C3AED)),
+    DEMO_NURTURE ("Demo nuôi",  Icons.Rounded.ThumbUp,              Color(0xFF1877F2)),  // v1.2.4
 }
 
 /**
@@ -109,6 +110,13 @@ private val SETTINGS_GROUPS = listOf(
         icon     = Icons.Rounded.AttachMoney,
         accent   = Color(0xFFF5A623),
         sections = listOf(Section.EARN_GOLIKE, Section.TASK_SETTINGS),
+    ),
+    SettingsGroup(
+        id       = "demo",
+        label    = "Demo nuôi acc",
+        icon     = Icons.Rounded.ThumbUp,
+        accent   = Color(0xFF1877F2),
+        sections = listOf(Section.DEMO_NURTURE),
     ),
 )
 
@@ -425,6 +433,7 @@ private fun SettingsLayout(
                 Section.PERMISSIONS   -> PermissionsSection(state, onOpenAccessibility, onOpenOverlay, onOpenNotification)
                 Section.EARN_GOLIKE   -> EarnGolikeSection(golikeVm)
                 Section.TASK_SETTINGS -> TaskSettingsSection(state, onSet)
+                Section.DEMO_NURTURE  -> DemoNurtureSection(state, onSet)
             }
         }
     }
@@ -1471,7 +1480,7 @@ private fun GolikeTikTokAccountRow(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(5.dp))
                                 .background(accent.copy(alpha = 0.15f))
-                                .clickable { golikeVm.completeJob(job.jobId, acc.uniqueUsername) }
+                                .clickable { golikeVm.completeJob(job, acc.id, acc.uniqueUsername) }
                                 .padding(horizontal = 6.dp, vertical = 3.dp),
                         ) {
                             Text("Xong", color = accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
@@ -2093,6 +2102,126 @@ private fun TaskSettingsSection(
     )
 
     } // end Column
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Demo nuôi acc section [v1.2.4]
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun DemoNurtureSection(
+    state: ConfigUiState,
+    onSet: (ConfigUiState.() -> ConfigUiState) -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 14.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        // ── Notice ──────────────────────────────────────────────────
+        val Amber = Color(0xFFF59E0B)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(Amber.copy(alpha = 0.07f))
+                .border(0.5.dp, Amber.copy(alpha = 0.30f), RoundedCornerShape(10.dp))
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(Icons.Rounded.Info, null, tint = Amber, modifier = Modifier.size(14.dp).padding(top = 1.dp))
+            Text(
+                "Các nền tảng này chạy ở chế độ Demo — " +
+                "cần cài đặt app trên thiết bị và đăng nhập trước khi chạy.",
+                color = Amber.copy(alpha = 0.85f), fontSize = 11.sp, lineHeight = 16.sp,
+            )
+        }
+
+        // ── Facebook ──────────────────────────────────────────────
+        SectionTitle("Facebook", Icons.Rounded.ThumbUp, Color(0xFF1877F2))
+        SettingSliderInt("Thời gian nuôi (giây)", state.facebookNurtureDurationSecs, 30, 600, 30) {
+            onSet { copy(facebookNurtureDurationSecs = it) }
+        }
+        CfgSlider(
+            label     = "Xác suất like bài đăng",
+            display   = "${(state.facebookLikeRate * 100).toInt()}%",
+            value     = state.facebookLikeRate,
+            range     = 0f..0.8f,
+            steps     = 15,
+            onChanged = { v -> onSet { copy(facebookLikeRate = v) } },
+        )
+
+        // ── X (Twitter) ───────────────────────────────────────────
+        SectionTitle("X (Twitter)", Icons.Rounded.MoreVert, Color(0xFF1D9BF0))
+        SettingSliderInt("Thời gian nuôi (giây)", state.xNurtureDurationSecs, 30, 600, 30) {
+            onSet { copy(xNurtureDurationSecs = it) }
+        }
+        CfgSlider(
+            label     = "Xác suất like tweet",
+            display   = "${(state.xLikeRate * 100).toInt()}%",
+            value     = state.xLikeRate,
+            range     = 0f..0.8f,
+            steps     = 15,
+            onChanged = { v -> onSet { copy(xLikeRate = v) } },
+        )
+        CfgSlider(
+            label     = "Xác suất repost tweet",
+            display   = "${(state.xRetweetRate * 100).toInt()}%",
+            value     = state.xRetweetRate,
+            range     = 0f..0.3f,
+            steps     = 5,
+            onChanged = { v -> onSet { copy(xRetweetRate = v) } },
+        )
+
+        // ── Instagram ─────────────────────────────────────────────
+        SectionTitle("Instagram", Icons.Rounded.CameraAlt, Color(0xFF833AB4))
+        SettingSliderInt("Thời gian nuôi (giây)", state.instagramNurtureDurationSecs, 30, 600, 30) {
+            onSet { copy(instagramNurtureDurationSecs = it) }
+        }
+        CfgSlider(
+            label     = "Xác suất like bài / reel",
+            display   = "${(state.instagramLikeRate * 100).toInt()}%",
+            value     = state.instagramLikeRate,
+            range     = 0f..0.8f,
+            steps     = 15,
+            onChanged = { v -> onSet { copy(instagramLikeRate = v) } },
+        )
+        CfgSlider(
+            label     = "Xác suất follow tác giả",
+            display   = "${(state.instagramFollowRate * 100).toInt()}%",
+            value     = state.instagramFollowRate,
+            range     = 0f..0.3f,
+            steps     = 5,
+            onChanged = { v -> onSet { copy(instagramFollowRate = v) } },
+        )
+
+        // ── Threads ───────────────────────────────────────────────
+        SectionTitle("Threads", Icons.Rounded.Forum, Color(0xFFAAAAAA))
+        SettingSliderInt("Thời gian nuôi (giây)", state.threadsNurtureDurationSecs, 30, 600, 30) {
+            onSet { copy(threadsNurtureDurationSecs = it) }
+        }
+        CfgSlider(
+            label     = "Xác suất like bài viết",
+            display   = "${(state.threadsLikeRate * 100).toInt()}%",
+            value     = state.threadsLikeRate,
+            range     = 0f..0.8f,
+            steps     = 15,
+            onChanged = { v -> onSet { copy(threadsLikeRate = v) } },
+        )
+
+        // ── Snapchat ──────────────────────────────────────────────
+        SectionTitle("Snapchat", Icons.Rounded.CameraAlt, Color(0xFFFFFC00))
+        SettingSliderInt("Thời gian nuôi (giây)", state.snapchatNurtureDurationSecs, 30, 600, 30) {
+            onSet { copy(snapchatNurtureDurationSecs = it) }
+        }
+        SettingSliderInt("Thời gian xem mỗi Story (giây)", state.snapchatStoryViewSecs, 3, 30, 1) {
+            onSet { copy(snapchatStoryViewSecs = it) }
+        }
+
+        Spacer(Modifier.height(24.dp))
+    }
 }
 
 // Reuse existing helper — simple Int slider row

@@ -70,53 +70,81 @@ data class TikTokAccountsResponse(
     val data:    List<TikTokAccountDto> = emptyList(),
 )
 
-// ── TikTok Jobs ───────────────────────────────────────────────────────────────
+// ── TikTok Jobs [v1.2.5 — đồng bộ chính xác theo golike.py] ───────────────────
 
+/**
+ * v1.2.5 — Theo golike.py `get_next_job()`: field ID của job là `id`
+ * (KHÔNG phải `job_id` như giả định v1.2.3 dựa trên docs reverse-engineer).
+ * Giá tiền job có thể nằm ở `fix_coin_job` HOẶC `price_per_after_cost`
+ * (golike.py: `job.get("fix_coin_job") or job.get("price_per_after_cost", 0)`)
+ * → expose cả 2 field thô + computed `fixCoin` để code cũ gọi `.fixCoin` không cần sửa.
+ */
 @Serializable
 data class TikTokJobDto(
-    @SerialName("job_id")   val jobId:    Int    = 0,
-    val link:     String = "",
-    val type:     String = "",
-    @SerialName("fix_coin") val fixCoin:  Int    = 0,
-    /** v1.2.3 — golike_api_docs.md §4.2: cần cho body complete-jobs/skip-jobs. */
-    @SerialName("object_id") val objectId: String = "",
-)
+    @SerialName("id")    val jobId: Int    = 0,
+    val link:             String = "",
+    val type:             String = "",
+    @SerialName("object_id")          val objectId:          String = "",
+    @SerialName("fix_coin_job")       val fixCoinJob:         Int?   = null,
+    @SerialName("price_per_after_cost") val pricePerAfterCost: Int?   = null,
+) {
+    /** Computed — golike.py: fix_coin_job ưu tiên, fallback price_per_after_cost. */
+    val fixCoin: Int get() = fixCoinJob ?: pricePerAfterCost ?: 0
+}
 
+/**
+ * v1.2.5 — Theo golike.py: GET `.../tiktok/jobs?account_id=X&data=null` trả về
+ * MỘT job duy nhất (`data` là object, không phải array) + `lock` cùng response
+ * (KHÔNG cần gọi thêm endpoint job-detail riêng — endpoint đó không tồn tại).
+ * `data == null` nghĩa là hiện không có job nào khả dụng cho account này.
+ */
 @Serializable
 data class TikTokJobsResponse(
-    val status:  Int                = 0,
-    val success: Boolean            = false,
-    val data:    List<TikTokJobDto> = emptyList(),
+    val status:  Int           = 0,
+    val success: Boolean       = false,
+    val message: String?       = null,
+    val data:    TikTokJobDto? = null,
+    val lock:    JobLockDto?   = null,
 )
 
+/**
+ * v1.2.5 — Theo golike.py `complete_job()`: body chỉ có 5 field, KHÔNG có
+ * "success" (endpoint complete-jobs nghĩa là "tôi đã làm xong" — trường hợp
+ * không làm được thì gọi skip-jobs riêng, không phải complete với success=false).
+ */
 @Serializable
 data class CompleteJobRequest(
-    @SerialName("job_id")          val jobId:          Int,
-    @SerialName("unique_username") val uniqueUsername: String,
-    val success: Boolean = true,
+    @SerialName("account_id") val accountId: Int,
+    @SerialName("ads_id")     val adsId:     Int,
+    @SerialName("object_id")  val objectId:  String,
+    val type: String,
+    val link: String,
+)
+
+/** v1.2.5 — golike.py: `result.data.prices` chứa số coin vừa nhận được. */
+@Serializable
+data class CompleteJobDataDto(
+    val prices: Int = 0,
 )
 
 @Serializable
 data class CompleteJobResponse(
-    val status:  Int     = 0,
-    val success: Boolean = false,
-    val message: String  = "",
-    /** v1.2.3 — golike_api_docs.md §4.3: số giây phải chờ trước khi retry nếu status=400. */
-    val cooldown: Int     = 0,
+    val status:   Int                  = 0,
+    val success:  Boolean               = false,
+    val message:  String                = "",
+    val data:     CompleteJobDataDto?   = null,
+    /** v1.2.5 — golike.py `_handle_response`: số giây chờ trước khi retry khi success=false. */
+    val cooldown: Int                   = 0,
 )
 
-// ── TikTok Job Detail / Skip [v1.2.3] ─────────────────────────────────────────
-
 /**
- * v1.2.3 — golike_api_docs.md §4.4 (POST /api/advertising/publishers/tiktok/skip-jobs).
- * Doc không show body mẫu — dùng tạm cùng shape với CompleteJobRequest (job_id +
- * unique_username) theo quy ước chung của publisher API. Cần verify lại bằng HAR
- * capture thực tế khi có job bị skip.
+ * v1.2.5 — Theo golike.py `skip_job()`: body chỉ 3 field, KHÔNG có unique_username.
  */
 @Serializable
 data class SkipJobRequest(
-    @SerialName("job_id")          val jobId:          Int,
-    @SerialName("unique_username") val uniqueUsername: String,
+    @SerialName("account_id") val accountId: Int,
+    @SerialName("ads_id")     val adsId:     Int,
+    @SerialName("object_id")  val objectId:  String,
 )
 
 @Serializable
@@ -127,28 +155,10 @@ data class SkipJobResponse(
 )
 
 /**
- * v1.2.3 — golike_api_docs.md §4.2 (GET /api/jobs/tiktok/job-detail).
- * `lock.lock_time` = số giây app có để hoàn thành job trước khi tự unlock (vd "120").
+ * v1.2.5 — `lock` đi kèm CÙNG response với job (field của [TikTokJobsResponse]),
+ * không phải từ endpoint job-detail riêng (endpoint đó không có trong golike.py).
+ * golike.py ưu tiên `lock.object_id` trước `job.object_id` khi cả 2 đều có.
  */
-@Serializable
-data class JobDetailResponse(
-    val status:  Int             = 0,
-    val success: Boolean         = false,
-    val message: String?         = null,
-    val data:    JobDetailDto?    = null,
-    val lock:    JobLockDto?      = null,
-)
-
-@Serializable
-data class JobDetailDto(
-    val id:        Int    = 0,
-    val link:      String = "",
-    @SerialName("object_id") val objectId: String = "",
-    val type:      String = "",
-    val quantity:  Int    = 0,
-    @SerialName("price_per_after_cost") val pricePerAfterCost: Int = 0,
-)
-
 @Serializable
 data class JobLockDto(
     @SerialName("user_id")    val userId:    Int    = 0,
@@ -156,8 +166,8 @@ data class JobLockDto(
     @SerialName("account_id") val accountId: Int    = 0,
     @SerialName("object_id")  val objectId:  String = "",
     val type:      String = "",
-    /** Số giây để publisher hoàn thành job trước khi tự unlock (server trả dạng String, vd "120"). */
-    @SerialName("lock_time")  val lockTime:  String = "0",
+    /** Số giây để publisher hoàn thành job trước khi tự unlock (golike.py default 120). */
+    @SerialName("lock_time")  val lockTime:  String = "120",
 )
 
 // ── Statistics ────────────────────────────────────────────────────────────────
@@ -180,7 +190,17 @@ data class PlatformStatsDto(
 
 // ── Result wrapper ────────────────────────────────────────────────────────────
 
+/**
+ * v1.2.5 — Theo golike.py `_handle_response()`: lỗi có thể kèm `cooldown` (số giây
+ * chờ trước khi retry) và phân biệt lỗi xác thực (401/403 → cần đăng nhập lại)
+ * với lỗi khác (4xx/5xx khác → có thể retry/backoff).
+ */
 sealed class GolikeResult<out T> {
     data class Success<T>(val data: T) : GolikeResult<T>()
-    data class Error(val message: String, val code: Int = 0) : GolikeResult<Nothing>()
+    data class Error(
+        val message:     String,
+        val code:        Int     = 0,
+        val cooldown:     Int     = 0,
+        val isAuthError:  Boolean = false,
+    ) : GolikeResult<Nothing>()
 }

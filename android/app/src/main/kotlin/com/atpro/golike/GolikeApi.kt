@@ -5,6 +5,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
@@ -46,6 +48,11 @@ object GolikeApi {
     suspend fun getTikTokAccounts(token: String, deviceId: String? = null): GolikeResult<TikTokAccountsResponse> =
         get("api/tiktok-account", token, deviceId)
 
+    /**
+     * v1.2.5 — golike.py `get_next_job()`: response trả MỘT job + `lock` CÙNG lúc.
+     * Không có endpoint job-detail riêng (endpoint `api/jobs/tiktok/job-detail`
+     * từng dùng ở v1.2.3 KHÔNG tồn tại trong golike.py — đã xóa).
+     */
     suspend fun getTikTokJobs(token: String, accountId: Int, deviceId: String? = null): GolikeResult<TikTokJobsResponse> =
         get(
             "api/advertising/publishers/tiktok/jobs?account_id=$accountId&data=null",
@@ -54,19 +61,9 @@ object GolikeApi {
         )
 
     /**
-     * v1.2.3 [FIX]: Endpoint đúng theo golike_api_docs.md §4.2 là
-     * `api/jobs/tiktok/job-detail` (KHÔNG có `/advertising/publishers/`).
-     * Trả về detail + lock (account_id, ads_id, object_id, type, lock_time).
-     * `adsId` = `job_id` lấy từ getTikTokJobs().
-     */
-    suspend fun getTikTokJobDetail(token: String, adsId: Int, deviceId: String? = null): GolikeResult<JobDetailResponse> =
-        get("api/jobs/tiktok/job-detail?ads_id=$adsId", token, deviceId)
-
-    /**
-     * v1.2.3 [FIX]: Endpoint đúng theo golike_api_docs.md §4.3 +
-     * Image 3 (DevTools capture) là
-     * `api/advertising/publishers/tiktok/complete-jobs` —
-     * KHÔNG có tiền tố `_private/` (path cũ gây HTTP 404/lỗi không mong đợi).
+     * v1.2.5 — golike.py `complete_job()`: body 5 field
+     * (account_id, ads_id, object_id, type, link) — KHÔNG có "success".
+     * Endpoint đúng: `api/advertising/publishers/tiktok/complete-jobs`.
      */
     suspend fun completeTikTokJob(token: String, request: CompleteJobRequest, deviceId: String? = null): GolikeResult<CompleteJobResponse> =
         post(
@@ -77,9 +74,8 @@ object GolikeApi {
         )
 
     /**
-     * v1.2.3 — golike_api_docs.md §4.4: bỏ qua (skip) 1 job — dùng khi job
-     * không thực hiện được (vd: acc bị block, hết quota...) thay vì gọi lại
-     * complete-jobs với success=false (endpoint riêng, không phải tham số).
+     * v1.2.5 — golike.py `skip_job()`: body 3 field (account_id, ads_id, object_id).
+     * Dùng khi job không thực hiện được (acc bị block, lock hết hạn...).
      */
     suspend fun skipTikTokJob(token: String, request: SkipJobRequest, deviceId: String? = null): GolikeResult<SkipJobResponse> =
         post(
@@ -155,38 +151,72 @@ object GolikeApi {
         }
     }
 
-    private fun openConnection(endpoint: String, token: String?, deviceId: String?): HttpURLConnection =
+    private fun openConnection(endpoint: String, token: String?, deviceId: String? = null): HttpURLConnection =
         (URL("$BASE_URL$endpoint").openConnection() as HttpURLConnection).apply {
-            setRequestProperty("Content-Type", "application/json")
-            setRequestProperty("Accept",       "application/json")
+
+            // ── Base headers — theo golike.py _base_headers() ─────────────────────
+            setRequestProperty("Accept",           "application/json, text/plain, */*")
+            setRequestProperty("Accept-Language",  "vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5")
+            setRequestProperty("Content-Type",     "application/json;charset=utf-8")
+            setRequestProperty("Origin",           "https://app.golike.net")
+            setRequestProperty("Referer",          "https://app.golike.net/")
+            setRequestProperty("User-Agent",
+                "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/139.0.0 Mobile Safari/537.36"
+            )
+            // Sec- headers — CORS same-site context
+            setRequestProperty("Sec-Ch-Ua",          "\"Chromium\";v=\"139\", \"Not;A=Brand\";v=\"99\"")
+            setRequestProperty("Sec-Ch-Ua-Mobile",   "?1")
+            setRequestProperty("Sec-Ch-Ua-Platform", "\"Android\"")
+            setRequestProperty("Sec-Fetch-Dest",     "empty")
+            setRequestProperty("Sec-Fetch-Mode",     "cors")
+            setRequestProperty("Sec-Fetch-Site",     "same-site")
+
+            // ── Auth headers — theo golike.py _auth_headers() ─────────────────────
             if (token != null) {
                 setRequestProperty("Authorization", "Bearer $token")
-                // v1.2.3 — golike_api_docs.md §2.2: header phụ song song Authorization.
-                setRequestProperty("G-Auth", token)
+                // NOTE: G-Auth KHÔNG có trong golike.py reference → xóa v1.2.5.
             }
-            // v1.2.3 — golike_api_docs.md §2.2: bắt buộc cho mọi request gateway.golike.net,
-            // nếu không có server có thể trả 400 dù Authorization hợp lệ.
-            setRequestProperty("T", generateTToken())
+            setRequestProperty("T",           generateTToken())
             setRequestProperty("G-Device-Id", deviceId ?: fallbackDeviceId)
+
             connectTimeout = 15_000
             readTimeout    = 20_000
         }
 
+    /**
+     * v1.2.5 — Theo golike.py `_handle_response()`:
+     * - 401/403 → lỗi xác thực (token hết hạn/sai) → cần đăng nhập lại.
+     * - Khác (400, 429, 5xx...) → CỐ GẮNG parse JSON body để lấy `message` +
+     *   `cooldown` (golike.py dùng cooldown để biết chờ bao lâu trước khi retry).
+     *   Nếu body không phải JSON hợp lệ (HTML error page...), fallback message chung.
+     */
     private inline fun <reified T> readResponse(conn: HttpURLConnection): GolikeResult<T> {
         return try {
             val code = conn.responseCode
 
-            // Non-2xx: read error body for logging only — do NOT attempt JSON parse.
-            // The server often returns an HTML error page which would cause a misleading
-            // "Unexpected JSON token" exception to surface in the UI.
             if (code !in 200..299) {
                 val errBody = conn.errorStream
                     ?.bufferedReader(Charsets.UTF_8)
                     ?.readText()
-                    ?.take(200)
                     ?: ""
-                Log.w(TAG, "HTTP $code — $errBody")
-                return GolikeResult.Error("Lỗi máy chủ (HTTP $code)")
+                Log.w(TAG, "HTTP $code — ${errBody.take(200)}")
+
+                // Thử parse JSON để lấy message + cooldown thực (golike.py: data.get("message"), data.get("cooldown", 0))
+                val (msg, cooldown) = try {
+                    val errJson = jsonParser.parseToJsonElement(errBody).jsonObject
+                    val m = errJson["message"]?.let { if (it is kotlinx.serialization.json.JsonPrimitive) it.content else null }
+                        ?: "Lỗi máy chủ (HTTP $code)"
+                    val c = errJson["cooldown"]?.let {
+                        (it as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull()
+                    } ?: 0
+                    Pair(m, c)
+                } catch (_: Exception) {
+                    Pair("Lỗi máy chủ (HTTP $code)", 0)
+                }
+
+                val isAuth = code == 401 || code == 403
+                return GolikeResult.Error(msg, code, cooldown, isAuth)
             }
 
             val body = conn.inputStream

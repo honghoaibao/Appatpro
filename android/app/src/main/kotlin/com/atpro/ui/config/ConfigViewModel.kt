@@ -71,6 +71,19 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
                 taskJobDelaySecs          = repo.getConfigInt   ("task_job_delay_secs",         4),
                 taskJobsPerAccount        = repo.getConfigInt   ("task_jobs_per_account",       5),
                 taskMaxConsecFailures     = repo.getConfigInt   ("task_max_consec_failures",    3),
+                // [v1.2.4] Demo nuôi acc
+                facebookNurtureDurationSecs = repo.getConfigInt   ("fb_nurture_duration_secs",  180),
+                facebookLikeRate            = repo.getConfigDouble("fb_like_rate",              0.2).toFloat(),
+                xNurtureDurationSecs        = repo.getConfigInt   ("x_nurture_duration_secs",   120),
+                xLikeRate                   = repo.getConfigDouble("x_like_rate",               0.25).toFloat(),
+                xRetweetRate                = repo.getConfigDouble("x_retweet_rate",            0.05).toFloat(),
+                instagramNurtureDurationSecs= repo.getConfigInt   ("ig_nurture_duration_secs",  180),
+                instagramLikeRate           = repo.getConfigDouble("ig_like_rate",              0.30).toFloat(),
+                instagramFollowRate         = repo.getConfigDouble("ig_follow_rate",            0.08).toFloat(),
+                threadsNurtureDurationSecs  = repo.getConfigInt   ("threads_nurture_duration_secs", 120),
+                threadsLikeRate             = repo.getConfigDouble("threads_like_rate",         0.20).toFloat(),
+                snapchatNurtureDurationSecs = repo.getConfigInt   ("snap_nurture_duration_secs", 90),
+                snapchatStoryViewSecs       = repo.getConfigInt   ("snap_story_view_secs",       8),
             )
             // [v1.1.4.1 FIX] Dùng update thay vì assignment trực tiếp để giữ lại
             // trạng thái quyền đã được refreshPermissions() cập nhật. Nếu dùng
@@ -128,6 +141,19 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
             repo.setConfig("task_job_delay_secs",      "${s.taskJobDelaySecs}")
             repo.setConfig("task_jobs_per_account",    "${s.taskJobsPerAccount}")
             repo.setConfig("task_max_consec_failures", "${s.taskMaxConsecFailures}")
+            // [v1.2.4] Demo nuôi acc
+            repo.setConfig("fb_nurture_duration_secs",       "${s.facebookNurtureDurationSecs}")
+            repo.setConfig("fb_like_rate",                   "${s.facebookLikeRate}")
+            repo.setConfig("x_nurture_duration_secs",        "${s.xNurtureDurationSecs}")
+            repo.setConfig("x_like_rate",                    "${s.xLikeRate}")
+            repo.setConfig("x_retweet_rate",                 "${s.xRetweetRate}")
+            repo.setConfig("ig_nurture_duration_secs",       "${s.instagramNurtureDurationSecs}")
+            repo.setConfig("ig_like_rate",                   "${s.instagramLikeRate}")
+            repo.setConfig("ig_follow_rate",                 "${s.instagramFollowRate}")
+            repo.setConfig("threads_nurture_duration_secs",  "${s.threadsNurtureDurationSecs}")
+            repo.setConfig("threads_like_rate",              "${s.threadsLikeRate}")
+            repo.setConfig("snap_nurture_duration_secs",     "${s.snapchatNurtureDurationSecs}")
+            repo.setConfig("snap_story_view_secs",           "${s.snapchatStoryViewSecs}")
 
             // Áp dụng ngay vào runtime manager
             AtProNotificationManager.enableSystemNotifications = s.enableSystemNotifications
@@ -217,6 +243,19 @@ data class ConfigUiState(
     val taskJobDelaySecs:         Int     = 4,
     val taskJobsPerAccount:       Int     = 5,
     val taskMaxConsecFailures:    Int     = 3,
+    // [v1.2.4] Demo nuôi tài khoản các nền tảng khác
+    val facebookNurtureDurationSecs: Int   = 180,
+    val facebookLikeRate:            Float = 0.2f,
+    val xNurtureDurationSecs:        Int   = 120,
+    val xLikeRate:                   Float = 0.25f,
+    val xRetweetRate:                Float = 0.05f,
+    val instagramNurtureDurationSecs:Int   = 180,
+    val instagramLikeRate:           Float = 0.30f,
+    val instagramFollowRate:         Float = 0.08f,
+    val threadsNurtureDurationSecs:  Int   = 120,
+    val threadsLikeRate:             Float = 0.20f,
+    val snapchatNurtureDurationSecs: Int   = 90,
+    val snapchatStoryViewSecs:       Int   = 8,
     // ── Permission state (read-only, refreshed via refreshPermissions()) ──
     val accessibilityGranted:     Boolean = false,
     val overlayGranted:           Boolean = false,

@@ -724,17 +724,15 @@ private fun IdleView(state: DashboardUiState, vm: DashboardViewModel, golikeStat
 
             Spacer(Modifier.height(24.dp))
 
-            // ── Farm mode toggle — ẩn ở chế độ Demo nuôi Facebook [v1.2.3] ──
+            // ── Farm mode toggle — ẩn ở chế độ Demo [v1.2.3/v1.2.4] ──
             AnimatedVisibility(
-                visible = state.serviceMode != com.atpro.automation.ServiceMode.FACEBOOK_NURTURE,
+                visible = !state.isDemoMode,
             ) {
                 Column {
                     FarmModeToggle(
                         selected  = state.farmMode,
                         onSelect  = vm::setFarmMode,
                     )
-
-                    // ── Account list input — SELECTED_LIST mode only ──
                     AnimatedVisibility(
                         visible = state.farmMode == FarmMode.SELECTED_LIST,
                         enter   = fadeIn(tween(250)) + expandVertically(tween(300, easing = EaseOut)),
@@ -753,39 +751,52 @@ private fun IdleView(state: DashboardUiState, vm: DashboardViewModel, golikeStat
 
             Spacer(Modifier.height(24.dp))
 
-            // ── Start button — phân nhánh Farm / Task / Facebook nurture ──
-            // v1.2.1: Nút bắt đầu thay đổi nhãn + action theo serviceMode
-            // v1.2.3: thêm FACEBOOK_NURTURE — demo nuôi acc Facebook
+            // ── Start button — phân nhánh theo serviceMode [v1.2.4] ──
             when (state.serviceMode) {
                 com.atpro.automation.ServiceMode.FARM -> StartButton(
-                    enabled = state.canStart,
-                    hint    = state.startHint,
-                    onClick = vm::startFarm,
+                    enabled = state.canStart, hint = state.startHint, onClick = vm::startFarm,
                 )
                 com.atpro.automation.ServiceMode.TASK -> StartButton(
-                    enabled    = state.canStart,
-                    hint       = state.startHint,
-                    onClick    = vm::startTask,
-                    labelText  = "Bắt đầu làm nhiệm vụ",
+                    enabled = state.canStart, hint = state.startHint, onClick = vm::startTask,
+                    labelText = "Bắt đầu làm nhiệm vụ",
                     accentColor = androidx.compose.ui.graphics.Color(0xFF7C3AED),
                 )
                 com.atpro.automation.ServiceMode.FACEBOOK_NURTURE -> StartButton(
-                    enabled    = state.canStart,
-                    hint       = state.startHint,
-                    onClick    = vm::startFacebookNurture,
-                    labelText  = "Bắt đầu nuôi Facebook",
+                    enabled = state.canStart, hint = state.startHint, onClick = vm::startFacebookNurture,
+                    labelText = "Bắt đầu nuôi Facebook",
                     accentColor = androidx.compose.ui.graphics.Color(0xFF1877F2),
+                )
+                com.atpro.automation.ServiceMode.X_NURTURE -> StartButton(
+                    enabled = state.canStart, hint = state.startHint, onClick = vm::startXNurture,
+                    labelText = "Bắt đầu nuôi X",
+                    accentColor = androidx.compose.ui.graphics.Color(0xFF1D9BF0),
+                )
+                com.atpro.automation.ServiceMode.INSTAGRAM_NURTURE -> StartButton(
+                    enabled = state.canStart, hint = state.startHint, onClick = vm::startInstagramNurture,
+                    labelText = "Bắt đầu nuôi Instagram",
+                    accentColor = androidx.compose.ui.graphics.Color(0xFF833AB4),
+                )
+                com.atpro.automation.ServiceMode.THREADS_NURTURE -> StartButton(
+                    enabled = state.canStart, hint = state.startHint, onClick = vm::startThreadsNurture,
+                    labelText = "Bắt đầu nuôi Threads",
+                    accentColor = androidx.compose.ui.graphics.Color(0xFFAAAAAA),
+                )
+                com.atpro.automation.ServiceMode.SNAPCHAT_NURTURE -> StartButton(
+                    enabled = state.canStart, hint = state.startHint, onClick = vm::startSnapchatNurture,
+                    labelText = "Bắt đầu nuôi Snapchat",
+                    accentColor = androidx.compose.ui.graphics.Color(0xFFFFFC00),
                 )
             }
 
             Spacer(Modifier.height(20.dp))
 
-            // ── [v1.2.2] Golike card — phân nhánh theo serviceMode ──
-            when (state.serviceMode) {
-                com.atpro.automation.ServiceMode.TASK -> GolikeTaskInfoCard(golikeState)
-                com.atpro.automation.ServiceMode.FACEBOOK_NURTURE -> { /* không hiện card Golike */ }
+            // ── [v1.2.4] Golike card — phân nhánh theo serviceMode ──
+            when {
+                state.serviceMode == com.atpro.automation.ServiceMode.TASK ->
+                    GolikeTaskInfoCard(golikeState)
+                state.isDemoMode -> { /* Demo modes: không hiện card Golike */ }
                 else -> {
-                    // FARM mode: chỉ hiện card khi đã đăng nhập (bỏ prompt đăng nhập)
+                    // FARM mode: chỉ hiện card khi đã đăng nhập
                     if (golikeState.isLoggedIn) {
                         GolikeSummaryCard(state = golikeState)
                     }

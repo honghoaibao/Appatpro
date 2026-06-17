@@ -30,7 +30,8 @@ enum class FarmMode { ALL_LOCAL, SELECTED_LIST }
 
 /** v1.2.1 — Chế độ dịch vụ: nuôi tài khoản hoặc làm nhiệm vụ Golike. */
 /** v1.2.3: thêm FACEBOOK_NURTURE — demo nuôi acc Facebook (mở app → lướt feed → like → đóng). */
-enum class ServiceMode { FARM, TASK, FACEBOOK_NURTURE }
+/** v1.2.4: thêm X_NURTURE, INSTAGRAM_NURTURE, THREADS_NURTURE, SNAPCHAT_NURTURE — demo nuôi acc. */
+enum class ServiceMode { FARM, TASK, FACEBOOK_NURTURE, X_NURTURE, INSTAGRAM_NURTURE, THREADS_NURTURE, SNAPCHAT_NURTURE }
 
 /** v1.2.1 — Kết quả thao tác follow từ hồ sơ. */
 internal enum class FollowResult {
@@ -472,6 +473,62 @@ class AutomationEngine(
         }
     }
 
+    /** v1.2.4 — Demo nuôi tài khoản X (Twitter). */
+    fun startXNurture() {
+        if (isFarming) return
+        isFarming = true; isPaused = false; isResting = false
+        resetPauseTracking()
+        farmJob = host.scope.launch {
+            config = repo.loadFarmConfig(); host.showFarmOverlay()
+            try { runXNurtureSession() }
+            catch (e: CancellationException) { log("Nuôi X bị hủy bởi người dùng"); throw e }
+            catch (e: Exception) { log("ERR: Nuôi X lỗi: ${e.javaClass.simpleName} — ${e.message}") }
+            finally { host.hideFarmOverlay(); setStatus(""); stopInternal("x_completed") }
+        }
+    }
+
+    /** v1.2.4 — Demo nuôi tài khoản Instagram. */
+    fun startInstagramNurture() {
+        if (isFarming) return
+        isFarming = true; isPaused = false; isResting = false
+        resetPauseTracking()
+        farmJob = host.scope.launch {
+            config = repo.loadFarmConfig(); host.showFarmOverlay()
+            try { runInstagramNurtureSession() }
+            catch (e: CancellationException) { log("Nuôi Instagram bị hủy bởi người dùng"); throw e }
+            catch (e: Exception) { log("ERR: Nuôi Instagram lỗi: ${e.javaClass.simpleName} — ${e.message}") }
+            finally { host.hideFarmOverlay(); setStatus(""); stopInternal("instagram_completed") }
+        }
+    }
+
+    /** v1.2.4 — Demo nuôi tài khoản Threads. */
+    fun startThreadsNurture() {
+        if (isFarming) return
+        isFarming = true; isPaused = false; isResting = false
+        resetPauseTracking()
+        farmJob = host.scope.launch {
+            config = repo.loadFarmConfig(); host.showFarmOverlay()
+            try { runThreadsNurtureSession() }
+            catch (e: CancellationException) { log("Nuôi Threads bị hủy bởi người dùng"); throw e }
+            catch (e: Exception) { log("ERR: Nuôi Threads lỗi: ${e.javaClass.simpleName} — ${e.message}") }
+            finally { host.hideFarmOverlay(); setStatus(""); stopInternal("threads_completed") }
+        }
+    }
+
+    /** v1.2.4 — Demo nuôi tài khoản Snapchat. */
+    fun startSnapchatNurture() {
+        if (isFarming) return
+        isFarming = true; isPaused = false; isResting = false
+        resetPauseTracking()
+        farmJob = host.scope.launch {
+            config = repo.loadFarmConfig(); host.showFarmOverlay()
+            try { runSnapchatNurtureSession() }
+            catch (e: CancellationException) { log("Nuôi Snapchat bị hủy bởi người dùng"); throw e }
+            catch (e: Exception) { log("ERR: Nuôi Snapchat lỗi: ${e.javaClass.simpleName} — ${e.message}") }
+            finally { host.hideFarmOverlay(); setStatus(""); stopInternal("snapchat_completed") }
+        }
+    }
+
     /**
      * v1.2.3 — pause/resume: track [pauseAccumMs] để countdown luôn chính xác.
      * Guard `if (!isPaused)` / `if (isPaused)` tránh double-counting nếu
@@ -796,8 +853,35 @@ class AutomationEngine(
         host.clickNode(btn.node)
         delay(1_500)
 
-        // Đọc danh sách từ popup đang mở
-        val discovered = NodeTraverser.parseAccountList(host.getRootNode())
+        // v1.2.5: Đọc danh sách kèm node — phân loại valid/invalid
+        val entries  = NodeTraverser.parseAccountListWithNodes(host.getRootNode())
+        val valid    = entries.filter { !it.isNeedsNormalize }
+        val invalid  = entries.filter {  it.isNeedsNormalize }
+
+        val discovered = valid.map { it.displayText }.toMutableList()
+
+        if (invalid.isNotEmpty()) {
+            log("FIX: Phát hiện ${invalid.size} entry không hợp lệ trong popup: " +
+                invalid.joinToString { "'${it.displayText}'" })
+            // Chuẩn hoá: click từng entry → TikTok switch → đọc username thực
+            val fixedUsernames = normalizeInvalidAccountIds(invalid)
+            discovered.addAll(fixedUsernames)
+            log("FIX: Chuẩn hoá xong — thêm được ${fixedUsernames.size} username: $fixedUsernames")
+
+            // Mở lại popup sau khi chuẩn hoá (positionFirstAccount cần popup mở)
+            if (isFarming) {
+                host.openTikTokSettings()
+                delay(2_000)
+                if (scrollUntilSwitchFound(maxScrolls = 8)) {
+                    delay(800)
+                    findSwitchBtnNode()?.let { b ->
+                        host.clickNode(b.node)
+                        delay(1_500)
+                    }
+                }
+            }
+        }
+
         if (discovered.isNotEmpty()) {
             log("LIST: Discover ${discovered.size} acc từ switch popup")
             setStatus("✓ Tìm thấy ${discovered.size} tài khoản trong popup")
@@ -808,6 +892,76 @@ class AutomationEngine(
         }
 
         return Pair(true, discovered)
+    }
+
+    /**
+     * v1.2.5 — Chuẩn hoá các entry không hợp lệ trong switch popup.
+     *
+     * Xử lý 2 loại "lỗi hiển thị":
+     *   1. ID thuần số   → "@6784523189328" (TikTok internal ID bị lộ)
+     *   2. Display name  → "Bảo Hoài1502", "Ảo vãi" (nickname thay vì @username)
+     *
+     * Flow mỗi entry:
+     *   Click node trong popup → TikTok switch sang acc đó
+     *   → Kill + Relaunch TikTok → Feed load
+     *   → [detectCurrentAccount()] đọc @username thực
+     *   → Lưu username hợp lệ, mở lại popup cho entry tiếp theo (nếu còn)
+     *
+     * Caller ([openSwitchPopup]) sẽ mở lại popup sau khi method này return.
+     *
+     * @return Danh sách username hợp lệ đã phục hồi được.
+     */
+    private suspend fun normalizeInvalidAccountIds(
+        invalidEntries: List<NodeTraverser.AccountEntry>,
+    ): List<String> {
+        val recovered = mutableListOf<String>()
+
+        invalidEntries.forEachIndexed { idx, entry ->
+            if (!isFarming) return@forEachIndexed
+
+            val typeLabel = when {
+                entry.displayText.all { it.isDigit() } -> "ID thuần số"
+                else                                    -> "display name"
+            }
+            log("FIX: [${idx + 1}/${invalidEntries.size}] Chuẩn hoá ($typeLabel): '${entry.displayText}'")
+            setStatus("FIX: Chuẩn hoá '${entry.displayText}' ($typeLabel)...")
+
+            // Click vào entry trong popup → TikTok switch
+            host.clickNode(entry.node)
+            delay((config.delayAfterSwitchClick * 1_000).toLong().coerceAtLeast(1_500L))
+
+            // Kill + relaunch để acc load hoàn chỉnh
+            host.killTikTok()
+            delay(2_000)
+            host.launchTikTok()
+
+            if (!waitFeedLoad()) {
+                log("WARN: FIX: Feed không load sau click '${entry.displayText}' — bỏ qua")
+            } else {
+                // Đọc username thực từ profile acc hiện tại
+                val realUsername = detectCurrentAccount()
+                if (realUsername != null && NodeTraverser.isValidTikTokUsername(realUsername)) {
+                    log("FIX: ✓ '${entry.displayText}' → '@$realUsername'")
+                    recovered.add(realUsername)
+                } else {
+                    log("WARN: FIX: Không đọc được username sau switch (hiện: $realUsername)")
+                }
+            }
+
+            // Nếu còn entry tiếp theo: mở lại settings → popup để tiếp tục
+            val hasMore = idx < invalidEntries.lastIndex
+            if (hasMore && isFarming) {
+                host.openTikTokSettings()
+                delay(2_000)
+                if (!scrollUntilSwitchFound(maxScrolls = 8)) return@forEachIndexed
+                delay(800)
+                val switchBtn = findSwitchBtnNode() ?: return@forEachIndexed
+                host.clickNode(switchBtn.node)
+                delay(1_500)
+            }
+        }
+
+        return recovered
     }
 
     /**
@@ -2351,26 +2505,43 @@ class AutomationEngine(
             // ── [B] Lấy job từ Golike ─────────────────────────────
             setStatus("TASK: Lấy nhiệm vụ từ server...")
             val jobsResult = gRepo.getTikTokJobs(golikeAcc.id)
-            val job = when (jobsResult) {
-                is GolikeResult.Success -> {
-                    // Lọc theo loại job được cấu hình
-                    jobsResult.data.firstOrNull { j ->
-                        when (config.taskJobType) {
-                            TaskJobType.LIKE   -> j.type == "like"
-                            TaskJobType.FOLLOW -> j.type == "follow"
-                            TaskJobType.BOTH   -> j.type == "like" || j.type == "follow"
-                        }
-                    }
-                }
+            val (job, lock) = when (jobsResult) {
+                is GolikeResult.Success -> Pair(jobsResult.data.data, jobsResult.data.lock)
                 is GolikeResult.Error -> {
                     log("TASK: Lấy job thất bại: ${jobsResult.message}")
-                    null
+                    if (jobsResult.isAuthError) {
+                        log("TASK: Token Golike hết hạn/không hợp lệ — dừng task, cần đăng nhập lại")
+                        break
+                    }
+                    if (jobsResult.cooldown > 0) {
+                        log("TASK: Server yêu cầu chờ ${jobsResult.cooldown}s")
+                        delay(jobsResult.cooldown * 1_000L)
+                    }
+                    consecFail++
+                    Pair(null, null)
                 }
             }
 
             if (job == null) {
-                log("TASK: Không có job phù hợp cho @$username — dừng làm việc")
+                log("TASK: Không có job khả dụng cho @$username lúc này — dừng làm việc")
                 break
+            }
+
+            // object_id: ưu tiên lock (golike.py: lock.get("object_id") or job.get("object_id", ""))
+            val objectId = lock?.objectId?.takeIf { it.isNotBlank() } ?: job.objectId
+
+            // Lọc theo loại job được cấu hình — server tự chọn job, không phải client.
+            // Nếu không khớp config: skip job này để giải phóng lock, lấy job khác ở vòng sau.
+            val typeMatches = when (config.taskJobType) {
+                TaskJobType.LIKE   -> job.type == "like"
+                TaskJobType.FOLLOW -> job.type == "follow"
+                TaskJobType.BOTH   -> job.type == "like" || job.type == "follow"
+            }
+            if (!typeMatches) {
+                log("TASK: Job #${job.jobId} type=${job.type} không khớp cấu hình — skip")
+                gRepo.skipTikTokJob(golikeAcc.id, job.jobId, objectId)
+                consecFail++
+                continue
             }
 
             log("TASK: Job #${job.jobId} type=${job.type} link=${job.link.take(60)}")
@@ -2408,29 +2579,55 @@ class AutomationEngine(
             if (!NodeTraverser.isOnFeedTab(host.getRootNode())) recoverToFeed()
 
             // ── [F] Báo cáo kết quả lên Golike ───────────────────
+            // v1.2.5 — Theo golike.py: complete-jobs CHỈ dùng khi đã làm xong
+            // (không có cờ success). Nếu không làm được trên máy → skip-jobs riêng.
+            if (!success) {
+                setStatus("TASK: Không thực hiện được — báo skip...")
+                log("TASK: Job #${job.jobId} không thực hiện được trên máy — gọi skip")
+                when (val skipResult = gRepo.skipTikTokJob(golikeAcc.id, job.jobId, objectId)) {
+                    is GolikeResult.Success -> log("TASK: Đã skip job #${job.jobId}")
+                    is GolikeResult.Error   -> log("TASK: Lỗi skip job #${job.jobId}: ${skipResult.message}")
+                }
+                consecFail++
+                continue
+            }
+
             setStatus("TASK: Báo cáo kết quả...")
             val completeResult = gRepo.completeTikTokJob(
-                jobId          = job.jobId,
-                uniqueUsername = golikeAcc.uniqueUsername,
-                success        = success,
+                accountId = golikeAcc.id,
+                adsId     = job.jobId,
+                objectId  = objectId,
+                type      = job.type,
+                link      = job.link,
             )
 
             when (completeResult) {
                 is GolikeResult.Success -> {
                     if (completeResult.data.success) {
-                        log("TASK: Job #${job.jobId} hoàn thành ✓ (+${job.fixCoin} coin)")
+                        val earned = completeResult.data.data?.prices ?: job.fixCoin
+                        log("TASK: Job #${job.jobId} hoàn thành ✓ (+$earned coin)")
                         jobsDone++
                         consecFail = 0
                         if (job.type == "like") totalLikes++ else totalFollows++
                     } else {
-                        // Server không xác nhận → báo lỗi (success=false)
                         log("TASK: Server từ chối job #${job.jobId}: ${completeResult.data.message}")
-                        gRepo.completeTikTokJob(job.jobId, golikeAcc.uniqueUsername, success = false)
+                        if (completeResult.data.cooldown > 0) {
+                            log("TASK: Chờ cooldown ${completeResult.data.cooldown}s")
+                            delay(completeResult.data.cooldown * 1_000L)
+                        }
                         consecFail++
                     }
                 }
                 is GolikeResult.Error -> {
                     log("TASK: Lỗi báo cáo job #${job.jobId}: ${completeResult.message}")
+                    if (completeResult.isAuthError) {
+                        log("TASK: Token Golike hết hạn/không hợp lệ — dừng task")
+                        break
+                    }
+                    if (completeResult.cooldown > 0) {
+                        log("TASK: Chờ cooldown ${completeResult.cooldown}s")
+                        delay(completeResult.cooldown * 1_000L)
+                    }
                     consecFail++
                 }
             }
@@ -2651,6 +2848,176 @@ class AutomationEngine(
         delay(500)
         host.killApp(pkg)
         setStatus("")
+    }
+
+    // ── v1.2.4: Demo session runners — X, Instagram, Threads, Snapchat ────────
+
+    /** Demo nuôi X: mở X → lướt timeline → like/repost → đóng. */
+    private suspend fun runXNurtureSession() {
+        val pkg = AppConstants.X_PKG
+        log(">> [X] Bắt đầu phiên nuôi acc X (Twitter)")
+        setStatus(">> Đang mở X...")
+        if (!host.launchApp(pkg)) {
+            log("ERR: Không mở được X (gói: $pkg) — kiểm tra đã cài đặt"); setStatus(""); return
+        }
+        delay(4_000)
+
+        val totalMs   = config.xNurtureDurationSecs * 1_000L
+        val startWall = System.currentTimeMillis()
+        val startPMs  = currentPauseMs()
+        fun secsLeft() = maxOf(0L, (totalMs - ((System.currentTimeMillis() - startWall) - (currentPauseMs() - startPMs))) / 1_000L)
+
+        var scrolled = 0; var liked = 0; var reposted = 0
+        log("X: Lướt timeline ${config.xNurtureDurationSecs}s (like=${config.xLikeRate}, repost=${config.xRetweetRate})")
+
+        while (secsLeft() > 0L && isFarming) {
+            awaitResumed()
+            OverlayFarmMonitor.update(1, 1, "X", secsLeft(), secsLeft(), "X: Lướt timeline (${secsLeft()}s)")
+            safeStep("x_iter", 30_000L) {
+                if (Random.nextFloat() < config.xLikeRate) {
+                    val root = host.getRootNode()
+                    val btn = NodeTraverser.findByText(root, "thích", ignoreCase = true)
+                        ?: NodeTraverser.findByText(root, "like", ignoreCase = true)
+                    if (btn != null) {
+                        Human.microPause(); host.clickNode(btn.node); liked++
+                        log("X: Đã like tweet (#$liked)"); Human.delay(600, 1_200)
+                    }
+                }
+                if (Random.nextFloat() < config.xRetweetRate) {
+                    reposted++; log("X: Repost tweet (#$reposted) (demo)")
+                }
+                val x = screenW / 2 + Human.jitter(12)
+                host.swipeSuspend(x, (screenH * 0.75).toInt(), x, (screenH * 0.25).toInt(), Human.swipeDuration(420))
+                scrolled++
+                Human.delay(1_000, 2_200)
+                Human.occasionalPause(config.occasionalPauseChance)
+            }
+        }
+        log("X: Hoàn thành — lướt $scrolled lần, like $liked, repost $reposted")
+        setStatus("X: Đang đóng X..."); delay(500); host.killApp(pkg); setStatus("")
+    }
+
+    /** Demo nuôi Instagram: mở Instagram → lướt Reels → like → follow → đóng. */
+    private suspend fun runInstagramNurtureSession() {
+        val pkg = AppConstants.INSTAGRAM_PKG
+        log(">> [Instagram] Bắt đầu phiên nuôi acc Instagram")
+        setStatus(">> Đang mở Instagram...")
+        if (!host.launchApp(pkg)) {
+            log("ERR: Không mở được Instagram (gói: $pkg) — kiểm tra đã cài đặt"); setStatus(""); return
+        }
+        delay(4_500)
+
+        val totalMs   = config.instagramNurtureDurationSecs * 1_000L
+        val startWall = System.currentTimeMillis()
+        val startPMs  = currentPauseMs()
+        fun secsLeft() = maxOf(0L, (totalMs - ((System.currentTimeMillis() - startWall) - (currentPauseMs() - startPMs))) / 1_000L)
+
+        var scrolled = 0; var liked = 0; var followed = 0
+        log("IG: Lướt Reels ${config.instagramNurtureDurationSecs}s (like=${config.instagramLikeRate}, follow=${config.instagramFollowRate})")
+
+        while (secsLeft() > 0L && isFarming) {
+            awaitResumed()
+            OverlayFarmMonitor.update(1, 1, "Instagram", secsLeft(), secsLeft(), "IG: Lướt Reels (${secsLeft()}s)")
+            safeStep("ig_iter", 30_000L) {
+                if (Random.nextFloat() < config.instagramLikeRate) {
+                    val root = host.getRootNode()
+                    val btn = NodeTraverser.findByText(root, "thích", ignoreCase = true)
+                        ?: NodeTraverser.findByText(root, "like", ignoreCase = true)
+                    if (btn != null) {
+                        Human.microPause(); host.clickNode(btn.node); liked++
+                        log("IG: Đã like (#$liked)"); Human.delay(500, 1_000)
+                    }
+                }
+                if (Random.nextFloat() < config.instagramFollowRate) {
+                    followed++; log("IG: Follow (demo) (#$followed)")
+                }
+                val x = screenW / 2 + Human.jitter(10)
+                host.swipeSuspend(x, (screenH * 0.80).toInt(), x, (screenH * 0.20).toInt(), Human.swipeDuration(400))
+                scrolled++
+                Human.delay(2_000, 4_000)  // Reels xem lâu hơn
+                Human.occasionalPause(config.occasionalPauseChance)
+            }
+        }
+        log("IG: Hoàn thành — lướt $scrolled lần, like $liked, follow $followed")
+        setStatus("IG: Đang đóng Instagram..."); delay(500); host.killApp(pkg); setStatus("")
+    }
+
+    /** Demo nuôi Threads: mở Threads → lướt feed → like → đóng. */
+    private suspend fun runThreadsNurtureSession() {
+        val pkg = AppConstants.THREADS_PKG
+        log(">> [Threads] Bắt đầu phiên nuôi acc Threads")
+        setStatus(">> Đang mở Threads...")
+        if (!host.launchApp(pkg)) {
+            log("ERR: Không mở được Threads (gói: $pkg) — kiểm tra đã cài đặt"); setStatus(""); return
+        }
+        delay(4_000)
+
+        val totalMs   = config.threadsNurtureDurationSecs * 1_000L
+        val startWall = System.currentTimeMillis()
+        val startPMs  = currentPauseMs()
+        fun secsLeft() = maxOf(0L, (totalMs - ((System.currentTimeMillis() - startWall) - (currentPauseMs() - startPMs))) / 1_000L)
+
+        var scrolled = 0; var liked = 0
+        log("Threads: Lướt feed ${config.threadsNurtureDurationSecs}s (like=${config.threadsLikeRate})")
+
+        while (secsLeft() > 0L && isFarming) {
+            awaitResumed()
+            OverlayFarmMonitor.update(1, 1, "Threads", secsLeft(), secsLeft(), "Threads: Lướt feed (${secsLeft()}s)")
+            safeStep("threads_iter", 30_000L) {
+                if (Random.nextFloat() < config.threadsLikeRate) {
+                    val root = host.getRootNode()
+                    val btn = NodeTraverser.findByText(root, "thích", ignoreCase = true)
+                        ?: NodeTraverser.findByText(root, "like", ignoreCase = true)
+                    if (btn != null) {
+                        Human.microPause(); host.clickNode(btn.node); liked++
+                        log("Threads: Đã like (#$liked)"); Human.delay(600, 1_100)
+                    }
+                }
+                val x = screenW / 2 + Human.jitter(8)
+                host.swipeSuspend(x, (screenH * 0.76).toInt(), x, (screenH * 0.26).toInt(), Human.swipeDuration(430))
+                scrolled++
+                Human.delay(1_200, 2_600)
+                Human.occasionalPause(config.occasionalPauseChance)
+            }
+        }
+        log("Threads: Hoàn thành — lướt $scrolled lần, like $liked")
+        setStatus("Threads: Đang đóng..."); delay(500); host.killApp(pkg); setStatus("")
+    }
+
+    /** Demo nuôi Snapchat: mở Snapchat → xem Spotlight / Stories → swipe → đóng. */
+    private suspend fun runSnapchatNurtureSession() {
+        val pkg = AppConstants.SNAPCHAT_PKG
+        log(">> [Snapchat] Bắt đầu phiên nuôi acc Snapchat")
+        setStatus(">> Đang mở Snapchat...")
+        if (!host.launchApp(pkg)) {
+            log("ERR: Không mở được Snapchat (gói: $pkg) — kiểm tra đã cài đặt"); setStatus(""); return
+        }
+        delay(5_000)  // Snapchat khởi động chậm hơn
+
+        val totalMs   = config.snapchatNurtureDurationSecs * 1_000L
+        val startWall = System.currentTimeMillis()
+        val startPMs  = currentPauseMs()
+        fun secsLeft() = maxOf(0L, (totalMs - ((System.currentTimeMillis() - startWall) - (currentPauseMs() - startPMs))) / 1_000L)
+
+        var storiesViewed = 0
+        val viewMs = config.snapchatStoryViewSecs * 1_000L
+        log("Snapchat: Xem Spotlight ${config.snapchatNurtureDurationSecs}s (${config.snapchatStoryViewSecs}s/story)")
+
+        while (secsLeft() > 0L && isFarming) {
+            awaitResumed()
+            OverlayFarmMonitor.update(1, 1, "Snapchat", secsLeft(), secsLeft(), "Snapchat: Xem story #${storiesViewed + 1}")
+            safeStep("snap_iter", 40_000L) {
+                delay(viewMs)  // xem story N giây
+                storiesViewed++
+                log("Snapchat: Đã xem story #$storiesViewed")
+                // Swipe sang story tiếp theo (trái sang phải = next story)
+                val y = screenH / 2
+                host.swipeSuspend((screenW * 0.85).toInt(), y, (screenW * 0.15).toInt(), y, 250)
+                Human.delay(800, 1_500)
+            }
+        }
+        log("Snapchat: Hoàn thành — đã xem $storiesViewed stories")
+        setStatus("Snapchat: Đang đóng..."); delay(500); host.killApp(pkg); setStatus("")
     }
 }
 
