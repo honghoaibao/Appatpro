@@ -338,7 +338,9 @@ class AutomationEngine(
      * Flag này đảm bảo normalize chạy độc lập, không bị can thiệp bởi
      * các hàm nhận dạng lạc đang chạy song song.
      */
-    @Volatile private var isNormalizing = false
+    @Volatile private var isNormalizing          = false
+    /** v1.2.7: Acc đang active SAU normalize — dùng để không click lại acc hiện tại */
+    @Volatile private var postNormalizeActiveAcc: String? = null
 
     /**
      * v1.2.6 — Flag tắt lost/feed detection trong mọi giai đoạn ĐANG THỰC HIỆN hành động:
@@ -695,8 +697,11 @@ class AutomationEngine(
         AtProNotificationManager.notifyFarmStarted(farmList.size)
 
         // Bước 4: Position acc đầu tiên (popup đang mở — dùng trực tiếp)
+        // v1.2.7: Nếu có normalize thì dùng postNormalizeActiveAcc (stale currentAcc gây click lại acc hiện tại)
+        val effectiveCurrentAcc = postNormalizeActiveAcc ?: currentAcc
+        postNormalizeActiveAcc  = null   // reset sau khi dùng
         setStatus("SWITCH: Đang chuyển sang tài khoản đầu tiên...")
-        val positioned = positionFirstAccount(farmList.first(), currentAcc)
+        val positioned = positionFirstAccount(farmList.first(), effectiveCurrentAcc)
         if (!positioned) {
             log("ERR: Không thể position acc đầu: @${farmList.first()}")
             setStatus("")
@@ -932,7 +937,13 @@ class AutomationEngine(
                 discovered.addAll(0, listOf(lastNormalized))
                 discovered.addAll(rest)
             }
-            log("FIX: Chuẩn hoá xong — ${fixedUsernames.size} username (đầu farmList: ${discovered.firstOrNull()})")
+            // v1.2.7: lưu acc đang active sau normalize để phaseDiscover dùng thay currentAcc cũ
+            if (fixedUsernames.isNotEmpty()) {
+                postNormalizeActiveAcc = fixedUsernames.last()
+                log("FIX: Chuẩn hoá xong — ${fixedUsernames.size} username, active hiện tại: @${postNormalizeActiveAcc}")
+            } else {
+                log("FIX: Chuẩn hoá xong — không có username mới")
+            }
 
             // Mở lại popup lần cuối cho positionFirstAccount
             if (isFarming) {
@@ -1744,6 +1755,7 @@ class AutomationEngine(
             Human.doubleTapGap()
             host.clickSuspend(cx + Human.jitter(8), cy + Human.jitter(8))
             Human.likeAnimDelay()
+            log("TIM: Tim video")   // v1.2.7: hiển thị trong popup
             delay((config.delayAfterLike * 1_000).toLong())
         } finally {
             isActionLocked = false

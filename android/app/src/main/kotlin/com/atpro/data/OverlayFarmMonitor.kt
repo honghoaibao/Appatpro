@@ -159,8 +159,9 @@ object OverlayFarmMonitor {
     }
 
     // [v1.1.8] Last-posted values — skip redundant handler.post when nothing changed
-    private var lastAccountText = ""
-    private var lastActionText  = ""
+    private var lastAccountText  = ""
+    private var lastActionText   = ""
+    private var lastShownAction  = ""   // v1.2.7: tránh spam tvUserLog khi action không đổi
 
     fun update(
         accountIndex:    Int,
@@ -182,8 +183,17 @@ object OverlayFarmMonitor {
         handler.post {
             tvAccount?.text = accountText
 
-            // [v1.2.7] tvAction đã xoá — action string được chuyển vào tvUserLog nếu cần
-            // Log thường (addLog) vẫn là nguồn chính cho tvUserLog.
+            // v1.2.7: action → tvUserLog (thay cho tvAction đã xoá)
+            // Chỉ hiện action thực sự hữu ích (không hiện khi trống hoặc không đổi)
+            val actionClean = action.trim()
+            if (actionClean.isNotEmpty() && actionClean != lastShownAction) {
+                lastShownAction = actionClean
+                tvUserLog?.text = actionClean
+                tvBubbleLog?.let { b ->
+                    b.text = actionClean
+                    b.visibility = View.VISIBLE
+                }
+            }
 
             // [v1.1.0] Sync ticker state với giá trị thực từ engine
             // Chỉ reset nếu lệch >2s để tránh giật khi update liên tục
@@ -202,30 +212,50 @@ object OverlayFarmMonitor {
     }
 
     /**
-     * v1.2.7: Log area đơn giản — chỉ hiển thị log thường cho người dùng.
-     * Tất cả log có prefix kỹ thuật (LIVE-FEED:, SCAN:, WARN:, v.v.) bị lọc bỏ.
-     * Chỉ log "sạch" (không prefix) mới xuất hiện trong popup.
+     * v1.2.7: addLog() với WHITELIST — chỉ hiện log có ý nghĩa với người dùng.
+     *
+     * WHITELIST prefix → clean text:
+     *   ACC:    [X/Y] @username        → "@username (X/Y)"
+     *   TIM:    Tim video              → "❤ Tim video"
+     *   FOLLOW: Đã theo dõi...         → "✓ Đã theo dõi"
+     *   CMT:    Comment: "text"        → "💬 text"
+     *
+     * "Xem video (Xs)" đến qua update(action=...) → không qua hàm này.
+     * Tất cả log còn lại (kỹ thuật) bị bỏ qua hoàn toàn.
      */
     fun addLog(msg: String) {
-        // Lọc tất cả log kỹ thuật (system log) — không hiển thị trong popup
-        val systemPrefixes = listOf(
-            "LIST:", "DEV:", "SAVE:", "SCAN:", "WDG:", "RECOVER:",
-            "LIVE-FEED:", "WARN:", "ERR:", "SKIP:", "AUTH:", "ACCS:",
-            "LIMIT:", "WELLBEING:", "NOTIFY:", "LIKE:", "FOLLOW:",
-            "CMT:", "REST:", "ACC:", "OK:", "FARM:", "TASK:"
-        )
-        if (systemPrefixes.any { msg.startsWith(it) }) return
+        val cleanMsg: String = when {
+            // Tài khoản: "ACC: [1/8] @hoaibao.209" → "@hoaibao.209 (1/8)"
+            msg.startsWith("ACC: ") -> {
+                val body = msg.removePrefix("ACC: ").trim()   // "[1/8] @hoaibao"
+                val m = Regex("\\[(\\d+)/(\\d+)\\]\\s*@?(\\S+)").find(body)
+                if (m != null) "@${m.groupValues[3]} (${m.groupValues[1]}/${m.groupValues[2]})".take(48)
+                else return
+            }
+            // Tim video: "TIM: ..." → "❤ Tim video"
+            msg.startsWith("TIM: ") ->
+                "❤ " + msg.removePrefix("TIM: ").trim().take(40)
+            // Follow: "FOLLOW: Đã theo dõi — back về feed" → "✓ Đã theo dõi"
+            msg.startsWith("FOLLOW: ") && ("theo dõi" in msg.lowercase() || "follow" in msg.lowercase()) ->
+                "✓ Đã theo dõi"
+            // Comment: "CMT: Comment: "text"" → "💬 text"
+            msg.startsWith("CMT: ") -> {
+                val body = msg.removePrefix("CMT: ").removePrefix("Comment: ")
+                    .trim().removeSurrounding("\"").take(40)
+                "💬 $body"
+            }
+            // Bỏ hết log còn lại (kỹ thuật)
+            else -> return
+        }
 
-        val cleanMsg = msg.take(52)
         if (cleanMsg == lastUserLog) return   // tránh spam
         lastUserLog = cleanMsg
 
         handler.post {
             tvUserLog?.text = cleanMsg
-            // v1.2.7: cập nhật speech bubble khi đang minimize
             tvBubbleLog?.let { bubble ->
                 bubble.text = cleanMsg
-                bubble.visibility = if (cleanMsg.isEmpty()) View.GONE else View.VISIBLE
+                bubble.visibility = View.VISIBLE
             }
         }
     }
@@ -574,8 +604,9 @@ object OverlayFarmMonitor {
             if (isMinimized) {
                 fullPanel?.visibility  = View.GONE
                 circleView?.visibility = View.VISIBLE
-                lp.width  = circleSizePx
-                lp.height = circleSizePx
+                // v1.2.7: đủ chỗ cho circle + speech bubble phía trên
+                lp.width  = dp(170)
+                lp.height = circleSizePx + dp(80)
             } else {
                 circleView?.visibility = View.GONE
                 fullPanel?.visibility  = View.VISIBLE
