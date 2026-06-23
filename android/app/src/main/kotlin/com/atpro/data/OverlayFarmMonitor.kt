@@ -38,14 +38,17 @@ object OverlayFarmMonitor {
     const val TAG = "OverlayMonitor"
 
     // ── Colors (đồng bộ design tokens với DashboardScreen) ──
-    private const val C_BG       = 0xF01A1A2E.toInt()
-    private const val C_BORDER   = 0x446C63FF.toInt()
-    private const val C_PURPLE   = 0xFF6C63FF.toInt()
+    // v1.2.7: Improved popup palette — darker bg, stronger purple glow border
+    private const val C_BG       = 0xF50D0D18.toInt()   // near-black with slight blue tint
+    private const val C_BG2      = 0xF0141428.toInt()   // body area slightly lighter
+    private const val C_BORDER   = 0x556C63FF.toInt()   // purple border, slightly more opaque
+    private const val C_PURPLE   = 0xFF7C73FF.toInt()   // brighter purple
     private const val C_GREEN    = 0xFF10B981.toInt()
     private const val C_AMBER    = 0xFFF59E0B.toInt()
     private const val C_RED      = 0xFFEF4444.toInt()
-    private const val C_TEXT     = 0xFFE5E7EB.toInt()
-    private const val C_MUTED    = 0xFF9CA3AF.toInt()
+    private const val C_TEXT     = 0xFFEEEEF5.toInt()   // slightly brighter text
+    private const val C_MUTED    = 0xFF8B8FA8.toInt()   // muted blue-grey
+    private const val C_DIM      = 0xFF4B5563.toInt()   // dimmer muted
 
     private var windowManager: WindowManager? = null
     private var overlayView: View?            = null
@@ -57,7 +60,6 @@ object OverlayFarmMonitor {
     private var tvAccount:     TextView? = null
     private var tvSessionTime: TextView? = null
     private var tvTotalTime:   TextView? = null
-    private var tvAction:      TextView? = null
     private var btnPauseResume: TextView? = null
     private var btnStop:       TextView? = null
     // [v1.1.7] Minimize support — thu gọn overlay thành chỉ còn header
@@ -70,11 +72,13 @@ object OverlayFarmMonitor {
     private var panelWidthPx:  Int       = 0
     private var circleSizePx:  Int       = 0
 
-    // [v1.1.0] Log area — 3 dòng gần nhất
-    private var tvLog1: TextView? = null
-    private var tvLog2: TextView? = null
-    private var tvLog3: TextView? = null
-    private val recentLogLines = ArrayDeque<String>()
+    // [v1.2.7] Log area — chỉ giữ log thường (không còn system log dim)
+    private var tvUserLog:  TextView? = null
+    private var tvBubbleLog: TextView? = null   // v1.2.7: chat bubble khi minimize
+    private var lastUserLog: String   = ""
+    // Loading dots animation
+    private var dotsRunnable: Runnable? = null
+    private var dotsPhase:    Int       = 0
 
     // Track trạng thái pause nội bộ
     private var isPaused: Boolean = false
@@ -131,12 +135,12 @@ object OverlayFarmMonitor {
             overlayView    = null; windowManager  = null
             tvHeader       = null; tvAccount      = null; statusDotBg    = null
             tvSessionTime  = null; tvTotalTime    = null
-            tvAction       = null; btnPauseResume = null
+            btnPauseResume = null
             btnStop        = null; btnMinimize    = null
             contentArea    = null; isMinimized    = false
             fullPanel      = null; circleView     = null
-            tvLog1         = null; tvLog2         = null; tvLog3 = null
-            recentLogLines.clear()
+            tvUserLog = null; tvBubbleLog = null; lastUserLog = ""
+            stopDotsAnimation()
             isPaused       = false
         }
     }
@@ -150,8 +154,7 @@ object OverlayFarmMonitor {
 
     fun setStartupStatus(msg: String) {
         handler.post {
-            tvAction?.text      = if (msg.isEmpty()) "Chờ..." else msg
-            tvAction?.setTextColor(if (msg.isEmpty()) C_MUTED else C_AMBER)
+            // tvAction removed v1.2.7
         }
     }
 
@@ -178,8 +181,9 @@ object OverlayFarmMonitor {
 
         handler.post {
             tvAccount?.text = accountText
-            tvAction?.text  = action
-            tvAction?.setTextColor(C_MUTED)
+
+            // [v1.2.7] tvAction đã xoá — action string được chuyển vào tvUserLog nếu cần
+            // Log thường (addLog) vẫn là nguồn chính cho tvUserLog.
 
             // [v1.1.0] Sync ticker state với giá trị thực từ engine
             // Chỉ reset nếu lệch >2s để tránh giật khi update liên tục
@@ -198,33 +202,31 @@ object OverlayFarmMonitor {
     }
 
     /**
-     * v1.1.0: Thêm một dòng log vào khu vực log của overlay.
-     * Giữ tối đa 3 dòng gần nhất (FIFO). Lọc bỏ log quá dài/quá noise.
+     * v1.2.7: Log area đơn giản — chỉ hiển thị log thường cho người dùng.
+     * Tất cả log có prefix kỹ thuật (LIVE-FEED:, SCAN:, WARN:, v.v.) bị lọc bỏ.
+     * Chỉ log "sạch" (không prefix) mới xuất hiện trong popup.
      */
     fun addLog(msg: String) {
-        // Bỏ qua các log noise không cần thiết trong overlay
-        val skip = msg.startsWith("LIST:") || msg.startsWith("DEV:") ||
-                   msg.startsWith("SAVE:") || msg.startsWith("SCAN: Lost") ||
-                   msg.startsWith("WDG:")  || msg.startsWith("RECOVER:")   // [v1.1.8] noise giảm
-        if (skip) return
+        // Lọc tất cả log kỹ thuật (system log) — không hiển thị trong popup
+        val systemPrefixes = listOf(
+            "LIST:", "DEV:", "SAVE:", "SCAN:", "WDG:", "RECOVER:",
+            "LIVE-FEED:", "WARN:", "ERR:", "SKIP:", "AUTH:", "ACCS:",
+            "LIMIT:", "WELLBEING:", "NOTIFY:", "LIKE:", "FOLLOW:",
+            "CMT:", "REST:", "ACC:", "OK:", "FARM:", "TASK:"
+        )
+        if (systemPrefixes.any { msg.startsWith(it) }) return
 
-        // [v1.1.8] Bỏ qua nếu trùng với dòng log cuối — tránh spam overlay
-        val SHORT_MSG = msg
-            .removePrefix("WARN: ").removePrefix("ERR: ").removePrefix("OK: ")
-            .removePrefix("SKIP: ").removePrefix("LIKE: ").removePrefix("FOLLOW: ")
-            .removePrefix("CMT: ").removePrefix("ACC: ").removePrefix("AUTH: ")
-            .removePrefix("NOTIFY: ").removePrefix("ACCS: ").removePrefix("REST: ")
-            .removePrefix("LIMIT: ").removePrefix("WELLBEING: ")
-            .take(36)
-        if (recentLogLines.firstOrNull() == SHORT_MSG) return
+        val cleanMsg = msg.take(52)
+        if (cleanMsg == lastUserLog) return   // tránh spam
+        lastUserLog = cleanMsg
 
         handler.post {
-            recentLogLines.addFirst(SHORT_MSG)
-            while (recentLogLines.size > 3) recentLogLines.removeLast()
-
-            tvLog1?.text = recentLogLines.getOrNull(0) ?: ""
-            tvLog2?.text = recentLogLines.getOrNull(1) ?: ""
-            tvLog3?.text = recentLogLines.getOrNull(2) ?: ""
+            tvUserLog?.text = cleanMsg
+            // v1.2.7: cập nhật speech bubble khi đang minimize
+            tvBubbleLog?.let { bubble ->
+                bubble.text = cleanMsg
+                bubble.visibility = if (cleanMsg.isEmpty()) View.GONE else View.VISIBLE
+            }
         }
     }
 
@@ -264,6 +266,35 @@ object OverlayFarmMonitor {
         tickerRunnable = null
     }
 
+    // ── Loading dots animation for action text ────────────────
+
+    /**
+     * v1.2.7: Hiệu ứng loading dots (...) cho action text khi đang chờ.
+     * Ví dụ: "Chuẩn bị." → "Chuẩn bị.." → "Chuẩn bị..." → cycle lại.
+     */
+    private fun startDotsAnimation(baseText: String) {
+        stopDotsAnimation()
+        dotsPhase = 0
+        val dots = arrayOf(".", "..", "...")
+        val r = object : Runnable {
+            override fun run() {
+                val d = dots[dotsPhase % 3]
+                // tvAction removed v1.2.7
+                dotsPhase++
+                dotsRunnable = this
+                handler.postDelayed(this, 500L)
+            }
+        }
+        dotsRunnable = r
+        handler.postDelayed(r, 400L)
+    }
+
+    private fun stopDotsAnimation() {
+        dotsRunnable?.let { handler.removeCallbacks(it) }
+        dotsRunnable = null
+        dotsPhase = 0
+    }
+
     // ── View builder ──────────────────────────────────────────
 
     private fun buildView(context: Context): View {
@@ -284,10 +315,14 @@ object OverlayFarmMonitor {
         // ── Inner panel (toàn bộ nội dung popup) ──
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(10), dp(12), dp(10))
+            // v1.2.7: tighter padding, bigger corner radius cho vẻ ngoài tinh tế hơn
+            setPadding(dp(13), dp(11), dp(13), dp(11))
             background = GradientDrawable().apply {
-                setColor(C_BG)
-                cornerRadius = dp(12).toFloat()
+                // Gradient từ trên xuống: deep dark → slightly lighter
+                colors = intArrayOf(C_BG, C_BG2)
+                orientation = GradientDrawable.Orientation.TOP_BOTTOM
+                gradientType = GradientDrawable.LINEAR_GRADIENT
+                cornerRadius = dp(16).toFloat()
                 setStroke(dp(1), C_BORDER)
             }
         }
@@ -298,29 +333,77 @@ object OverlayFarmMonitor {
         ))
 
         // ── Circle indicator — chỉ hiện khi thu nhỏ ──
-        // [v1.1.8] Khi minimize: ẩn panel, hiện hình tròn nhỏ 52dp x 52dp.
-        val circle = FrameLayout(context).apply {
+        // [v1.2.7] Minimize bubble — logo app (ảnh) + speech bubble log bên trên
+        // Wrapper ngoài: FrameLayout chứa cả bubble text và circle logo
+        val bubbleWrapper = FrameLayout(context).apply {
             visibility = View.GONE
+        }
+
+        // Speech bubble — hiện log mới nhất như tin nhắn
+        val tvBubbleLog = TextView(context).apply {
+            text     = ""
+            textSize = 8f
+            setTextColor(C_TEXT)
+            gravity  = Gravity.CENTER
+            maxLines = 2
+            val bg = GradientDrawable().apply {
+                setColor(C_BG2)
+                cornerRadius = dp(10).toFloat()
+                setStroke(dp(1), C_BORDER)
+            }
+            background = bg
+            setPadding(dp(6), dp(4), dp(6), dp(4))
+            visibility = View.GONE   // ẩn khi chưa có log
+        }
+        bubbleWrapper.addView(tvBubbleLog, FrameLayout.LayoutParams(
+            dp(160), FrameLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            gravity     = Gravity.BOTTOM or Gravity.START
+            bottomMargin = circleSizePx + dp(4)   // nổi trên circle
+        })
+        this.tvBubbleLog = tvBubbleLog   // lưu ref
+
+        // Circle logo — dùng ImageView thay text "AT"
+        val circle = FrameLayout(context).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(C_BG)
                 setStroke(dp(2), C_PURPLE)
             }
         }
-        val circleLabel = TextView(context).apply {
-            text = "AT"
-            textSize = 10f
-            setTextColor(C_PURPLE)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
+        // App icon
+        try {
+            val icon = context.packageManager
+                .getApplicationIcon(context.packageName)
+            val imgView = android.widget.ImageView(context).apply {
+                setImageDrawable(icon)
+                scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+                setPadding(dp(6), dp(6), dp(6), dp(6))
+            }
+            circle.addView(imgView, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ))
+        } catch (_: Exception) {
+            // Fallback: text "AT" nếu không lấy được icon
+            val fallback = TextView(context).apply {
+                text = "AT"; textSize = 10f
+                setTextColor(C_PURPLE); typeface = Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+            }
+            circle.addView(fallback, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
+            ).apply { gravity = Gravity.CENTER })
         }
-        circle.addView(circleLabel, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT,
-        ).apply { gravity = Gravity.CENTER })
-        circle.setOnClickListener { onMinimizeClick() }  // tap circle → restore
-        circleView = circle
-        wrapper.addView(circle, FrameLayout.LayoutParams(circleSizePx, circleSizePx))
+        circle.setOnClickListener { onMinimizeClick() }   // tap → restore
+        bubbleWrapper.addView(circle, FrameLayout.LayoutParams(circleSizePx, circleSizePx).apply {
+            gravity = Gravity.BOTTOM or Gravity.START
+        })
+
+        circleView = bubbleWrapper
+        wrapper.addView(bubbleWrapper, FrameLayout.LayoutParams(
+            dp(170), circleSizePx + dp(60)   // đủ chỗ cho bubble phía trên
+        ))
 
         fun text(t: String, sizeSp: Float, color: Int, bold: Boolean = false): TextView =
             TextView(context).apply {
@@ -336,7 +419,7 @@ object OverlayFarmMonitor {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val tvLogo = text("AT PRO", 9f, C_PURPLE, bold = true).apply { typeface = Typeface.DEFAULT_BOLD }
+        val tvLogo = text("AT PRO", 10f, C_PURPLE, bold = true).apply { typeface = Typeface.DEFAULT_BOLD; letterSpacing = 0.08f }  // v1.2.7
         val dotBg = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(C_GREEN)
@@ -383,29 +466,32 @@ object OverlayFarmMonitor {
         body.addView(divider())
 
         // ── Account + progress ──
-        tvAccount = text("@—  ·  —/—", 10f, C_TEXT).also { body.addView(it) }
+        tvAccount = text("@—  ·  —/—", 10.5f, C_TEXT, bold = false).also { body.addView(it) }  // v1.2.7: slightly larger
 
+        // v1.2.7: Time row với font kích thước nhất quán, spacing tốt hơn
         val timeRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, dp(2), 0, 0)
+            setPadding(0, dp(3), 0, 0)
         }
-        val lblSession = text("Phiên  ", 9f, C_MUTED)
+        val lblSession = text("Phiên  ", 8.5f, C_DIM)
         tvSessionTime  = text("--:--", 9f, C_GREEN, bold = true)
-        val lblSep     = text("   Tổng  ", 9f, C_MUTED)
+        val lblSep     = text("   Tổng  ", 8.5f, C_DIM)
         tvTotalTime    = text("--:--", 9f, C_TEXT)
         timeRow.addView(lblSession); timeRow.addView(tvSessionTime)
         timeRow.addView(lblSep);     timeRow.addView(tvTotalTime)
         body.addView(timeRow)
 
         // Action text
-        tvAction = text("Chờ...", 9f, C_MUTED).apply { setPadding(0, dp(3), 0, 0) }
-        body.addView(tvAction)
 
-        // [v1.1.0] Log area — 3 dòng gần nhất
-        body.addView(divider())
-        tvLog1 = text("", 8f, C_MUTED).also { body.addView(it) }
-        tvLog2 = text("", 8f, 0xFF6B7280.toInt()).also { body.addView(it) }
-        tvLog3 = text("", 8f, 0xFF4B5563.toInt()).also { body.addView(it) }
+
+        // [v1.2.7] Log thường — 1 dòng user-friendly (đã bỏ system log dim)
+        // v1.2.7: Log thường — tăng kích thước chút, italic để phân biệt với action
+        tvUserLog = text("", 8.5f, 0xFF6B7280.toInt()).apply {
+            setPadding(0, dp(2), 0, dp(1))
+            typeface = android.graphics.Typeface.create(
+                android.graphics.Typeface.DEFAULT, android.graphics.Typeface.ITALIC
+            )
+        }.also { body.addView(it) }
 
         // Divider trước nút điều khiển
         body.addView(divider())

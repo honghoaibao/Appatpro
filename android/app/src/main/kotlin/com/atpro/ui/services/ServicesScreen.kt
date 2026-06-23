@@ -6,6 +6,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,6 +27,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.atpro.R
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 private val BgDark      = Color(0xFF0D0D14)
@@ -37,9 +43,6 @@ private val TextMuted   = Color(0xFF5C5C78)
 private val TikTokBlack = Color(0xFF010101)
 private val TikTokRed   = Color(0xFFFE2C55)
 private val TikTokCyan  = Color(0xFF69C9D0)
-private val GolikeGold  = Color(0xFFF5A623)
-private val GolikeAmber = Color(0xFFFF6B35)
-private val GolikeDark  = Color(0xFF1A1205)
 private val FacebookBlue = Color(0xFF1877F2)   // v1.2.3
 private val XBlack       = Color(0xFF14171A)   // v1.2.4 X (Twitter)
 private val XGray        = Color(0xFF536471)
@@ -55,22 +58,16 @@ private val SnapYellow   = Color(0xFFFFFC00)   // v1.2.4 Snapchat
 
 /**
  * v1.2.1: Thêm callbacks để điều hướng tới Dashboard với chế độ tương ứng.
- * v1.2.2: Thêm onGolikeLogout; block task service khi chưa đăng nhập.
- * v1.2.4: Thêm callbacks cho X, Instagram, Threads, Snapchat demo.
+ * v1.2.7: Xoá Golike UI (backend giữ nguyên).
  */
 @Composable
 fun ServicesScreen(
     onOpenFarmService:     () -> Unit  = {},
-    onOpenTaskService:     () -> Unit  = {},
     onOpenFacebookService: () -> Unit  = {},
     onOpenXService:        () -> Unit  = {},
     onOpenInstagramService:() -> Unit  = {},
     onOpenThreadsService:  () -> Unit  = {},
     onOpenSnapchatService: () -> Unit  = {},
-    onOpenGolikeLogin:     () -> Unit  = {},
-    onGolikeLogout:        () -> Unit  = {},
-    isGolikeLoggedIn:      Boolean     = false,
-    golikeDisplayName:     String      = "",
 ) {
     Column(
         modifier = Modifier
@@ -91,11 +88,7 @@ fun ServicesScreen(
         ) {
             // Card 1: Nuôi acc
             TikTokFarmCard(onClick = onOpenFarmService)
-            // Card 2: Làm nhiệm vụ (v1.2.1 mới) — v1.2.2: block khi chưa đăng nhập
-            TikTokTaskCard(
-                onClick          = if (isGolikeLoggedIn) onOpenTaskService else onOpenGolikeLogin,
-                isGolikeLoggedIn = isGolikeLoggedIn,
-            )
+
         }
 
         // ── Demo nuôi acc khác [v1.2.3/v1.2.4] ──────────────────────────────────────
@@ -112,19 +105,6 @@ fun ServicesScreen(
             SnapchatNurtureCard(onClick = onOpenSnapchatService)
         }
 
-        // ── Dịch vụ kiếm tiền ───────────────────────────────────────────────
-        ServiceGroup(
-            title  = "Tài khoản Golike",
-            icon   = Icons.Rounded.AttachMoney,
-            accent = GolikeGold,
-        ) {
-            GolikeAccountCard(
-                isLoggedIn    = isGolikeLoggedIn,
-                displayName   = golikeDisplayName,
-                onLoginClick  = onOpenGolikeLogin,
-                onLogoutClick = onGolikeLogout,
-            )
-        }
 
         Spacer(Modifier.height(24.dp))
     }
@@ -207,192 +187,126 @@ private fun TikTokFarmCard(onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .scale(scale)
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(20.dp))
             .background(
-                Brush.horizontalGradient(
+                Brush.linearGradient(
                     colorStops = arrayOf(
-                        0.0f to TikTokBlack,
-                        0.55f to Color(0xFF0D0D0D),
-                        0.85f to TikTokCyan.copy(alpha = 0.18f),
-                        1.0f to TikTokRed.copy(alpha = 0.22f),
+                        0.0f  to Color(0xFF0A0A0F),
+                        0.40f to TikTokBlack,
+                        0.75f to TikTokCyan.copy(alpha = 0.12f),
+                        1.0f  to TikTokRed.copy(alpha = 0.18f),
                     ),
                 )
             )
             .border(
-                width  = 1.dp,
-                brush  = Brush.horizontalGradient(
-                    listOf(TikTokCyan.copy(alpha = 0.35f), TikTokRed.copy(alpha = 0.25f))
+                width = 0.8.dp,
+                brush = Brush.linearGradient(
+                    listOf(
+                        TikTokCyan.copy(alpha = 0.50f),
+                        TikTokRed.copy(alpha = 0.30f),
+                    )
                 ),
-                shape  = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(20.dp),
             )
-            .clickable(onClick = onClick, onClickLabel = "Mở nuôi tài khoản TikTok")
-            .padding(horizontal = 20.dp, vertical = 18.dp),
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = {
+                        pressed = true
+                        tryAwaitRelease()
+                        pressed = false
+                    },
+                    onTap = { onClick() },
+                )
+            }
+            .padding(horizontal = 20.dp, vertical = 20.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Glow subtle ở góc phải
+        Box(
+            modifier = Modifier
+                .size(130.dp)
+                .offset(x = 60.dp, y = (-30).dp)
+                .align(Alignment.TopEnd)
+                .background(
+                    Brush.radialGradient(
+                        listOf(TikTokCyan.copy(alpha = 0.08f), Color.Transparent)
+                    )
+                )
+        )
+
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            // Row 1: Icon + Title + Badge
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                TikTokIconBox()
+                // v1.2.7: TikTok icon box — logo fill toàn bộ, bg đen
+                Box(
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(TikTokBlack)
+                        .border(
+                            0.5.dp,
+                            Brush.linearGradient(listOf(TikTokCyan.copy(alpha = 0.5f), TikTokRed.copy(alpha = 0.4f))),
+                            RoundedCornerShape(14.dp),
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    TikTokIconBox()
+                }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text          = "Nuôi tài khoản TikTok",
                         color         = Color.White,
                         fontSize      = 16.sp,
                         fontWeight    = FontWeight.Bold,
-                        letterSpacing = 0.2.sp,
+                        letterSpacing = 0.3.sp,
                     )
                     Text(
-                        text     = "Tự động tương tác & tăng trưởng",
+                        text     = "Tự động tương tác · tăng trưởng tự nhiên",
                         color    = TextSec,
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
                     )
                 }
                 ActiveBadge()
             }
 
-            HorizontalDivider(TikTokCyan)
+            // Divider gradient
+            Box(
+                Modifier.fillMaxWidth().height(0.5.dp)
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(TikTokCyan.copy(alpha = 0.5f), TikTokRed.copy(alpha = 0.3f), Color.Transparent)
+                        )
+                    )
+            )
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Row 2: Feature chips
+            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 ServiceChip("Xem video", TikTokCyan)
                 ServiceChip("Like", TikTokRed)
                 ServiceChip("Follow", Color(0xFF9D92F5))
+                ServiceChip("Comment", Color(0xFF34D399))
             }
 
-            OpenServiceRow(TikTokCyan)
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Card: Làm nhiệm vụ TikTok (v1.2.1 mới)
-// ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun TikTokTaskCard(
-    onClick:          () -> Unit,
-    isGolikeLoggedIn: Boolean,
-) {
-    var pressed by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue   = if (pressed) 0.97f else 1f,
-        animationSpec = tween(120),
-        label         = "task_card_scale",
-    )
-
-    val AccentTask = Color(0xFF7C3AED)  // violet
-    val AccentTask2 = Color(0xFF4F46E5) // indigo
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .scale(scale)
-            .clip(RoundedCornerShape(16.dp))
-            .background(
-                Brush.horizontalGradient(
-                    colorStops = arrayOf(
-                        0.0f to Color(0xFF0A0A18),
-                        0.6f to Color(0xFF0D0D1C),
-                        1.0f to AccentTask.copy(alpha = 0.15f),
-                    ),
-                )
-            )
-            .border(
-                width  = 1.dp,
-                brush  = Brush.horizontalGradient(
-                    listOf(AccentTask.copy(alpha = 0.4f), AccentTask2.copy(alpha = 0.2f))
-                ),
-                shape  = RoundedCornerShape(16.dp),
-            )
-            .clickable(onClick = onClick, onClickLabel = "Mở làm nhiệm vụ TikTok")
-            .padding(horizontal = 20.dp, vertical = 18.dp),
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Row 3: CTA
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                // Task icon
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(
-                            Brush.linearGradient(
-                                listOf(AccentTask.copy(alpha = 0.8f), AccentTask2.copy(alpha = 0.6f))
-                            )
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.AssignmentTurnedIn,
-                        contentDescription = null,
-                        tint     = Color.White,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text          = "Làm nhiệm vụ TikTok",
-                        color         = Color(0xFFD4BCFC),
-                        fontSize      = 16.sp,
-                        fontWeight    = FontWeight.Bold,
-                        letterSpacing = 0.2.sp,
-                    )
-                    Text(
-                        text     = "Kiếm coin Golike qua tim & follow",
-                        color    = TextSec,
-                        fontSize = 12.sp,
-                    )
-                }
-
-                // Login required badge if not logged in
-                if (!isGolikeLoggedIn) {
-                    Surface(
-                        shape  = RoundedCornerShape(20.dp),
-                        color  = Color(0xFFF59E0B).copy(alpha = 0.12f),
-                        border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.4f)),
-                    ) {
-                        Text(
-                            text       = "Cần đăng nhập",
-                            color      = Color(0xFFF59E0B),
-                            fontSize   = 9.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier   = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-                        )
-                    }
-                } else {
-                    ActiveBadge()
-                }
-            }
-
-            HorizontalDivider(AccentTask)
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ServiceChip("Tim video", TikTokRed)
-                ServiceChip("Follow", Color(0xFF9D92F5))
-                ServiceChip("Golike", GolikeGold)
-            }
-
-            // v1.2.2: Khi chưa login → nút chỉ tới trang đăng nhập Golike
-            Row(
-                verticalAlignment     = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
-                modifier              = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text       = if (isGolikeLoggedIn) "Mở dịch vụ" else "Đăng nhập Golike",
-                    color      = if (isGolikeLoggedIn) AccentTask else Color(0xFFF5A623),
+                    text       = "Bắt đầu farm",
+                    color      = TikTokCyan,
                     fontSize   = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Spacer(Modifier.width(4.dp))
                 Icon(
-                    imageVector        = Icons.Rounded.ArrowForwardIos,
+                    Icons.Rounded.ArrowForwardIos,
                     contentDescription = null,
-                    tint               = if (isGolikeLoggedIn) AccentTask else Color(0xFFF5A623),
-                    modifier           = Modifier.size(12.dp),
+                    tint     = TikTokCyan,
+                    modifier = Modifier.size(11.dp),
                 )
             }
         }
@@ -453,8 +367,13 @@ private fun XNurtureCard(onClick: () -> Unit) {
         bgTo        = Color(0xFF1D9BF0).copy(alpha = 0.10f),
         borderColor = Color(0xFF536471),
         iconContent = {
-            // X logo — simple X mark
-            Text("𝕏", color = AccentX, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            // v1.2.7: X logo fill toàn bộ ô (fillMaxSize → fit trong PlatformDemoCard 40dp)
+            Box(
+                modifier = Modifier.fillMaxSize().background(XBlack),
+                contentAlignment = Alignment.Center,
+            ) {
+                PlatformLogo(R.drawable.ic_logo_x, "X", Modifier.fillMaxSize())
+            }
         },
         title       = "Nuôi tài khoản X",
         subtitle    = "Lướt timeline & like tweet (demo)",
@@ -477,16 +396,14 @@ private fun InstagramNurtureCard(onClick: () -> Unit) {
         bgTo        = InstaGradA.copy(alpha = 0.12f),
         borderColor = InstaGradA.copy(alpha = 0.35f),
         iconContent = {
+            // v1.2.7: Instagram logo fill toàn bộ ô với gradient background
             Box(
                 modifier = Modifier
-                    .size(22.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(
-                        Brush.linearGradient(listOf(InstaGradA, InstaGradB, InstaGradC))
-                    ),
+                    .fillMaxSize()
+                    .background(Brush.linearGradient(listOf(InstaGradA, InstaGradB, InstaGradC))),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Rounded.CameraAlt, null, tint = Color.White, modifier = Modifier.size(13.dp))
+                PlatformLogo(R.drawable.ic_logo_instagram, "Instagram", Modifier.fillMaxSize())
             }
         },
         title       = "Nuôi tài khoản Instagram",
@@ -510,7 +427,13 @@ private fun ThreadsNurtureCard(onClick: () -> Unit) {
         bgTo        = Color(0xFF333333).copy(alpha = 0.20f),
         borderColor = Color(0xFF444444),
         iconContent = {
-            Text("@", color = tAccent, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            // v1.2.7: Threads — fill toàn bộ ô
+            Box(
+                modifier = Modifier.fillMaxSize().background(ThreadsBlack),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("@", color = tAccent, fontSize = 20.sp, fontWeight = FontWeight.Black)
+            }
         },
         title       = "Nuôi tài khoản Threads",
         subtitle    = "Lướt feed & like bài viết (demo)",
@@ -532,7 +455,13 @@ private fun SnapchatNurtureCard(onClick: () -> Unit) {
         bgTo        = SnapYellow.copy(alpha = 0.12f),
         borderColor = SnapYellow.copy(alpha = 0.40f),
         iconContent = {
-            Icon(Icons.Rounded.CameraAlt, null, tint = SnapYellow, modifier = Modifier.size(22.dp))
+            // v1.2.7: Snapchat logo fill toàn bộ ô với SnapYellow background
+            Box(
+                modifier = Modifier.fillMaxSize().background(SnapYellow),
+                contentAlignment = Alignment.Center,
+            ) {
+                PlatformLogo(R.drawable.ic_logo_snapchat, "Snapchat", Modifier.fillMaxSize())
+            }
         },
         title       = "Nuôi tài khoản Snapchat",
         subtitle    = "Xem Spotlight & Stories (demo)",
@@ -581,11 +510,17 @@ private fun PlatformDemoCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                // v1.2.7: Icon box — clip đủ để logo fillMaxSize bị trim góc
+                // Background được set bởi iconContent (platform-specific color)
                 Box(
                     modifier = Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color.Black.copy(alpha = 0.4f)),
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .border(
+                            0.5.dp,
+                            borderColor.copy(alpha = 0.35f),
+                            RoundedCornerShape(12.dp),
+                        ),
                     contentAlignment = Alignment.Center,
                 ) { iconContent() }
 
@@ -665,22 +600,17 @@ private fun FacebookNurtureCard(onClick: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                // v1.2.7: Facebook logo fill toàn bộ ô
                 Box(
                     modifier = Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(
-                            Brush.linearGradient(
-                                listOf(FacebookBlue.copy(alpha = 0.85f), AccentFb2.copy(alpha = 0.6f))
-                            )
-                        ),
-                    contentAlignment = Alignment.Center,
+                        .size(46.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(FacebookBlue),
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.ThumbUp,
-                        contentDescription = null,
-                        tint     = Color.White,
-                        modifier = Modifier.size(20.dp),
+                    PlatformLogo(
+                        logoRes     = R.drawable.ic_logo_facebook,
+                        contentDesc = "Facebook",
+                        modifier    = Modifier.fillMaxSize(),
                     )
                 }
 
@@ -715,196 +645,28 @@ private fun FacebookNurtureCard(onClick: () -> Unit) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Card: Tài khoản Golike (v1.2.1 — thay thế "Đang phát triển")
-// ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun GolikeAccountCard(
-    isLoggedIn:    Boolean,
-    displayName:   String,
-    onLoginClick:  () -> Unit,
-    onLogoutClick: () -> Unit,
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(
-                Brush.horizontalGradient(
-                    colorStops = arrayOf(
-                        0.0f to GolikeDark,
-                        0.5f to Color(0xFF1A1008),
-                        0.85f to GolikeGold.copy(alpha = 0.10f),
-                        1.0f to GolikeAmber.copy(alpha = 0.06f),
-                    ),
-                )
-            )
-            .border(
-                width  = 1.dp,
-                brush  = Brush.horizontalGradient(
-                    listOf(GolikeGold.copy(alpha = 0.25f), GolikeAmber.copy(alpha = 0.12f))
-                ),
-                shape  = RoundedCornerShape(16.dp),
-            )
-            .padding(horizontal = 20.dp, vertical = 18.dp),
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            // Header row
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(
-                            Brush.linearGradient(
-                                listOf(GolikeGold.copy(alpha = 0.85f), GolikeAmber.copy(alpha = 0.5f))
-                            )
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.CurrencyExchange,
-                        contentDescription = null,
-                        tint     = Color.Black,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text       = "Golike",
-                        color      = Color(0xFFF5D78A),
-                        fontSize   = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        text     = if (isLoggedIn) "Đã đăng nhập — $displayName"
-                                   else "Chưa đăng nhập",
-                        color    = if (isLoggedIn) Color(0xFF10B981) else TextMuted,
-                        fontSize = 12.sp,
-                    )
-                }
-
-                // Status badge
-                if (isLoggedIn) {
-                    Surface(
-                        shape  = RoundedCornerShape(20.dp),
-                        color  = Color(0xFF10B981).copy(alpha = 0.12f),
-                        border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.4f)),
-                    ) {
-                        Text(
-                            text       = "Kết nối",
-                            color      = Color(0xFF10B981),
-                            fontSize   = 9.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier   = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-                        )
-                    }
-                }
-            }
-
-            HorizontalDivider(GolikeGold)
-
-            // Description
-            Text(
-                text       = if (isLoggedIn)
-                    "Tài khoản Golike đã kết nối. Bạn có thể làm nhiệm vụ TikTok để kiếm coin."
-                else
-                    "Đăng nhập Golike để làm nhiệm vụ TikTok tự động và nhận coin thưởng.",
-                color      = TextSec,
-                fontSize   = 12.sp,
-                lineHeight = 18.sp,
-            )
-
-            if (isLoggedIn) {
-                // Khi đã đăng nhập: nút đăng nhập lại + nút đăng xuất
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick  = onLoginClick,
-                        modifier = Modifier.weight(1f),
-                        shape    = RoundedCornerShape(10.dp),
-                        colors   = ButtonDefaults.buttonColors(
-                            containerColor = GolikeGold.copy(alpha = 0.15f),
-                            contentColor   = GolikeGold,
-                        ),
-                    ) {
-                        Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Đăng nhập lại", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                    }
-                    Button(
-                        onClick  = onLogoutClick,
-                        modifier = Modifier.weight(1f),
-                        shape    = RoundedCornerShape(10.dp),
-                        colors   = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFEF4444).copy(alpha = 0.12f),
-                            contentColor   = Color(0xFFEF4444),
-                        ),
-                    ) {
-                        Icon(Icons.Rounded.Logout, null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Đăng xuất", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                    }
-                }
-            } else {
-                // Chưa đăng nhập: nút đăng nhập
-                Button(
-                    onClick  = onLoginClick,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape    = RoundedCornerShape(10.dp),
-                    colors   = ButtonDefaults.buttonColors(
-                        containerColor = GolikeGold.copy(alpha = 0.9f),
-                        contentColor   = Color.Black,
-                    ),
-                ) {
-                    Icon(Icons.Rounded.Login, null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Đăng nhập Golike", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                }
-            }
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 //  Shared composables
 // ─────────────────────────────────────────────────────────────────────────────
 
+// v1.2.7: Platform logo helpers — dùng ảnh thật thay cho icon generic
+@Composable
+private fun PlatformLogo(logoRes: Int, contentDesc: String, modifier: Modifier = Modifier) {
+    Image(
+        painter            = painterResource(logoRes),
+        contentDescription = contentDesc,
+        contentScale       = ContentScale.Fit,
+        modifier           = modifier,
+    )
+}
+
+// v1.2.7: TikTokIconBox — logo fill toàn bộ ô, không có inner wrapper
 @Composable
 private fun TikTokIconBox() {
-    Box(modifier = Modifier.size(38.dp)) {
-        Box(
-            modifier = Modifier
-                .size(24.dp)
-                .offset(x = 4.dp, y = 4.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(TikTokRed.copy(alpha = 0.6f)),
-        )
-        Box(
-            modifier = Modifier
-                .size(24.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(TikTokCyan.copy(alpha = 0.7f)),
-        )
-        Box(
-            modifier = Modifier
-                .size(24.dp)
-                .offset(x = 2.dp, y = 2.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(Color.White),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.MusicNote,
-                contentDescription = null,
-                tint     = TikTokBlack,
-                modifier = Modifier.size(14.dp),
-            )
-        }
-    }
+    PlatformLogo(
+        logoRes     = R.drawable.ic_logo_tiktok,
+        contentDesc = "TikTok",
+        modifier    = Modifier.fillMaxSize(),
+    )
 }
 
 @Composable

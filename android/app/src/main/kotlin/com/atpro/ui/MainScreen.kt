@@ -1,6 +1,12 @@
 package com.atpro.ui
 
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -12,12 +18,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.atpro.automation.ServiceMode
 import com.atpro.ui.accounts.AccountsScreen
 import com.atpro.ui.accounts.AccountsViewModel
 import com.atpro.ui.dashboard.DashboardScreen
 import com.atpro.ui.dashboard.DashboardViewModel
-import com.atpro.ui.golike.GolikeViewModel
 import com.atpro.ui.logs.LogsScreen
 import com.atpro.ui.logs.LogsViewModel
 import com.atpro.ui.services.ServicesScreen
@@ -32,37 +36,33 @@ private val TextMuted = Color(0xFF6B7280)
 
 // ─────────────────────────────────────────────────────────────
 //  Tab definition
+//  v1.2.7: Tab "Dịch vụ" dùng icon Settings để đồng bộ với ConfigScreen (Cài đặt).
+//          Tất cả label dùng cùng fontSize = 10.sp.
 // ─────────────────────────────────────────────────────────────
 
 private enum class Tab(
     val label: String,
     val icon:  ImageVector,
 ) {
-    DASHBOARD("Dashboard",   Icons.Rounded.Home),
-    SERVICES ("Dịch vụ",    Icons.Rounded.GridView),
-    STATS    ("Thống kê",   Icons.Rounded.BarChart),
-    ACCOUNTS ("Tài khoản",  Icons.Rounded.ManageAccounts),
-    LOGS     ("Nhật ký",    Icons.Rounded.Assignment),
+    DASHBOARD("Dashboard",  Icons.Rounded.Home),
+    SERVICES ("Dịch vụ",   Icons.Rounded.Layers),
+    STATS    ("Thống kê",  Icons.Rounded.BarChart),
+    ACCOUNTS ("Tài khoản", Icons.Rounded.ManageAccounts),
+    LOGS     ("Nhật ký",   Icons.Rounded.EventNote),
 }
 
 // ─────────────────────────────────────────────────────────────
 //  MainScreen — shell duy nhất chứa tất cả tab
-//
-//  [v1.1.6] Thêm tab "Dịch vụ" (vị trí 2) giữa Dashboard và
-//  Thống kê — cho phép chọn Nuôi tài khoản / Kiếm tiền.
 // ─────────────────────────────────────────────────────────────
 
 @Composable
 fun MainScreen(
-    dashboardVm:    DashboardViewModel,
-    statsVm:        StatsViewModel,
-    accountsVm:     AccountsViewModel,
-    logsVm:         LogsViewModel,
-    golikeVm:       GolikeViewModel,
-    onOpenGolikeLogin: () -> Unit = {},
+    dashboardVm: DashboardViewModel,
+    statsVm:     StatsViewModel,
+    accountsVm:  AccountsViewModel,
+    logsVm:      LogsViewModel,
 ) {
     var selectedTab by remember { mutableStateOf(Tab.DASHBOARD) }
-    val golikeState by golikeVm.state.collectAsState()
 
     Scaffold(
         containerColor      = BgDark,
@@ -87,7 +87,7 @@ fun MainScreen(
                         label = {
                             Text(
                                 tab.label,
-                                fontSize = 10.sp,
+                                fontSize = 10.sp,   // v1.2.7: tất cả tab label cùng cỡ
                                 maxLines = 1,
                             )
                         },
@@ -108,55 +108,50 @@ fun MainScreen(
                 .fillMaxSize()
                 .padding(bottom = innerPadding.calculateBottomPadding()),
         ) {
-            Crossfade(
+            AnimatedContent(
                 targetState   = selectedTab,
-                animationSpec = tween(durationMillis = 180),
-                label         = "tab_crossfade",
+                transitionSpec = {
+                    val forward = targetState.ordinal > initialState.ordinal
+                    (fadeIn(tween(220)) + slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) {
+                        if (forward) it / 12 else -it / 12
+                    }) togetherWith (fadeOut(tween(160)) + slideOutHorizontally(tween(220)) {
+                        if (forward) -it / 12 else it / 12
+                    })
+                },
+                label = "tab_transition",
             ) { tab ->
                 when (tab) {
-                    Tab.DASHBOARD -> DashboardScreen(vm = dashboardVm, golikeVm = golikeVm)
+                    Tab.DASHBOARD -> DashboardScreen(vm = dashboardVm)
 
                     Tab.SERVICES  -> ServicesScreen(
-                        // v1.2.1: Mode switch + navigate to Dashboard
                         onOpenFarmService = {
-                            dashboardVm.setServiceMode(ServiceMode.FARM)
+                            dashboardVm.setServiceMode(com.atpro.automation.ServiceMode.FARM)
                             selectedTab = Tab.DASHBOARD
                         },
-                        onOpenTaskService = {
-                            dashboardVm.setServiceMode(ServiceMode.TASK)
-                            selectedTab = Tab.DASHBOARD
-                        },
-                        // v1.2.3: Demo nuôi acc Facebook
                         onOpenFacebookService = {
-                            dashboardVm.setServiceMode(ServiceMode.FACEBOOK_NURTURE)
+                            dashboardVm.setServiceMode(com.atpro.automation.ServiceMode.FACEBOOK_NURTURE)
                             selectedTab = Tab.DASHBOARD
                         },
-                        // v1.2.4: Demo nuôi acc X, Instagram, Threads, Snapchat
                         onOpenXService = {
-                            dashboardVm.setServiceMode(ServiceMode.X_NURTURE)
+                            dashboardVm.setServiceMode(com.atpro.automation.ServiceMode.X_NURTURE)
                             selectedTab = Tab.DASHBOARD
                         },
                         onOpenInstagramService = {
-                            dashboardVm.setServiceMode(ServiceMode.INSTAGRAM_NURTURE)
+                            dashboardVm.setServiceMode(com.atpro.automation.ServiceMode.INSTAGRAM_NURTURE)
                             selectedTab = Tab.DASHBOARD
                         },
                         onOpenThreadsService = {
-                            dashboardVm.setServiceMode(ServiceMode.THREADS_NURTURE)
+                            dashboardVm.setServiceMode(com.atpro.automation.ServiceMode.THREADS_NURTURE)
                             selectedTab = Tab.DASHBOARD
                         },
                         onOpenSnapchatService = {
-                            dashboardVm.setServiceMode(ServiceMode.SNAPCHAT_NURTURE)
+                            dashboardVm.setServiceMode(com.atpro.automation.ServiceMode.SNAPCHAT_NURTURE)
                             selectedTab = Tab.DASHBOARD
                         },
-                        onOpenGolikeLogin  = onOpenGolikeLogin,
-                        onGolikeLogout     = golikeVm::logout,
-                        isGolikeLoggedIn   = golikeState.isLoggedIn,
-                        golikeDisplayName  = golikeState.displayName,
                     )
 
                     Tab.STATS     -> StatsScreen(
                         vm           = statsVm,
-                        golikeVm     = golikeVm,
                         onNavigateUp = { selectedTab = Tab.DASHBOARD },
                     )
                     Tab.ACCOUNTS  -> AccountsScreen(

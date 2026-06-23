@@ -22,10 +22,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.Image
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -50,8 +51,6 @@ import com.atpro.automation.LiveFarmStats
 import com.atpro.network.UpdateInfo
 import com.atpro.ui.accounts.AccountsActivity
 import com.atpro.ui.config.ConfigActivity
-import com.atpro.ui.golike.GolikeUiState
-import com.atpro.ui.golike.GolikeViewModel
 import com.atpro.ui.logs.LogsActivity
 import com.atpro.ui.stats.StatsActivity
 
@@ -73,9 +72,8 @@ private val TextMuted   = Color(0xFF6B7280)
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-fun DashboardScreen(vm: DashboardViewModel, golikeVm: GolikeViewModel) {
+fun DashboardScreen(vm: DashboardViewModel) {
     val state      by vm.uiState.collectAsStateWithLifecycle()
-    val golikeState by golikeVm.state.collectAsStateWithLifecycle()
     val context    = LocalContext.current
 
     // [v1.1.5] Trạng thái thu nhỏ popup — reset mỗi khi farm kết thúc
@@ -91,6 +89,11 @@ fun DashboardScreen(vm: DashboardViewModel, golikeVm: GolikeViewModel) {
         modifier = Modifier
             .fillMaxSize()
             .background(BgDark)
+            .background(
+                Brush.radialGradient(
+                    colors = listOf(Purple.copy(alpha = 0.09f), Color.Transparent),
+                )
+            )
     ) {
         // [v1.0.4] Bỏ permission gate — mở thẳng Dashboard không cần cấp quyền trước.
         // Việc cấp quyền được thực hiện qua tab "Quyền" trong Cài đặt.
@@ -108,7 +111,7 @@ fun DashboardScreen(vm: DashboardViewModel, golikeVm: GolikeViewModel) {
             label = "farming_state",
         ) { farming ->
             if (farming) FarmingView(state, vm)
-            else         IdleView(state, vm, golikeState)
+            else         IdleView(state, vm)
         }
 
         // ── [v1.1.5] Startup status popup — có nút thu nhỏ ──────────────────
@@ -641,7 +644,7 @@ private fun UpdateAvailableDialog(
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun IdleView(state: DashboardUiState, vm: DashboardViewModel, golikeState: GolikeUiState) {
+private fun IdleView(state: DashboardUiState, vm: DashboardViewModel) {
     val context = LocalContext.current
 
     var visible by remember { mutableStateOf(false) }
@@ -651,6 +654,19 @@ private fun IdleView(state: DashboardUiState, vm: DashboardViewModel, golikeStat
         visible = visible,
         enter   = fadeIn(tween(400)) + slideInVertically(tween(400, easing = EaseOut)) { it / 10 },
     ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            // v1.2.7: Decorative radial glow top-right corner
+            Box(
+                modifier = Modifier
+                    .size(240.dp)
+                    .offset(x = 80.dp, y = (-60).dp)
+                    .align(Alignment.TopEnd)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(Purple.copy(alpha = 0.07f), Color.Transparent)
+                        )
+                    )
+            )
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -661,14 +677,30 @@ private fun IdleView(state: DashboardUiState, vm: DashboardViewModel, golikeStat
 
             // ── Header ──
             Row(verticalAlignment = Alignment.CenterVertically) {
-                StatusDot(online = state.serviceConnected)
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text  = if (state.serviceConnected) "Sẵn sàng" else "Chưa bật dịch vụ",
-                    color = if (state.serviceConnected) Green else TextMuted,
-                    fontSize   = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(
+                            if (state.serviceConnected) Green.copy(alpha = 0.10f)
+                            else CardDark.copy(alpha = 0.6f)
+                        )
+                        .border(
+                            0.5.dp,
+                            if (state.serviceConnected) Green.copy(alpha = 0.25f) else BorderDark,
+                            RoundedCornerShape(20.dp),
+                        )
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                ) {
+                    StatusDot(online = state.serviceConnected)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text  = if (state.serviceConnected) "Sẵn sàng" else "Chưa bật dịch vụ",
+                        color = if (state.serviceConnected) Green else TextMuted,
+                        fontSize   = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
                 Spacer(Modifier.weight(1f))
                 IconButton(
                     onClick  = { context.startActivity(Intent(context, ConfigActivity::class.java)) },
@@ -682,7 +714,22 @@ private fun IdleView(state: DashboardUiState, vm: DashboardViewModel, golikeStat
                     )
                 }
                 Spacer(Modifier.width(4.dp))
-                AppLogo()
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .border(0.75.dp, Purple.copy(alpha = 0.30f), RoundedCornerShape(10.dp))
+                        .padding(1.5.dp),
+                ) {
+                    AppLogo()
+                }
+                Spacer(Modifier.width(6.dp))
+                // v1.2.7: version badge
+                Text(
+                    text     = "v1.2.7",
+                    color    = TextMuted.copy(alpha = 0.55f),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Medium,
+                )
             }
 
             Spacer(Modifier.weight(1f))
@@ -702,10 +749,12 @@ private fun IdleView(state: DashboardUiState, vm: DashboardViewModel, golikeStat
                 ) { count ->
                     Text(
                         text  = "$count",
-                        color = Color.White,
-                        fontSize   = 72.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        lineHeight = 72.sp,
+                        style = androidx.compose.ui.text.TextStyle(
+                            brush      = Brush.verticalGradient(listOf(Color.White, Color(0xFFC9C9DE))),
+                            fontSize   = 72.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            lineHeight = 72.sp,
+                        ),
                     )
                 }
                 Spacer(Modifier.height(6.dp))
@@ -788,27 +837,13 @@ private fun IdleView(state: DashboardUiState, vm: DashboardViewModel, golikeStat
                 )
             }
 
-            Spacer(Modifier.height(20.dp))
-
-            // ── [v1.2.4] Golike card — phân nhánh theo serviceMode ──
-            when {
-                state.serviceMode == com.atpro.automation.ServiceMode.TASK ->
-                    GolikeTaskInfoCard(golikeState)
-                state.isDemoMode -> { /* Demo modes: không hiện card Golike */ }
-                else -> {
-                    // FARM mode: chỉ hiện card khi đã đăng nhập
-                    if (golikeState.isLoggedIn) {
-                        GolikeSummaryCard(state = golikeState)
-                    }
-                }
-            }
-
             Spacer(Modifier.weight(1f))
 
             // [v1.1.5] ShortcutRow đã được chuyển sang bottom NavigationBar — không cần ở đây nữa.
 
             Spacer(Modifier.height(32.dp))
-        }
+        }  // Column
+        }  // Box (decorative glow wrapper)
     }
 }
 
@@ -819,6 +854,28 @@ private fun IdleView(state: DashboardUiState, vm: DashboardViewModel, golikeStat
 @Composable
 private fun FarmingView(state: DashboardUiState, vm: DashboardViewModel) {
     val stats = state.liveStats
+    // v1.2.7: Animated glow orb background when farming
+    val inf = rememberInfiniteTransition(label = "farm_bg")
+    val glowIntensity by inf.animateFloat(
+        initialValue  = 0.04f,
+        targetValue   = if (state.isPaused) 0.04f else 0.10f,
+        animationSpec = infiniteRepeatable(tween(2500, easing = EaseInOut), RepeatMode.Reverse),
+        label         = "glow_intensity",
+    )
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Decorative glow at top-left
+        Box(
+            modifier = Modifier
+                .size(280.dp)
+                .offset(x = (-60).dp, y = (-40).dp)
+                .background(Brush.radialGradient(
+                    colors = listOf(
+                        (if (state.isPaused) Amber else Green).copy(alpha = glowIntensity),
+                        Color.Transparent,
+                    )
+                ))
+        )
 
     Column(
         modifier = Modifier
@@ -880,7 +937,8 @@ private fun FarmingView(state: DashboardUiState, vm: DashboardViewModel) {
         )
 
         Spacer(Modifier.height(32.dp))
-    }
+    }  // Column
+    }  // Box (farming glow bg)
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1004,15 +1062,30 @@ private fun AccountListInput(value: String, onChanged: (String) -> Unit) {
 // ─────────────────────────────────────────────────────────────
 
 @Composable
+// v1.2.7: AppLogo với animated glow ring
 private fun AppLogo() {
-    Image(
-        painter            = painterResource(R.drawable.icon_app),
-        contentDescription = "AT PRO",
-        contentScale       = ContentScale.Crop,
-        modifier           = Modifier
-            .size(32.dp)
-            .clip(RoundedCornerShape(8.dp)),
+    val inf = rememberInfiniteTransition(label = "logo_glow")
+    val alpha by inf.animateFloat(
+        initialValue  = 0.2f,
+        targetValue   = 0.5f,
+        animationSpec = infiniteRepeatable(tween(1800, easing = EaseInOut), RepeatMode.Reverse),
+        label         = "logo_alpha",
     )
+    Box(
+        modifier = Modifier
+            .size(34.dp)
+            .border(1.dp, Purple.copy(alpha = alpha), RoundedCornerShape(9.dp))
+            .padding(1.dp),
+    ) {
+        Image(
+            painter            = painterResource(R.drawable.icon_app),
+            contentDescription = "AT PRO",
+            contentScale       = ContentScale.Crop,
+            modifier           = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(8.dp)),
+        )
+    }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1097,9 +1170,18 @@ private fun StatusDot(online: Boolean) {
         animationSpec = tween(300),
         label        = "status_dot",
     )
+    // v1.2.7: Breathing glow khi online
+    val inf = rememberInfiniteTransition(label = "dot_breath")
+    val scale by inf.animateFloat(
+        initialValue  = 1f,
+        targetValue   = if (online) 1.25f else 1f,
+        animationSpec = infiniteRepeatable(tween(900, easing = EaseInOut), RepeatMode.Reverse),
+        label         = "dot_scale",
+    )
     Box(
         modifier = Modifier
             .size(8.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(CircleShape)
             .background(color)
     )
@@ -1140,27 +1222,50 @@ private fun StartButton(
     )
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Button(
-            onClick           = onClick,
-            enabled           = enabled,
-            interactionSource = interactionSource,
-            modifier          = Modifier
+        // v1.2.7: Gradient button với glow effect
+        Box(
+            modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp)
-                .scale(scale),
-            shape  = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor         = accentColor,
-                disabledContainerColor = BorderDark,
-            ),
+                .scale(scale)
+                .clip(RoundedCornerShape(16.dp))
+                .background(
+                    if (enabled)
+                        Brush.horizontalGradient(
+                            listOf(
+                                accentColor,
+                                accentColor.copy(red = (accentColor.red + 0.08f).coerceAtMost(1f),
+                                                 blue = (accentColor.blue + 0.06f).coerceAtMost(1f)),
+                            )
+                        )
+                    else Brush.horizontalGradient(listOf(BorderDark, BorderDark))
+                )
+                .clickable(
+                    enabled           = enabled,
+                    interactionSource = interactionSource,
+                    indication        = null,
+                    onClick           = onClick,
+                ),
+            contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(
-                labelText,
-                fontSize   = 16.sp,
-                fontWeight = FontWeight.Bold,
-            )
+            Row(
+                verticalAlignment         = Alignment.CenterVertically,
+                horizontalArrangement     = Arrangement.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.PlayArrow,
+                    null,
+                    tint     = if (enabled) Color.White else TextMuted,
+                    modifier = Modifier.size(22.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    labelText,
+                    fontSize   = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color      = if (enabled) Color.White else TextMuted,
+                )
+            }
         }
         AnimatedVisibility(
             visible = hint != null,
@@ -1183,7 +1288,29 @@ private fun CurrentAccountCard(stats: LiveFarmStats) {
         animationSpec = tween(500, easing = EaseOut),
         label         = "progress",
     )
+    // v1.2.7: Slow rotating border glow
+    val inf = rememberInfiniteTransition(label = "card_glow")
+    val glowAlpha by inf.animateFloat(
+        initialValue  = 0.25f,
+        targetValue   = 0.55f,
+        animationSpec = infiniteRepeatable(tween(2200, easing = EaseInOut), RepeatMode.Reverse),
+        label         = "card_glow_a",
+    )
 
+    // v1.2.7: Subtle glowing card wrapper
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(CardDark.copy(alpha = 0.5f))
+            .border(
+                0.75.dp,
+                Purple.copy(alpha = glowAlpha),
+                RoundedCornerShape(20.dp),
+            )
+            .padding(vertical = 20.dp, horizontal = 20.dp),
+        contentAlignment = Alignment.Center,
+    ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.fillMaxWidth(),
@@ -1220,6 +1347,7 @@ private fun CurrentAccountCard(stats: LiveFarmStats) {
             trackColor = BorderDark,
         )
     }
+    }  // Box
 }
 
 @Composable
@@ -1291,160 +1419,6 @@ private fun PauseResumeButton(isPaused: Boolean, onPause: () -> Unit, onResume: 
     }
 }
 
-// ─────────────────────────────────────────────────────────────
-//  [v1.1.9] Golike Summary Card — compact dashboard widget
-// ─────────────────────────────────────────────────────────────
-
-private val GolikeGold = Color(0xFFF5A623)
-
-@Composable
-private fun GolikeSummaryCard(state: GolikeUiState) {
-    if (state.isLoading || !state.isLoggedIn) return
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
-            .background(CardDark)
-            .border(1.dp, GolikeGold.copy(alpha = 0.22f),
-                androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(9.dp))
-                    .background(GolikeGold.copy(alpha = 0.13f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Rounded.CurrencyExchange, null, tint = GolikeGold, modifier = Modifier.size(17.dp))
-            }
-
-            Column(Modifier.weight(1f)) {
-                Text(state.displayName.ifEmpty { "Golike" }, color = GolikeGold, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (state.rankName.isNotEmpty()) {
-                        Text(state.rankName, color = TextMuted, fontSize = 10.sp)
-                        Text("•", color = TextMuted, fontSize = 10.sp)
-                    }
-                    Text("${state.totalJobCount} nhiệm vụ", color = TextMuted, fontSize = 10.sp)
-                }
-            }
-            // Coin + TikTok stats
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(state.formatCoin(state.coin), color = GolikeGold, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
-                    Text("coin", color = TextMuted, fontSize = 9.sp)
-                }
-                if (state.tiktokHold > 0 || state.tiktokPending > 0) {
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text("+${state.formatCoin(state.tiktokHold)}", color = Green, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Text("hold", color = TextMuted, fontSize = 9.sp)
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────
-//  v1.2.2 — Golike Task Info Card (dashboard task mode)
-//  Hiện khi serviceMode == TASK: tên TK, số dư, hold, pending
-// ─────────────────────────────────────────────────────────────
-
-@Composable
-private fun GolikeTaskInfoCard(state: GolikeUiState) {
-    if (state.isLoading) return
-
-    val AccentTask = Color(0xFF7C3AED)
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
-            .background(CardDark)
-            .border(
-                1.dp,
-                if (state.isLoggedIn) AccentTask.copy(alpha = 0.3f) else BorderDark,
-                androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
-            )
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-    ) {
-        if (!state.isLoggedIn) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(Icons.Rounded.Warning, null, tint = Amber, modifier = Modifier.size(16.dp))
-                Text(
-                    "Chưa đăng nhập Golike — vào tab Dịch vụ để đăng nhập",
-                    color    = Amber,
-                    fontSize = 12.sp,
-                )
-            }
-            return
-        }
-
-        // Header: icon + tên tài khoản
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(9.dp))
-                    .background(AccentTask.copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Rounded.AssignmentTurnedIn, null, tint = AccentTask, modifier = Modifier.size(17.dp))
-            }
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text       = state.displayName.ifEmpty { "Golike" },
-                    color      = Color(0xFFD4BCFC),
-                    fontSize   = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text("Tài khoản Golike", color = TextMuted, fontSize = 10.sp)
-            }
-        }
-
-        Spacer(Modifier.height(10.dp))
-        // Divider
-        Box(Modifier.fillMaxWidth().height(0.5.dp).background(AccentTask.copy(alpha = 0.18f)))
-        Spacer(Modifier.height(10.dp))
-
-        // Stats row: coin | hold | pending
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            GolikeStatBox("Số dư",     state.formatCoin(state.coin),           GolikeGold,  Modifier.weight(1f))
-            GolikeStatBox("Đang duyệt", state.formatCoin(state.tiktokHold),    Green,        Modifier.weight(1f))
-            GolikeStatBox("Chờ duyệt", state.formatCoin(state.tiktokPending),  Amber,        Modifier.weight(1f))
-        }
-    }
-}
-
-@Composable
-private fun GolikeStatBox(label: String, value: String, color: Color, modifier: Modifier) {
-    Column(
-        modifier = modifier
-            .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
-            .background(color.copy(alpha = 0.08f))
-            .padding(vertical = 8.dp, horizontal = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(value, color = color, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(2.dp))
-        Text(label, color = TextMuted, fontSize = 9.sp)
-    }
-}
 
 @Composable
 private fun ShortcutRow() {
@@ -1453,16 +1427,19 @@ private fun ShortcutRow() {
         ShortcutTile(
             icon     = Icons.Rounded.ManageAccounts,
             label    = "Tài khoản",
+            accent   = Purple,
             modifier = Modifier.weight(1f),
         ) { context.startActivity(Intent(context, AccountsActivity::class.java)) }
         ShortcutTile(
             icon     = Icons.Rounded.BarChart,
             label    = "Thống kê",
+            accent   = Color(0xFF22D3EE),
             modifier = Modifier.weight(1f),
         ) { context.startActivity(Intent(context, StatsActivity::class.java)) }
         ShortcutTile(
             icon     = Icons.Rounded.Assignment,
             label    = "Nhật ký",
+            accent   = Pink,
             modifier = Modifier.weight(1f),
         ) { context.startActivity(Intent(context, LogsActivity::class.java)) }
     }
@@ -1472,6 +1449,7 @@ private fun ShortcutRow() {
 private fun ShortcutTile(
     icon: ImageVector,
     label: String,
+    accent: Color = Purple,
     modifier: Modifier,
     onClick: () -> Unit,
 ) {
@@ -1489,11 +1467,20 @@ private fun ShortcutTile(
             .scale(scale)
             .clip(RoundedCornerShape(14.dp))
             .background(CardDark)
+            .border(0.5.dp, accent.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
             .padding(vertical = 14.dp),
     ) {
-        Icon(icon, null, tint = Purple.copy(alpha = 0.85f), modifier = Modifier.size(20.dp))
-        Spacer(Modifier.height(6.dp))
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .clip(RoundedCornerShape(9.dp))
+                .background(accent.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, null, tint = accent, modifier = Modifier.size(17.dp))
+        }
+        Spacer(Modifier.height(7.dp))
         Text(label, color = TextSec, fontSize = 11.sp)
     }
 }

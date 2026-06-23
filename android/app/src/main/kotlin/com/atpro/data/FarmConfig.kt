@@ -74,6 +74,14 @@ data class FarmConfig(
     val skipAds: Boolean = true,
 
     /**
+     * v1.2.6 — Bật tính năng chuẩn hoá display name / ID thuần số trong
+     * switch popup thành @username hợp lệ. Tắt khi danh sách acc đã ổn định
+     * (giảm thời gian chuẩn bị mỗi phiên).
+     * Mặc định true — bật để đảm bảo acc list đầy đủ.
+     */
+    val normalizeEnabled: Boolean = true,
+
+    /**
      * `v1.1.8` Cho phép like quảng cáo TikTok.
      * Chỉ có hiệu lực khi skipAds = false (tức quảng cáo không bị vuốt qua).
      * Mặc định false — không bao giờ like quảng cáo.

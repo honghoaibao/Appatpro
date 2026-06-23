@@ -185,6 +185,8 @@ class LocalRepository(context: Context) : IFarmRepository {
         // Behavior
         skipLive                  = getConfigBool  ("skip_live",                true),
         skipAds                   = getConfigBool  ("skip_ads",                 true),
+        // v1.2.6 — Toggle chuẩn hoá acc
+        normalizeEnabled          = getConfigBool  ("normalize_enabled",        true),
         // [v1.1.8] Like content-aware gate
         likeAdsEnabled            = getConfigBool  ("like_ads",                 false),
         enableRestBetweenAccounts = getConfigBool  ("enable_rest",              false),

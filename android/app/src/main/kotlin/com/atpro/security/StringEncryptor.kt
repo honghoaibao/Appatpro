@@ -37,7 +37,13 @@ object AppConstants {
     )
 
     /** v1.2.3 — Package Facebook chính thức (Facebook app). Dùng cho demo nuôi acc Facebook. */
-    const val FACEBOOK_PKG = "com.facebook.katana"
+    const val FACEBOOK_PKG = "com.facebook.katana"   // Facebook chính
+    // v1.2.7: Danh sách gói Facebook theo thứ tự ưu tiên (không gồm Lite)
+    val FACEBOOK_PACKAGES = listOf(
+        "com.facebook.katana",    // Facebook (chính thức)
+        "com.facebook.orca",      // Messenger (một số ROM gộp)
+        "com.facebook.android",   // Variant trên một số thiết bị Samsung/Xiaomi
+    )
 
     /** v1.2.4 — Packages demo nuôi acc các nền tảng mới. */
     const val X_PKG         = "com.twitter.android"

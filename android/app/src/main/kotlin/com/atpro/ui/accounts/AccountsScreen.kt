@@ -20,9 +20,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
-import android.app.Activity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.atpro.db.entity.AccountEntity
 
@@ -57,7 +55,6 @@ fun AccountsScreen(vm: AccountsViewModel, onNavigateUp: (() -> Unit)? = null) {
     var query    by remember { mutableStateOf("") }
     var filter   by remember { mutableStateOf("all") }
     var platform by remember { mutableStateOf(AccPlatform.TIKTOK) }
-    val activity = LocalContext.current as? Activity
 
     val filtered = remember(accounts, query, filter) {
         accounts.filter { acc ->
@@ -82,12 +79,9 @@ fun AccountsScreen(vm: AccountsViewModel, onNavigateUp: (() -> Unit)? = null) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 4.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = { onNavigateUp?.invoke() ?: activity?.finish() }) {
-                Icon(Icons.Rounded.ArrowBackIosNew, "Quay lại", tint = Color.White, modifier = Modifier.size(20.dp))
-            }
             Column(Modifier.weight(1f)) {
                 Text("Tài khoản", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Text(

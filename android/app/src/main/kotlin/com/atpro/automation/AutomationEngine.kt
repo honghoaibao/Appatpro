@@ -329,6 +329,28 @@ class AutomationEngine(
     //     farmOneAccount() sẽ đọc flag này và thực hiện smart recovery.
     @Volatile private var watchdogStuckFlag  = false
 
+    /**
+     * v1.2.6 — Flag báo hiệu đang trong quá trình chuẩn hoá acc (normalize).
+     * Khi true:
+     *   - watchdog KHÔNG kích hoạt stuck recovery
+     *   - isLostWithRetry() luôn trả về false (tắt hoàn toàn)
+     *   - recoverToFeed() KHÔNG được gọi tự động
+     * Flag này đảm bảo normalize chạy độc lập, không bị can thiệp bởi
+     * các hàm nhận dạng lạc đang chạy song song.
+     */
+    @Volatile private var isNormalizing = false
+
+    /**
+     * v1.2.6 — Flag tắt lost/feed detection trong mọi giai đoạn ĐANG THỰC HIỆN hành động:
+     *   • Chuẩn bị nuôi acc (waitFeedLoad, kill/relaunch, switch acc)
+     *   • doLike(), doFollow(), doComment(), doNotification()
+     *   • swipeNext(), forceSwipeNext()
+     *   • recoverToFeed() tự thân (tránh re-entry)
+     * Khi true: isLostWithRetry() trả false ngay, watchdog không kích hoạt.
+     * Đảm bảo các hàm không chặn lẫn nhau.
+     */
+    @Volatile private var isActionLocked = false
+
     // ─────────────────────────────────────────────────────────────────────────
     // [v1.2.3] Pause-aware time tracking
     //
@@ -854,29 +876,71 @@ class AutomationEngine(
         delay(1_500)
 
         // v1.2.5: Đọc danh sách kèm node — phân loại valid/invalid
-        val entries  = NodeTraverser.parseAccountListWithNodes(host.getRootNode())
+        val entries  = NodeTraverser.parseAccountListWithNodes(host.getRootNode(), screenW, screenH)
         val valid    = entries.filter { !it.isNeedsNormalize }
-        val invalid  = entries.filter {  it.isNeedsNormalize }
 
-        val discovered = valid.map { it.displayText }.toMutableList()
+        // ── Xử lý acc ĐẦU TIÊN bị invalid (= acc đang đăng nhập) ──────────
+        // Không thể click vào entry[0] để switch vì TikTok chỉ đóng popup.
+        // Fix: nếu entry[0] invalid → switch tạm sang 1 acc hợp lệ khác,
+        //      sau đó entry[0] sẽ rời vị trí 0 → có thể chuẩn hoá bình thường.
+        val firstEntry = entries.firstOrNull()
+        var currentEntries = entries
 
-        if (invalid.isNotEmpty()) {
-            log("FIX: Phát hiện ${invalid.size} entry không hợp lệ trong popup: " +
-                invalid.joinToString { "'${it.displayText}'" })
-            // Chuẩn hoá: click từng entry → TikTok switch → đọc username thực
-            val fixedUsernames = normalizeInvalidAccountIds(invalid)
-            discovered.addAll(fixedUsernames)
-            log("FIX: Chuẩn hoá xong — thêm được ${fixedUsernames.size} username: $fixedUsernames")
-
-            // Mở lại popup sau khi chuẩn hoá (positionFirstAccount cần popup mở)
-            if (isFarming) {
-                host.openTikTokSettings()
-                delay(2_000)
+        if (firstEntry != null && firstEntry.isNeedsNormalize && config.normalizeEnabled) {
+            val tempTarget = entries.drop(1).firstOrNull { !it.isNeedsNormalize }
+            if (tempTarget != null) {
+                log("FIX: Acc đang login '${firstEntry.displayText}' invalid → " +
+                    "switch tạm sang '${tempTarget.displayText}' để đưa ra khỏi vị trí đầu")
+                setStatus("FIX: Chuyển tạm sang '${tempTarget.displayText}'...")
+                host.clickNode(tempTarget.node)
+                delay((config.delayAfterSwitchClick * 1_000).toLong().coerceAtLeast(1_800L))
+                host.killTikTok(); delay(2_500); host.launchTikTok()
+                waitFeedLoad()
+                // Mở lại popup → re-parse (entry đầu invalid giờ ở vị trí != 0)
+                host.openTikTokSettings(); delay(2_200)
                 if (scrollUntilSwitchFound(maxScrolls = 8)) {
                     delay(800)
                     findSwitchBtnNode()?.let { b ->
-                        host.clickNode(b.node)
-                        delay(1_500)
+                        host.clickNode(b.node); delay(1_500)
+                        currentEntries = NodeTraverser
+                            .parseAccountListWithNodes(host.getRootNode(), screenW, screenH)
+                    }
+                }
+            } else {
+                log("WARN: FIX: Acc đầu invalid nhưng không tìm được acc hợp lệ để switch tạm — bỏ qua")
+            }
+        }
+
+        val invalid = currentEntries.drop(1).filter { it.isNeedsNormalize }
+        val discovered = currentEntries.filter { !it.isNeedsNormalize }.map { it.displayText }.toMutableList()
+
+        if (invalid.isNotEmpty() && config.normalizeEnabled) {
+            log("FIX: Phát hiện ${invalid.size} entry không hợp lệ: " +
+                invalid.joinToString { "'${it.displayText}'" })
+
+            // Đóng popup hiện tại — normalizeInvalidAccountIds tự quản lý popup
+            host.pressBack(); delay(800); host.pressBack(); delay(800)
+
+            val fixedUsernames = normalizeInvalidAccountIds(invalid.map { it.displayText })
+            // v1.2.7: acc CUỐI cùng chuẩn hoá = acc đang active sau normalize
+            // → đưa lên đầu farmList để nuôi ngay (tận dụng context đã switch).
+            // Phần còn lại của fixedUsernames ghép vào sau.
+            if (fixedUsernames.isNotEmpty()) {
+                val lastNormalized = fixedUsernames.last()
+                val rest           = fixedUsernames.dropLast(1)
+                // Cấu trúc: [lastNormalized] + [discovered có trước] + [rest]
+                discovered.addAll(0, listOf(lastNormalized))
+                discovered.addAll(rest)
+            }
+            log("FIX: Chuẩn hoá xong — ${fixedUsernames.size} username (đầu farmList: ${discovered.firstOrNull()})")
+
+            // Mở lại popup lần cuối cho positionFirstAccount
+            if (isFarming) {
+                host.openTikTokSettings(); delay(2_200)
+                if (scrollUntilSwitchFound(maxScrolls = 8)) {
+                    delay(800)
+                    findSwitchBtnNode()?.let { b ->
+                        host.clickNode(b.node); delay(1_500)
                     }
                 }
             }
@@ -895,70 +959,161 @@ class AutomationEngine(
     }
 
     /**
-     * v1.2.5 — Chuẩn hoá các entry không hợp lệ trong switch popup.
+     * v1.2.6 — Chuẩn hoá các entry không hợp lệ trong switch popup.
      *
-     * Xử lý 2 loại "lỗi hiển thị":
-     *   1. ID thuần số   → "@6784523189328" (TikTok internal ID bị lộ)
-     *   2. Display name  → "Bảo Hoài1502", "Ảo vãi" (nickname thay vì @username)
+     * Flow mỗi entry (theo đúng spec người dùng):
+     *   1. Mở switch popup → RE-PARSE fresh (không dùng node cũ từ lần trước)
+     *   2. Tìm entry cần chuẩn hoá theo displayText (bỏ acc đầu tiên = acc đang login)
+     *   3. Click entry đó → TikTok switch sang acc
+     *   4. Kill + Relaunch → chờ feed load
+     *   5. Vào profile → xác nhận @username thực
+     *   6. Về feed → lặp lại cho entry tiếp theo
      *
-     * Flow mỗi entry:
-     *   Click node trong popup → TikTok switch sang acc đó
-     *   → Kill + Relaunch TikTok → Feed load
-     *   → [detectCurrentAccount()] đọc @username thực
-     *   → Lưu username hợp lệ, mở lại popup cho entry tiếp theo (nếu còn)
+     * Quan trọng:
+     *   - [isNormalizing = true] suốt quá trình → tắt HOÀN TOÀN watchdog +
+     *     isLostWithRetry() + recoverToFeed() tự động — tránh can thiệp nhầm.
+     *   - Mỗi vòng lặp re-parse fresh → không dùng node stale sau kill/relaunch.
+     *   - Bỏ acc đầu tiên trong popup (= acc đang đăng nhập hiện tại).
      *
-     * Caller ([openSwitchPopup]) sẽ mở lại popup sau khi method này return.
-     *
-     * @return Danh sách username hợp lệ đã phục hồi được.
+     * @param invalidDisplayTexts Danh sách displayText của các entry cần chuẩn hoá.
+     * @return Danh sách @username hợp lệ đã phục hồi được.
      */
     private suspend fun normalizeInvalidAccountIds(
-        invalidEntries: List<NodeTraverser.AccountEntry>,
+        invalidDisplayTexts: List<String>,
     ): List<String> {
-        val recovered = mutableListOf<String>()
+        val recovered   = mutableListOf<String>()
+        isNormalizing   = true          // TẮT watchdog + lost detection hoàn toàn
+        resetWatchdog()                 // Xoá trạng thái stuck cũ (nếu có)
 
-        invalidEntries.forEachIndexed { idx, entry ->
-            if (!isFarming) return@forEachIndexed
+        try {
+            invalidDisplayTexts.forEachIndexed { idx, displayText ->
+                if (!isFarming) return@forEachIndexed
 
-            val typeLabel = when {
-                entry.displayText.all { it.isDigit() } -> "ID thuần số"
-                else                                    -> "display name"
-            }
-            log("FIX: [${idx + 1}/${invalidEntries.size}] Chuẩn hoá ($typeLabel): '${entry.displayText}'")
-            setStatus("FIX: Chuẩn hoá '${entry.displayText}' ($typeLabel)...")
-
-            // Click vào entry trong popup → TikTok switch
-            host.clickNode(entry.node)
-            delay((config.delayAfterSwitchClick * 1_000).toLong().coerceAtLeast(1_500L))
-
-            // Kill + relaunch để acc load hoàn chỉnh
-            host.killTikTok()
-            delay(2_000)
-            host.launchTikTok()
-
-            if (!waitFeedLoad()) {
-                log("WARN: FIX: Feed không load sau click '${entry.displayText}' — bỏ qua")
-            } else {
-                // Đọc username thực từ profile acc hiện tại
-                val realUsername = detectCurrentAccount()
-                if (realUsername != null && NodeTraverser.isValidTikTokUsername(realUsername)) {
-                    log("FIX: ✓ '${entry.displayText}' → '@$realUsername'")
-                    recovered.add(realUsername)
-                } else {
-                    log("WARN: FIX: Không đọc được username sau switch (hiện: $realUsername)")
+                if (NodeTraverser.isLikelySystemLabel(displayText)) {
+                    log("WARN: FIX: Bỏ qua '$displayText' — nghi là nhãn hệ thống")
+                    return@forEachIndexed
                 }
-            }
 
-            // Nếu còn entry tiếp theo: mở lại settings → popup để tiếp tục
-            val hasMore = idx < invalidEntries.lastIndex
-            if (hasMore && isFarming) {
+                val typeLabel = when {
+                    displayText.all { it.isDigit() } -> "ID thuần số"
+                    else                              -> "display name"
+                }
+                log("FIX: [${idx + 1}/${invalidDisplayTexts.size}] Chuẩn hoá ($typeLabel): '$displayText'")
+                setStatus("FIX: [${idx + 1}/${invalidDisplayTexts.size}] Chuẩn hoá '$displayText'...")
+
+                // ── Bước 1: Mở switch popup + RE-PARSE FRESH ───────────────
+                // KHÔNG dùng node cũ — node bị stale sau kill/relaunch lần trước.
                 host.openTikTokSettings()
-                delay(2_000)
-                if (!scrollUntilSwitchFound(maxScrolls = 8)) return@forEachIndexed
+                delay(2_200)
+                if (!scrollUntilSwitchFound(maxScrolls = 8)) {
+                    log("ERR: FIX: Không tìm thấy nút switch cho '$displayText' — bỏ qua")
+                    return@forEachIndexed
+                }
                 delay(800)
-                val switchBtn = findSwitchBtnNode() ?: return@forEachIndexed
+                val switchBtn = findSwitchBtnNode() ?: run {
+                    log("ERR: FIX: Switch button biến mất — bỏ qua '$displayText'")
+                    return@forEachIndexed
+                }
                 host.clickNode(switchBtn.node)
                 delay(1_500)
+
+                // ── Bước 2: Re-parse popup fresh → tìm entry theo displayText ──
+                // drop(1): entry đầu = acc đang login, KHÔNG click (chỉ đóng popup)
+                val allFreshEntries = NodeTraverser
+                    .parseAccountListWithNodes(host.getRootNode(), screenW, screenH)
+
+                // Kiểm tra entry đầu — nếu chính là target thì phải switch tạm trước
+                val firstFreshEntry = allFreshEntries.firstOrNull()
+                if (firstFreshEntry != null &&
+                    firstFreshEntry.displayText.trim().equals(displayText.trim(), ignoreCase = true)
+                ) {
+                    // Target đang ở vị trí 0 (acc đang login) → switch sang acc khác tạm
+                    val tempTarget = allFreshEntries.drop(1).firstOrNull { !it.isNeedsNormalize }
+                    if (tempTarget == null) {
+                        log("WARN: FIX: '$displayText' ở vị trí 0, không tìm được acc tạm — bỏ qua")
+                        host.pressBack(); delay(800); host.pressBack(); delay(800)
+                        return@forEachIndexed
+                    }
+                    log("FIX: '$displayText' ở vị trí 0 → switch tạm sang '${tempTarget.displayText}'")
+                    host.clickNode(tempTarget.node)
+                    delay((config.delayAfterSwitchClick * 1_000).toLong().coerceAtLeast(1_800L))
+                    host.killTikTok(); delay(2_500); host.launchTikTok()
+                    waitFeedLoad()
+                    // Mở lại popup → target giờ không còn ở vị trí 0
+                    host.openTikTokSettings(); delay(2_200)
+                    if (!scrollUntilSwitchFound(maxScrolls = 8)) {
+                        log("ERR: FIX: Không tìm thấy switch button sau switch tạm — bỏ qua '$displayText'")
+                        return@forEachIndexed
+                    }
+                    delay(800)
+                    val switchBtn2 = findSwitchBtnNode() ?: run {
+                        log("ERR: FIX: Switch button biến mất — bỏ qua '$displayText'")
+                        return@forEachIndexed
+                    }
+                    host.clickNode(switchBtn2.node); delay(1_500)
+                }
+
+                val freshEntries = NodeTraverser
+                    .parseAccountListWithNodes(host.getRootNode(), screenW, screenH)
+                    .drop(1)
+                val target = freshEntries.firstOrNull { entry ->
+                    entry.displayText.trim().equals(displayText.trim(), ignoreCase = true)
+                }
+                if (target == null) {
+                    log("WARN: FIX: Không tìm thấy '$displayText' trong popup (đã chuẩn hoá lần trước?) — bỏ qua")
+                    // Đóng popup trước khi sang entry tiếp
+                    host.pressBack()
+                    delay(800)
+                    host.pressBack()
+                    delay(800)
+                    return@forEachIndexed
+                }
+
+                // ── Bước 3: Click entry → switch sang acc ──────────────────
+                // v1.2.7: Sau khi click, TikTok tự điều hướng về feed (không cần pressBack)
+                if (NodeTraverser.isLikelySystemLabel(target.displayText)) {
+                    log("WARN: FIX: Fresh node '$displayText' nghi là nhãn hệ thống — bỏ qua")
+                    host.pressBack(); delay(800); host.pressBack(); delay(800)
+                    return@forEachIndexed
+                }
+                log("FIX: Click node '${target.displayText}' để switch...")
+                host.clickNode(target.node)
+                // v1.2.7: TikTok tự về feed sau khi switch thành công — chỉ cần delay + waitFeedLoad
+                delay((config.delayAfterSwitchClick * 1_000).toLong().coerceAtLeast(2_000L))
+
+                if (!isFarming) return@forEachIndexed
+
+                // ── Bước 4: Chờ feed — không cần kill/relaunch vì TikTok tự redirect ──
+                val feedLoaded = waitFeedLoad()
+                if (!feedLoaded) {
+                    // Fallback: nếu TikTok không tự về feed → kill+relaunch
+                    log("WARN: FIX: Feed chưa hiện sau switch '$displayText' → fallback kill+relaunch")
+                    host.killTikTok(); delay(2_500); host.launchTikTok()
+                    if (!waitFeedLoad()) {
+                        log("WARN: FIX: Feed không load sau fallback — bỏ qua")
+                        return@forEachIndexed
+                    }
+                }
+
+                // ── Bước 5: Vào profile → xác nhận @username ───────────────
+                setStatus("FIX: Xác nhận tài khoản sau chuẩn hoá '$displayText'...")
+                val realUsername = detectCurrentAccount()
+                if (realUsername != null && NodeTraverser.isValidTikTokUsername(realUsername)) {
+                    log("FIX: ✓ '$displayText' → '@$realUsername'")
+                    recovered.add(realUsername)
+                } else {
+                    log("WARN: FIX: Không đọc được @username sau switch (kết quả: $realUsername)")
+                }
+
+                // ── Bước 6: Về feed (detectCurrentAccount() đã về feed) ─────
+                // waitFeedLoad() ở đây để ổn định trước vòng tiếp theo
+                delay(1_000)
+                log("FIX: [${idx + 1}/${invalidDisplayTexts.size}] Hoàn tất — chuẩn bị entry tiếp theo")
             }
+        } finally {
+            // Đảm bảo luôn reset flag dù có exception
+            isNormalizing = false
+            resetWatchdog()
         }
 
         return recovered
@@ -1235,10 +1390,18 @@ class AutomationEngine(
             // Thẻ Live preview full-screen (chưa vào live room) — không có
             // like/share buttons → engine không thể farm, cần swipe qua.
             // Phải xử lý TRƯỚC isLostWithRetry() để không bị tính là "lạc".
+            // [v1.2.7 FIX] Thêm consecutiveSkipCount: nếu swipeNext() không thoát
+            // được live card liên tiếp → forceSwipeNext() + delay dài, tránh stuck loop.
             if (NodeTraverser.isLiveCardInFeed(root)) {
-                log("LIVE-FEED: Thẻ Live full-screen trong feed → swipe qua")
-                swipeNext()
-                delay(1_200)
+                consecutiveSkipCount++
+                if (consecutiveSkipCount >= MAX_CONSECUTIVE_SKIPS) {
+                    log("LIVE-FEED: Skip liên tiếp ${consecutiveSkipCount}× (live-card) → forceSwipeNext")
+                    forceSwipeNext(); delay(2_000); consecutiveSkipCount = 0
+                } else {
+                    log("LIVE-FEED: Thẻ Live full-screen trong feed → swipe qua")
+                    swipeNext()
+                    delay(1_200)
+                }
                 lostStreak = 0
                 resetWatchdog()   // tránh watchdog fire sau swipe
                 continue
@@ -1440,6 +1603,19 @@ class AutomationEngine(
                     // làm log "đứng" ở LIKE và không vuốt sang video tiếp theo.
                     val likeOk = safeStep("like_action", timeoutMs = 15_000L) { doLike() }
                     if (likeOk != null) likes++
+
+                    // v1.2.6 FIX: Kiểm tra ngay sau like — quảng cáo có nút CTA đôi khi bị
+                    // tap nhầm khi double-tap, khiến TikTok mở trang sản phẩm / trình duyệt.
+                    // Nếu không còn ở feed: recover rồi skip toàn bộ [9]-[11], bắt đầu vòng mới.
+                    val onFeedAfterLike = NodeTraverser.isOnFeedTab(host.getRootNode())
+                    if (!onFeedAfterLike) {
+                        log("WARN: Rời feed sau like (CTA bị tap nhầm?) — recoverToFeed")
+                        OverlayFarmMonitor.update(idx + 1, total, account,
+                            sessionSecsRemain, totalSecsRemain, "RECOVER: quay lại feed")
+                        recoverToFeed()
+                        lostStreak++
+                        continue
+                    }
                 } else if (isLiveContent) {
                     log("LIKE SKIP: Không like live")
                 } else if (isAdContent) {
@@ -1560,16 +1736,18 @@ class AutomationEngine(
      * v1.1.9: likeAnimDelay() sau double-tap — người thật thường nhìn animation tim.
      */
     private suspend fun doLike() {
-        val cx = screenW / 2 + Human.jitter(25)
-        val cy = (screenH * 0.55).toInt() + Human.jitter(20)
-        host.clickSuspend(cx, cy)
-        // v1.2.3 [FIX]: doubleTapGap() (60–150ms) thay microPause() —
-        // đảm bảo 2 tap được TikTok nhận là double-tap LIKE, không phải
-        // 2 single-tap (pause/resume video).
-        Human.doubleTapGap()
-        host.clickSuspend(cx + Human.jitter(8), cy + Human.jitter(8))
-        Human.likeAnimDelay()
-        delay((config.delayAfterLike * 1_000).toLong())
+        isActionLocked = true
+        try {
+            val cx = screenW / 2 + Human.jitter(25)
+            val cy = (screenH * 0.55).toInt() + Human.jitter(20)
+            host.clickSuspend(cx, cy)
+            Human.doubleTapGap()
+            host.clickSuspend(cx + Human.jitter(8), cy + Human.jitter(8))
+            Human.likeAnimDelay()
+            delay((config.delayAfterLike * 1_000).toLong())
+        } finally {
+            isActionLocked = false
+        }
     }
 
     /**
@@ -1578,25 +1756,19 @@ class AutomationEngine(
      * Kiểm tra text nút trước khi click — bỏ qua nếu đã follow.
      * Trả true nếu đã thực sự click (chưa follow).
      */
-    private suspend fun doFollow(): Boolean = doFollowWithRoot(host.getRootNode())
+    private suspend fun doFollow(): Boolean {
+        isActionLocked = true
+        return try { doFollowWithRoot(host.getRootNode()) }
+        finally { isActionLocked = false }
+    }
 
-    /**
-     * v1.1.9: Overload nhận root đã fetch — tái sử dụng từ bước Like,
-     * giảm số lần gọi getRootNode() (IPC qua accessibility service).
-     *
-     * v1.2.1: Giữ nguyên hàm này nhưng không dùng trong farm flow nữa.
-     * Farm flow dùng doFollowFromProfile() thay thế.
-     */
     private suspend fun doFollowWithRoot(root: android.view.accessibility.AccessibilityNodeInfo?): Boolean {
         val btn = NodeTraverser.findByText(root, "follow",     ignoreCase = true)
             ?: NodeTraverser.findByText(root, "theo dõi",     ignoreCase = true)
             ?: NodeTraverser.findByText(root, "đăng ký",      ignoreCase = true)
             ?: return false
-
-        // Đã follow rồi → bỏ qua
         val t = btn.text?.lowercase() ?: ""
         if ("following" in t || "đang theo dõi" in t || "đã theo dõi" in t) return false
-
         host.clickNode(btn.node)
         delay((config.delayAfterFollow * 1_000).toLong())
         return true
@@ -2054,28 +2226,34 @@ class AutomationEngine(
      * v1.1.9: Dùng swipeStartFactor/EndFactor ngẫu nhiên — vị trí swipe thay đổi mỗi lần.
      */
     private suspend fun swipeNext() {
-        val xOff = Human.jitter(12)
-        val x    = screenW / 2 + xOff
-        host.swipeSuspend(
-            x, (screenH * Human.swipeStartFactor()).toInt(),
-            x, (screenH * Human.swipeEndFactor()).toInt(),
-            Human.swipeDuration(350),
-        )
-        Human.delay(700, 1_400)
+        isActionLocked = true
+        try {
+            val xOff = Human.jitter(12)
+            val x    = screenW / 2 + xOff
+            host.swipeSuspend(
+                x, (screenH * Human.swipeStartFactor()).toInt(),
+                x, (screenH * Human.swipeEndFactor()).toInt(),
+                Human.swipeDuration(350),
+            )
+            Human.delay(700, 1_400)
+        } finally {
+            isActionLocked = false
+        }
     }
 
-    /**
-     * Force swipe mạnh khi bị kẹt ở cùng 1 video.
-     * Swipe 2 lần liên tiếp, nhanh hơn bình thường.
-     */
     private suspend fun forceSwipeNext() {
-        repeat(2) {
-            host.swipeSuspend(
-                screenW / 2, (screenH * 0.82).toInt(),
-                screenW / 2, (screenH * 0.08).toInt(),
-                200,
-            )
-            delay(500)
+        isActionLocked = true
+        try {
+            repeat(2) {
+                host.swipeSuspend(
+                    screenW / 2, (screenH * 0.82).toInt(),
+                    screenW / 2, (screenH * 0.08).toInt(),
+                    200,
+                )
+                delay(500)
+            }
+        } finally {
+            isActionLocked = false
         }
     }
 
@@ -2095,9 +2273,9 @@ class AutomationEngine(
         watchdogJob = host.scope.launch {
             while (isActive && isFarming) {
                 delay(30_000L)
-                // Bỏ qua khi đã dừng, đang pause, hoặc đang nghỉ giữa acc —
-                // không có video mới trong REST là đúng, không phải stuck.
-                if (!isFarming || isPaused || isResting) continue
+                // Bỏ qua khi đã dừng, đang pause, đang nghỉ giữa acc, đang normalize, hoặc
+                // đang thực hiện action — các trạng thái này không có video mới là bình thường.
+                if (!isFarming || isPaused || isResting || isNormalizing || isActionLocked) continue
                 val stuckSecs = (System.currentTimeMillis() - watchdogLastTick) / 1_000
                 if (stuckSecs > config.watchdogTimeoutSecs) {
                     log("WDG: Không có video mới trong ${stuckSecs}s — kích hoạt smart recovery")
@@ -2145,6 +2323,8 @@ class AutomationEngine(
      * Loại bỏ ~90% false-positive từ animation lag / accessibility tree chưa update.
      */
     private suspend fun isLostWithRetry(): Boolean {
+        // v1.2.6: Không coi là "lạc" khi đang normalize hoặc thực hiện action
+        if (isNormalizing || isActionLocked) return false
         if (NodeTraverser.isOnFeedTab(host.getRootNode())) return false
         delay(1_500)
         if (NodeTraverser.isOnFeedTab(host.getRootNode())) return false
@@ -2414,13 +2594,28 @@ class AutomationEngine(
             return
         }
 
-        // Match thiết bị ↔ Golike
-        val golikeMap = golikeAccounts.associateBy { acc ->
-            acc.uniqueUsername.lowercase().removePrefix("@")
-        }
+        // v1.2.6 FIX — Matching thiết bị ↔ Golike theo đúng spec golike.py:
+        //   1. unique_username là key chính (trường unique trên Golike).
+        //   2. nickname chỉ dùng làm fallback nếu không tìm thấy trùng unique_username
+        //      VÀ nickname đó không bị trùng với unique_username của acc khác (tránh nhầm).
+        //
+        // Trước đây chỉ map theo unique_username → bỏ sót các acc có unique_username
+        // lạ nhưng nickname khớp với @username TikTok thực tế trên thiết bị.
+        val uniqueMap  = golikeAccounts.associateBy { it.uniqueUsername.lowercase().removePrefix("@") }
+        val nicknameMap = golikeAccounts
+            .filter { acc ->
+                // Chỉ cho phép nickname làm key nếu nickname KHÔNG trùng với
+                // unique_username của bất kỳ acc nào khác (tránh ambiguity).
+                val nick = acc.nickname.lowercase().removePrefix("@")
+                nick.isNotEmpty() && !uniqueMap.containsKey(nick)
+            }
+            .associateBy { it.nickname.lowercase().removePrefix("@") }
+
         val matchedList: List<Pair<String, TikTokAccountDto>> = farmList.mapNotNull { username ->
             val clean = username.lowercase().removePrefix("@")
-            golikeMap[clean]?.let { username to it }
+            // Ưu tiên match unique_username → fallback nickname
+            val golikeAcc = uniqueMap[clean] ?: nicknameMap[clean]
+            golikeAcc?.let { username to it }
         }
 
         if (matchedList.isEmpty()) {
@@ -2764,8 +2959,16 @@ class AutomationEngine(
 
         log(">> [Facebook] Bắt đầu phiên nuôi acc Facebook")
         setStatus(">> Đang mở Facebook...")
-        if (!host.launchApp(pkg)) {
-            log("ERR: Không mở được Facebook (gói: $pkg) — kiểm tra đã cài đặt trên thiết bị")
+        // v1.2.7: thử lần lượt các gói Facebook (ngoại trừ Lite) cho đến khi mở được
+        val fbPkg = AppConstants.FACEBOOK_PACKAGES.firstOrNull { pkgName ->
+            val launched = host.launchApp(pkgName)
+            if (launched) {
+                log(">> [Facebook] Mở thành công với gói: $pkgName")
+            }
+            launched
+        }
+        if (fbPkg == null) {
+            log("ERR: Không mở được Facebook — thử: ${AppConstants.FACEBOOK_PACKAGES.joinToString()} — kiểm tra đã cài đặt")
             setStatus("")
             return
         }

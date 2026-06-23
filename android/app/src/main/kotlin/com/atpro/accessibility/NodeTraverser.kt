@@ -63,6 +63,40 @@ object NodeTraverser {
     }
 
     /**
+     * v1.2.6 — Nhãn UI hệ thống / nút bấm KHÔNG BAO GIỜ được coi là display name.
+     *
+     * BUG-NORMALIZE-001 (v1.2.5): Pass 3 (Unicode display name) từng bắt nhầm
+     * content-description hệ thống như "Trang tính dưới cùng" (Android tự sinh
+     * cho BottomSheetDialog) và nhãn nút "Đóng" (X close icon) — vì cả 2 đều
+     * chứa dấu tiếng Việt và không nằm trong danh sách loại trừ cũ. Hệ quả:
+     * app bấm nhầm vào nút Đóng / khung chứa, văng ra khỏi luồng switch acc.
+     * Fix: mở rộng denylist phủ toàn bộ nhãn nút/hệ thống phổ biến (VN + EN).
+     */
+    private val GENERIC_UI_DENYLIST = setOf(
+        "thêm tài khoản", "chuyển đổi tài khoản", "đăng nhập", "đăng xuất",
+        "add account", "switch account", "log in", "login", "log out", "logout",
+        "manage accounts", "quản lý tài khoản",
+        "đóng", "close", "x", "huỷ", "hủy", "cancel", "bỏ qua", "skip",
+        "lưu", "save", "xác nhận", "confirm", "đồng ý", "agree", "ok",
+        "quay lại", "back", "tiếp theo", "next", "xong", "done",
+        "có", "không", "yes", "no", "từ chối", "decline", "reject",
+        "để sau", "not now", "more", "thêm", "ít hơn", "less",
+        "trang tính dưới cùng", "bottom sheet", "lớp nền", "scrim",
+        "cài đặt", "settings", "tài khoản", "account",
+        "tiktok", "app",
+    )
+    private val BADGE_REGEX = Regex("""^\d+\+?$""")          // "9+", "12" – notification badge
+
+    /**
+     * v1.2.6 — Kiểm tra nhanh: chuỗi này có khớp một nhãn UI hệ thống/nút bấm
+     * đã biết không (không phân biệt hoa thường, so khớp chính xác sau trim).
+     * Dùng làm lớp bảo vệ thứ 2 ở AutomationEngine trước khi click 1 entry
+     * được cho là "display name cần chuẩn hoá".
+     */
+    fun isLikelySystemLabel(s: String): Boolean =
+        s.trim().lowercase() in GENERIC_UI_DENYLIST
+
+    /**
      * v1.2.5 — Phân tích danh sách tài khoản trong switch popup, kèm node gốc.
      *
      * Khác với [parseAccountList], method này:
@@ -78,16 +112,12 @@ object NodeTraverser {
      * val invalid = entries.filter {  it.isNeedsNormalize }
      * ```
      */
-    fun parseAccountListWithNodes(root: AccessibilityNodeInfo?): List<AccountEntry> {
+    fun parseAccountListWithNodes(
+        root: AccessibilityNodeInfo?,
+        screenWidth:  Int = Int.MAX_VALUE,
+        screenHeight: Int = Int.MAX_VALUE,
+    ): List<AccountEntry> {
         root ?: return emptyList()
-
-        val UI_LABELS = setOf(
-            "thêm tài khoản", "chuyển đổi tài khoản", "đăng nhập",
-            "add account", "switch account", "log in", "login",
-            "manage accounts", "quản lý tài khoản",
-        )
-        val FALSE_POSITIVES = setOf("tiktok", "app", "ok", "yes", "no", "cancel", "hủy")
-        val BADGE_REGEX     = Regex("""^\d+\+?$""")          // "9+", "12" – notification badge
 
         val entries = mutableListOf<AccountEntry>()
         val seen    = mutableSetOf<String>()
@@ -115,8 +145,7 @@ object NodeTraverser {
             val raw   = nr.displayText ?: return@forEach
             val clean = raw.trim().replace(" ", "")
             if (usernameRegex.matches(clean)
-                && clean.lowercase() !in UI_LABELS
-                && clean.lowercase() !in FALSE_POSITIVES
+                && clean.lowercase() !in GENERIC_UI_DENYLIST
                 && !BADGE_REGEX.matches(clean)
             ) {
                 if (seen.add(clean.lowercase()))
@@ -127,14 +156,34 @@ object NodeTraverser {
         // ── Pass 3: Display name Unicode (VD: "Bảo Hoài1502", "Ảo vãi") ────
         // TikTok đôi khi hiển thị nickname thay @unique_username → Pass 2 bỏ sót.
         // Dấu hiệu: chứa ký tự Unicode (ã, ả, ô...) hoặc dấu cách.
+        //
+        // BUG-NORMALIZE-001 fix: ngoài denylist mở rộng ở trên, áp thêm 2 bộ lọc
+        // hình học để chặn các node KHÔNG PHẢI hàng tài khoản trong danh sách:
+        //   (a) "container-sized" — node cao gần hết bottom sheet/màn hình
+        //       (VD content-description "Trang tính dưới cùng" phủ cả khung).
+        //   (b) "icon-sized" — node nhỏ & gần vuông như nút X đóng (24-48dp),
+        //       trong khi text 1 dòng (nickname) luôn rộng hơn cao rõ rệt.
         allNodes.forEach { nr ->
             val raw   = nr.displayText ?: return@forEach
             val clean = raw.trim()
             if (clean.length < 2 || clean.length > 60) return@forEach
-            if (clean.lowercase() in UI_LABELS) return@forEach
-            if (clean.lowercase() in FALSE_POSITIVES) return@forEach
+            if (clean.lowercase() in GENERIC_UI_DENYLIST) return@forEach
             if (BADGE_REGEX.matches(clean)) return@forEach
             if (seen.contains(clean.lowercase())) return@forEach
+
+            val w = nr.bounds.width()
+            val h = nr.bounds.height()
+            if (w <= 0 || h <= 0) return@forEach
+
+            // (a) Container/dialog-sized — bottom sheet, overlay nền, v.v.
+            if (screenHeight != Int.MAX_VALUE && h >= screenHeight * 0.4) return@forEach
+
+            // (b) Icon-sized — nút vuông nhỏ (close/back/...) không phải text hàng acc.
+            val aspectRatio = w.toFloat() / h.toFloat()
+            val isSmallSquareIcon = aspectRatio < 1.8f &&
+                (screenWidth == Int.MAX_VALUE || w <= screenWidth * 0.18)
+            if (isSmallSquareIcon) return@forEach
+
             // Phải có ký tự Unicode hoặc dấu cách (đây là display name, không phải username)
             val hasUnicode = clean.any { it.code > 127 }
             val hasSpace   = clean.contains(' ')
@@ -822,55 +871,40 @@ object NodeTraverser {
     fun detectAd(root: AccessibilityNodeInfo?): Boolean {
         root ?: return false
 
-        // Tier 1: Resource-ID exact list
+        // Tier 1: Resource-ID chính xác — chỉ xuất hiện trong ad container
         val AD_IDS = listOf(
-            // Skip / close button
-            "ad_skip", "skip_ad", "btn_skip_ad", "ad_skip_btn", "adSkipButton",
-            // Ad badge / label
-            "ad_badge", "ad_label", "ad_indicator", "ad_tag",
-            // Ad action / CTA
-            "ad_action_button", "ad_cta_btn", "ad_cta",
-            // Ad container / view
-            "feed_ad", "ad_view", "ad_image", "ad_container",
-            // Ad countdown timer
-            "ad_countdown", "ad_timer",
+            "ad_skip","skip_ad","btn_skip_ad","ad_skip_btn","adSkipButton",
+            "ad_badge","ad_label","ad_indicator","ad_tag",
+            "ad_action_button","ad_cta_btn","ad_cta",
+            "feed_ad","ad_view","ad_image","ad_container",
+            "ad_countdown","ad_timer",
         )
         if (AD_IDS.any { findByResourceId(root, it) != null }) return true
 
-        // Tier 1b: Full-path resource-id scan cho AD
         val hasAdId = traverseAll(root).any { node ->
             val resId = node.viewIdResourceName?.lowercase() ?: return@any false
             resId.contains("/ad_") || resId.contains("_ad/") || resId.contains("feed_ad")
         }
         if (hasAdId) return true
 
-        // Tier 2: Exact text badge — tránh false positive từ caption/hashtag
+        // Tier 2: Badge quảng cáo — exact match để tránh false positive
         val AD_EXACT = listOf(
-            "quảng cáo",            // TikTok VN badge
-            "sponsored",            // TikTok EN badge
-            "tài trợ",              // "Được tài trợ" variant
-            "bỏ qua quảng cáo",     // skip ad button text
+            "quảng cáo",
+            "sponsored",
+            "tài trợ",
+            "bỏ qua quảng cáo",
             "skip ad",
         )
         if (AD_EXACT.any { findByText(root, it, exact = true) != null }) return true
 
-        // Tier 3: Soft CTA signals — >= 2 để tránh false positive
-        // Các nút này xuất hiện ĐỘC QUYỀN trong quảng cáo nhưng
-        // từng nút riêng lẻ có thể bắt nhầm video thông thường.
+        // Tier 3: Soft signals — cần >= 2 để kết luận ad
         val text = getAllText(root).lowercase()
-        val AD_SOFT_SIGNALS = listOf(
-            "tìm hiểu thêm",        // "Learn more" CTA — rất phổ biến trong ads VN
-            "cài đặt ngay",         // App install ad
-            "mua ngay",             // Shopping ad
-            "đặt hàng ngay",        // Order now
-            "đăng ký ngay",         // Sign up ad
-            "xem thêm",             // See more — thường đi kèm badge quảng cáo
-            "shop now",
-            "download now",
-            "install now",
-            "learn more",
+        val AD_SOFT = listOf(
+            "tìm hiểu thêm", "cài đặt ngay", "mua ngay", "đặt hàng ngay",
+            "đăng ký ngay", "xem thêm", "shop now", "download now",
+            "install now", "learn more",
         )
-        return AD_SOFT_SIGNALS.count { it in text } >= 2
+        return AD_SOFT.count { it in text } >= 2
     }
 
     /**

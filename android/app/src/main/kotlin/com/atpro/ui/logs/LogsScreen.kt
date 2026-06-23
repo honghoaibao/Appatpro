@@ -20,8 +20,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.platform.LocalContext
-import android.app.Activity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.atpro.db.entity.FarmLogEntity
 import java.text.SimpleDateFormat
@@ -49,7 +47,6 @@ fun LogsScreen(vm: LogsViewModel, onNavigateUp: (() -> Unit)? = null) {
     val levelFilter by vm.levelFilter.collectAsStateWithLifecycle()
     val clipboard   = LocalClipboardManager.current
     val listState   = rememberLazyListState()
-    val activity    = LocalContext.current as? Activity
 
     // Auto-scroll to top khi có log mới
     LaunchedEffect(logs.firstOrNull()?.id) {
@@ -66,12 +63,9 @@ fun LogsScreen(vm: LogsViewModel, onNavigateUp: (() -> Unit)? = null) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = { onNavigateUp?.invoke() ?: activity?.finish() }) {
-                Icon(Icons.Rounded.ArrowBackIosNew, contentDescription = "Quay lại", tint = Color.White, modifier = Modifier.size(20.dp))
-            }
             Text(
                 "Nhật ký",
                 color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold,

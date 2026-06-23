@@ -46,6 +46,7 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
                 followRate               = repo.getConfigDouble("follow_rate",         0.15).toFloat(),
                 skipLive                 = repo.getConfigBool  ("skip_live",           true),
                 skipAds                  = repo.getConfigBool  ("skip_ads",            true),
+                normalizeEnabled         = repo.getConfigBool  ("normalize_enabled",   true),
                 // [v1.1.8] Like content-aware
                 likeAds                  = repo.getConfigBool  ("like_ads",            false),
                 verifyAccount            = repo.getConfigBool  ("verify_account",      true),
@@ -72,17 +73,17 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
                 taskJobsPerAccount        = repo.getConfigInt   ("task_jobs_per_account",       5),
                 taskMaxConsecFailures     = repo.getConfigInt   ("task_max_consec_failures",    3),
                 // [v1.2.4] Demo nuôi acc
-                facebookNurtureDurationSecs = repo.getConfigInt   ("fb_nurture_duration_secs",  180),
+                facebookNurtureDurationSecs = repo.getConfigInt   ("fb_nurture_duration_secs",  600),
                 facebookLikeRate            = repo.getConfigDouble("fb_like_rate",              0.2).toFloat(),
-                xNurtureDurationSecs        = repo.getConfigInt   ("x_nurture_duration_secs",   120),
+                xNurtureDurationSecs        = repo.getConfigInt   ("x_nurture_duration_secs",   480),
                 xLikeRate                   = repo.getConfigDouble("x_like_rate",               0.25).toFloat(),
                 xRetweetRate                = repo.getConfigDouble("x_retweet_rate",            0.05).toFloat(),
-                instagramNurtureDurationSecs= repo.getConfigInt   ("ig_nurture_duration_secs",  180),
+                instagramNurtureDurationSecs= repo.getConfigInt   ("ig_nurture_duration_secs",  600),
                 instagramLikeRate           = repo.getConfigDouble("ig_like_rate",              0.30).toFloat(),
                 instagramFollowRate         = repo.getConfigDouble("ig_follow_rate",            0.08).toFloat(),
-                threadsNurtureDurationSecs  = repo.getConfigInt   ("threads_nurture_duration_secs", 120),
+                threadsNurtureDurationSecs  = repo.getConfigInt   ("threads_nurture_duration_secs", 480),
                 threadsLikeRate             = repo.getConfigDouble("threads_like_rate",         0.20).toFloat(),
-                snapchatNurtureDurationSecs = repo.getConfigInt   ("snap_nurture_duration_secs", 90),
+                snapchatNurtureDurationSecs = repo.getConfigInt   ("snap_nurture_duration_secs", 360),
                 snapchatStoryViewSecs       = repo.getConfigInt   ("snap_story_view_secs",       8),
             )
             // [v1.1.4.1 FIX] Dùng update thay vì assignment trực tiếp để giữ lại
@@ -117,6 +118,7 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
             repo.setConfig("follow_rate",                  "${s.followRate}")
             repo.setConfig("skip_live",                    "${s.skipLive}")
             repo.setConfig("skip_ads",                     "${s.skipAds}")
+            repo.setConfig("normalize_enabled",            "${s.normalizeEnabled}") // v1.2.6
             repo.setConfig("like_ads",                     "${s.likeAds}")  // [v1.1.8]
             repo.setConfig("verify_account",               "${s.verifyAccount}")
             repo.setConfig("enable_system_notifications",  "${s.enableSystemNotifications}")
@@ -217,6 +219,8 @@ data class ConfigUiState(
     val followRate:               Float   = 0.15f,
     val skipLive:                 Boolean = true,
     val skipAds:                  Boolean = true,
+    // v1.2.6 — Bật/tắt chuẩn hoá display name / ID thuần số khi farm bắt đầu.
+    val normalizeEnabled:         Boolean = true,
     // [v1.1.8] Like quảng cáo khi skipAds = false.
     val likeAds:                  Boolean = false,
     val verifyAccount:            Boolean = true,
