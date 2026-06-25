@@ -17,8 +17,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.platform.LocalContext
-import android.app.Activity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.atpro.scheduler.ScheduledFarmManager.FarmSchedule
 
@@ -37,28 +35,34 @@ private val DAY_LABELS = listOf("CN", "T2", "T3", "T4", "T5", "T6", "T7")
 
 // ─────────────────────────────────────────────────────────────
 //  Root
+//  v1.2.8: thêm onNavigateUp để dùng được cả trong tab MainScreen
+//           lẫn standalone ScheduleActivity (default = {}).
 // ─────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScheduleScreen(vm: ScheduleViewModel) {
+fun ScheduleScreen(vm: ScheduleViewModel, onNavigateUp: () -> Unit = {}) {
     val schedules by vm.schedules.collectAsStateWithLifecycle()
     val isLoading by vm.isLoading.collectAsStateWithLifecycle()
     var showAdd   by remember { mutableStateOf(false) }
-    val activity  = LocalContext.current as? Activity
 
     Scaffold(
         containerColor = BgDark,
         topBar = {
-            @OptIn(ExperimentalMaterial3Api::class)
             TopAppBar(
                 navigationIcon = {
-                    IconButton(onClick = { activity?.finish() }) {
-                        Icon(Icons.Rounded.ArrowBackIosNew, contentDescription = "Quay lại", tint = Color.White, modifier = Modifier.size(20.dp))
+                    IconButton(onClick = onNavigateUp) {
+                        Icon(
+                            Icons.Rounded.ArrowBackIosNew,
+                            contentDescription = "Quay lại",
+                            tint   = Color.White,
+                            modifier = Modifier.size(20.dp),
+                        )
                     }
                 },
                 title = {
                     Column {
-                        Text("Lịch farm tự động", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                        Text("Lịch tự động", fontWeight = FontWeight.Bold, fontSize = 17.sp)
                         Text(
                             "${schedules.count { it.enabled }} lịch đang bật",
                             color = TextMuted, fontSize = 11.sp,
@@ -93,9 +97,9 @@ fun ScheduleScreen(vm: ScheduleViewModel) {
             EmptyScheduleView(Modifier.padding(padding))
         } else {
             LazyColumn(
-                contentPadding      = PaddingValues(
-                    start = 16.dp, end = 16.dp,
-                    top   = padding.calculateTopPadding() + 8.dp,
+                contentPadding = PaddingValues(
+                    start  = 16.dp, end    = 16.dp,
+                    top    = padding.calculateTopPadding() + 8.dp,
                     bottom = padding.calculateBottomPadding() + 80.dp,
                 ),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -183,19 +187,16 @@ private fun ScheduleRow(schedule: FarmSchedule, onToggle: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            // Label + time
             Text(schedule.label, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(4.dp))
             Text(
                 "%02d:%02d".format(schedule.hourOfDay, schedule.minute),
-                color = if (schedule.enabled) Purple else TextMuted,
-                fontSize = 22.sp,
+                color      = if (schedule.enabled) Purple else TextMuted,
+                fontSize   = 22.sp,
                 fontWeight = FontWeight.ExtraBold,
             )
             Spacer(Modifier.height(8.dp))
-            // Day chips
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                // daysOfWeek: 1=Sun, 2=Mon … 7=Sat
                 listOf(1, 2, 3, 4, 5, 6, 7).forEach { day ->
                     val active = day in schedule.daysOfWeek
                     Box(
@@ -210,8 +211,8 @@ private fun ScheduleRow(schedule: FarmSchedule, onToggle: () -> Unit) {
                     ) {
                         Text(
                             DAY_LABELS[day - 1],
-                            fontSize = 9.sp,
-                            color    = if (active && schedule.enabled) Purple else TextMuted,
+                            fontSize   = 9.sp,
+                            color      = if (active && schedule.enabled) Purple else TextMuted,
                             fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
                         )
                     }
@@ -221,7 +222,7 @@ private fun ScheduleRow(schedule: FarmSchedule, onToggle: () -> Unit) {
         Switch(
             checked         = schedule.enabled,
             onCheckedChange = { onToggle() },
-            colors          = SwitchDefaults.colors(
+            colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
                 checkedTrackColor = Purple,
             ),
@@ -238,19 +239,18 @@ private fun AddScheduleDialog(
     onDismiss: () -> Unit,
     onAdd:     (label: String, hour: Int, minute: Int, days: List<Int>) -> Unit,
 ) {
-    var label      by remember { mutableStateOf("Farm") }
-    var hour       by remember { mutableIntStateOf(8) }
-    var minute     by remember { mutableIntStateOf(0) }
-    var selectedDays by remember { mutableStateOf(setOf(2, 3, 4, 5, 6, 7, 1)) } // all days
+    var label        by remember { mutableStateOf("Farm") }
+    var hour         by remember { mutableIntStateOf(8) }
+    var minute       by remember { mutableIntStateOf(0) }
+    var selectedDays by remember { mutableStateOf(setOf(2, 3, 4, 5, 6, 7, 1)) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor   = CardDark,
-        title = { Text("Thêm lịch farm", color = Color.White, fontWeight = FontWeight.Bold) },
+        title = { Text("Thêm lịch tự động", color = Color.White, fontWeight = FontWeight.Bold) },
         text  = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
 
-                // Label
                 OutlinedTextField(
                     value         = label,
                     onValueChange = { label = it },
@@ -258,13 +258,13 @@ private fun AddScheduleDialog(
                     singleLine    = true,
                     modifier      = Modifier.fillMaxWidth(),
                     colors        = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor   = Purple, unfocusedBorderColor = BorderDark,
-                        focusedTextColor     = Color.White, unfocusedTextColor = Color.White,
-                        focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
+                        focusedBorderColor    = Purple, unfocusedBorderColor  = BorderDark,
+                        focusedTextColor      = Color.White, unfocusedTextColor = Color.White,
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
                     ),
                 )
 
-                // Time picker (simple +/- steppers)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Giờ:", color = TextSec, fontSize = 13.sp, modifier = Modifier.width(40.dp))
                     TimeStepBtn(Icons.Rounded.Remove) { hour = (hour - 1 + 24) % 24 }
@@ -285,7 +285,6 @@ private fun AddScheduleDialog(
                     TimeStepBtn(Icons.Rounded.Add) { minute = (minute + 5) % 60 }
                 }
 
-                // Day selector
                 Column {
                     Text("Ngày trong tuần:", color = TextSec, fontSize = 13.sp)
                     Spacer(Modifier.height(8.dp))
@@ -305,8 +304,8 @@ private fun AddScheduleDialog(
                             ) {
                                 Text(
                                     DAY_LABELS[day - 1],
-                                    fontSize = 10.sp,
-                                    color    = if (selected) Color.White else TextMuted,
+                                    fontSize   = 10.sp,
+                                    color      = if (selected) Color.White else TextMuted,
                                     fontWeight = FontWeight.Bold,
                                 )
                             }
@@ -363,7 +362,7 @@ private fun EmptyScheduleView(modifier: Modifier = Modifier) {
         Spacer(Modifier.height(8.dp))
         Text(
             "Nhấn + để thêm lịch farm tự động\nWorkManager sẽ khởi động farm đúng giờ",
-            color = TextMuted, fontSize = 13.sp, lineHeight = 20.sp,
+            color     = TextMuted, fontSize = 13.sp, lineHeight = 20.sp,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
     }

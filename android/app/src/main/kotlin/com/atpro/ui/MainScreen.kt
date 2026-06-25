@@ -24,11 +24,13 @@ import com.atpro.ui.dashboard.DashboardScreen
 import com.atpro.ui.dashboard.DashboardViewModel
 import com.atpro.ui.logs.LogsScreen
 import com.atpro.ui.logs.LogsViewModel
+import com.atpro.ui.schedule.ScheduleScreen
+import com.atpro.ui.schedule.ScheduleViewModel
 import com.atpro.ui.services.ServicesScreen
 import com.atpro.ui.stats.StatsScreen
 import com.atpro.ui.stats.StatsViewModel
 
-// ── Design tokens (đồng bộ với DashboardScreen) ───────────────
+// ── Design tokens ────────────────────────────────────────────
 private val BgDark    = Color(0xFF0D0D14)
 private val NavBg     = Color(0xFF13131F)
 private val Purple    = Color(0xFF6C63FF)
@@ -36,8 +38,7 @@ private val TextMuted = Color(0xFF6B7280)
 
 // ─────────────────────────────────────────────────────────────
 //  Tab definition
-//  v1.2.7: Tab "Dịch vụ" dùng icon Settings để đồng bộ với ConfigScreen (Cài đặt).
-//          Tất cả label dùng cùng fontSize = 10.sp.
+//  v1.2.8: Thêm tab SCHEDULE (Lịch) giữa ACCOUNTS và LOGS.
 // ─────────────────────────────────────────────────────────────
 
 private enum class Tab(
@@ -48,6 +49,7 @@ private enum class Tab(
     SERVICES ("Dịch vụ",   Icons.Rounded.Layers),
     STATS    ("Thống kê",  Icons.Rounded.BarChart),
     ACCOUNTS ("Tài khoản", Icons.Rounded.ManageAccounts),
+    SCHEDULE ("Lịch",      Icons.Rounded.Schedule),
     LOGS     ("Nhật ký",   Icons.Rounded.EventNote),
 }
 
@@ -61,6 +63,7 @@ fun MainScreen(
     statsVm:     StatsViewModel,
     accountsVm:  AccountsViewModel,
     logsVm:      LogsViewModel,
+    scheduleVm:  ScheduleViewModel,
 ) {
     var selectedTab by remember { mutableStateOf(Tab.DASHBOARD) }
 
@@ -69,9 +72,9 @@ fun MainScreen(
         contentWindowInsets = WindowInsets(0),
         bottomBar = {
             NavigationBar(
-                modifier        = Modifier.navigationBarsPadding(),
-                containerColor  = NavBg,
-                tonalElevation  = 0.dp,
+                modifier       = Modifier.navigationBarsPadding(),
+                containerColor = NavBg,
+                tonalElevation = 0.dp,
             ) {
                 Tab.entries.forEach { tab ->
                     NavigationBarItem(
@@ -87,7 +90,7 @@ fun MainScreen(
                         label = {
                             Text(
                                 tab.label,
-                                fontSize = 10.sp,   // v1.2.7: tất cả tab label cùng cỡ
+                                fontSize = 10.sp,
                                 maxLines = 1,
                             )
                         },
@@ -150,15 +153,19 @@ fun MainScreen(
                         },
                     )
 
-                    Tab.STATS     -> StatsScreen(
+                    Tab.STATS    -> StatsScreen(
                         vm           = statsVm,
                         onNavigateUp = { selectedTab = Tab.DASHBOARD },
                     )
-                    Tab.ACCOUNTS  -> AccountsScreen(
+                    Tab.ACCOUNTS -> AccountsScreen(
                         vm           = accountsVm,
                         onNavigateUp = { selectedTab = Tab.DASHBOARD },
                     )
-                    Tab.LOGS      -> LogsScreen(
+                    Tab.SCHEDULE -> ScheduleScreen(
+                        vm           = scheduleVm,
+                        onNavigateUp = { selectedTab = Tab.DASHBOARD },
+                    )
+                    Tab.LOGS     -> LogsScreen(
                         vm           = logsVm,
                         onNavigateUp = { selectedTab = Tab.DASHBOARD },
                     )

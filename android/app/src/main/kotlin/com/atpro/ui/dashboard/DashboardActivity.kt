@@ -10,13 +10,15 @@ import androidx.compose.ui.graphics.Color
 import com.atpro.ui.MainScreen
 import com.atpro.ui.accounts.AccountsViewModel
 import com.atpro.ui.logs.LogsViewModel
+import com.atpro.ui.schedule.ScheduleViewModel
 import com.atpro.ui.stats.StatsViewModel
 
 /**
  * DashboardActivity — single-Activity host cho toàn bộ app kể từ v1.1.5.
  *
  * v1.2.7: Xoá Golike UI (GolikeViewModel, GolikeLoginWebActivity).
- * Backend Golike (GolikeApi, GolikeRepository) giữ nguyên để dùng sau.
+ *         Backend Golike (GolikeApi, GolikeRepository) giữ nguyên để dùng sau.
+ * v1.2.8: Thêm scheduleVm cho tab Lịch tự động.
  */
 class DashboardActivity : AppCompatActivity() {
 
@@ -31,6 +33,9 @@ class DashboardActivity : AppCompatActivity() {
     }
     private val logsVm: LogsViewModel by viewModels {
         LogsViewModel.Factory(applicationContext)
+    }
+    private val scheduleVm: ScheduleViewModel by viewModels {
+        ScheduleViewModel.Factory(applicationContext)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,6 +54,7 @@ class DashboardActivity : AppCompatActivity() {
                     statsVm     = statsVm,
                     accountsVm  = accountsVm,
                     logsVm      = logsVm,
+                    scheduleVm  = scheduleVm,
                 )
             }
         }

@@ -872,6 +872,7 @@ class AutomationEngine(
 
         // Giai đoạn B: settle → fresh node → click
         delay(800)
+        log("BTN: Đã tìm thấy nút chuyển đổi tài khoản")
         val btn = findSwitchBtnNode()
         if (btn == null) {
             log("ERR: Nút chuyển đổi biến mất sau delay")

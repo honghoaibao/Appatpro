@@ -38,6 +38,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.atpro.R
 import com.atpro.data.AccessibilitySettingsHelper
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -403,6 +407,11 @@ private fun SettingsLayout(
 //  thay cho icon Material chung (ThumbUp/CameraAlt/MoreVert... trùng lặp & sai).
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * v1.2.8 — Đồng bộ icon logo thật với ServicesScreen.
+ * Facebook / X / Instagram / Snapchat dùng drawable ic_logo_* giống ServicesScreen.
+ * Threads giữ "@" text (không có ic_logo_threads trong drawable).
+ */
 @Composable
 private fun PlatformBadge(section: Section, size: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(size * 0.28f)
@@ -411,13 +420,23 @@ private fun PlatformBadge(section: Section, size: androidx.compose.ui.unit.Dp, m
             modifier = modifier.size(size).clip(shape).background(Color(0xFF1877F2)),
             contentAlignment = Alignment.Center,
         ) {
-            Text("f", color = Color.White, fontSize = (size.value * 0.62f).sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Serif)
+            Image(
+                painter            = painterResource(R.drawable.ic_logo_facebook),
+                contentDescription = "Facebook",
+                contentScale       = ContentScale.Fit,
+                modifier           = Modifier.fillMaxSize(),
+            )
         }
         Section.DEMO_X -> Box(
             modifier = modifier.size(size).clip(shape).background(Color.Black),
             contentAlignment = Alignment.Center,
         ) {
-            Text("X", color = Color.White, fontSize = (size.value * 0.55f).sp, fontWeight = FontWeight.Black)
+            Image(
+                painter            = painterResource(R.drawable.ic_logo_x),
+                contentDescription = "X",
+                contentScale       = ContentScale.Fit,
+                modifier           = Modifier.fillMaxSize(),
+            )
         }
         Section.DEMO_INSTAGRAM -> Box(
             modifier = modifier.size(size).clip(shape).background(
@@ -425,9 +444,15 @@ private fun PlatformBadge(section: Section, size: androidx.compose.ui.unit.Dp, m
             ),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Rounded.CameraAlt, null, tint = Color.White, modifier = Modifier.size(size * 0.58f))
+            Image(
+                painter            = painterResource(R.drawable.ic_logo_instagram),
+                contentDescription = "Instagram",
+                contentScale       = ContentScale.Fit,
+                modifier           = Modifier.fillMaxSize(),
+            )
         }
         Section.DEMO_THREADS -> Box(
+            // Threads: không có logo drawable → giữ "@" text như ServicesScreen
             modifier = modifier.size(size).clip(shape).background(Color.Black),
             contentAlignment = Alignment.Center,
         ) {
@@ -437,7 +462,12 @@ private fun PlatformBadge(section: Section, size: androidx.compose.ui.unit.Dp, m
             modifier = modifier.size(size).clip(shape).background(Color(0xFFFFFC00)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Rounded.Mood, null, tint = Color.Black, modifier = Modifier.size(size * 0.62f))
+            Image(
+                painter            = painterResource(R.drawable.ic_logo_snapchat),
+                contentDescription = "Snapchat",
+                contentScale       = ContentScale.Fit,
+                modifier           = Modifier.fillMaxSize(),
+            )
         }
         else -> Box(
             modifier = modifier.size(size).clip(shape).background(section.accent.copy(alpha = 0.15f)),
