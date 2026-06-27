@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- AT PRO launcher icon background — matches v1.2.6 logo deep navy -->
-    <color name="ic_launcher_background">#00041A</color>
-    <!-- Dark background for all native screens (replaces Flutter launch bg) -->
-    <color name="bg_dark">#0D0D14</color>
-</resources>
