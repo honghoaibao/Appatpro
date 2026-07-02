@@ -62,14 +62,32 @@ class DashboardViewModel(
         }
     }
 
-    /** v1.2.2: Poll trạng thái đăng nhập Golike mỗi 5s để cập nhật canStart. */
+    /** v1.2.2: Poll trạng thái đăng nhập Golike mỗi 5s để cập nhật canStart.
+     *  v1.2.9: Cũng fetch số dư (từ getMe) và tiền chờ duyệt (từ getStatistics). */
     private fun pollGolikeLoginState() {
         val repo = golikeRepo ?: return
         viewModelScope.launch {
             while (true) {
                 val loggedIn = repo.getSavedToken() != null
                 _uiState.update { it.copy(isGolikeLoggedIn = loggedIn) }
-                delay(5_000)
+
+                if (loggedIn) {
+                    // Số dư hiện tại — dùng getMe() vì luôn có GolikeUserData.coin
+                    val meResult = repo.getMe()
+                    if (meResult is com.atpro.golike.GolikeResult.Success) {
+                        _uiState.update { it.copy(golikeCoin = meResult.data.coin) }
+                    }
+
+                    // Tiền chờ duyệt — từ statistics/report
+                    val statsResult = repo.getStatistics()
+                    if (statsResult is com.atpro.golike.GolikeResult.Success) {
+                        val holdCoin = (statsResult.data.tiktok?.holdCoin   ?: 0.0) +
+                                       (statsResult.data.facebook?.holdCoin  ?: 0.0) +
+                                       (statsResult.data.instagram?.holdCoin ?: 0.0)
+                        _uiState.update { it.copy(golikeHoldCoin = holdCoin) }
+                    }
+                }
+                delay(30_000)
             }
         }
     }
@@ -134,6 +152,18 @@ class DashboardViewModel(
     /** v1.2.1: Chuyển dashboard sang chế độ farm hoặc task. */
     fun setServiceMode(mode: ServiceMode) {
         _uiState.update { it.copy(serviceMode = mode) }
+    }
+
+    /** v1.2.9: Lưu Golike JWT token nhập thủ công (ô athu trong Dịch vụ). */
+    fun saveGolikeToken(token: String) {
+        val repo = golikeRepo ?: return
+        viewModelScope.launch { repo.saveManualToken(token) }
+    }
+
+    /** v1.2.9: Xóa token Golike (đăng xuất). */
+    fun clearGolikeToken() {
+        val repo = golikeRepo ?: return
+        viewModelScope.launch { repo.clearToken(); _uiState.update { it.copy(isGolikeLoggedIn = false, golikeCoin = 0.0, golikeHoldCoin = 0.0) } }
     }
 
     fun setCustomAccounts(text: String) {
@@ -340,6 +370,34 @@ class DashboardViewModel(
                             }
                         }
                     }
+
+                    // v1.2.9: Kiểm tra file tải về có thật sự là APK hợp lệ TRƯỚC khi
+                    // đưa cho installer — tránh trường hợp "gói không hợp lệ" khi:
+                    //   (a) URL trả về trang HTML thay vì file .apk (release thiếu asset),
+                    //   (b) tải bị ngắt giữa chừng (kích thước < Content-Length),
+                    //   (c) server trả lỗi (404/500) nhưng vẫn ghi "nội dung lỗi" ra file.
+                    // Mọi file APK hợp lệ đều bắt đầu bằng magic bytes ZIP "PK\x03\x04"
+                    // (APK về bản chất là file ZIP).
+                    val header = ByteArray(4)
+                    file.inputStream().use { it.read(header) }
+                    val isZipMagic = header.size == 4 &&
+                        header[0] == 0x50.toByte() && header[1] == 0x4B.toByte() &&
+                        (header[2] == 0x03.toByte() || header[2] == 0x05.toByte() || header[2] == 0x07.toByte())
+
+                    if (!isZipMagic) {
+                        file.delete()
+                        throw IllegalStateException(
+                            "File tải về không phải APK hợp lệ (có thể link download đã hỏng " +
+                            "hoặc release GitHub thiếu file .apk đính kèm)"
+                        )
+                    }
+                    if (total > 0 && file.length() < total) {
+                        file.delete()
+                        throw IllegalStateException(
+                            "Tải về không đầy đủ (${file.length()}/$total bytes) — mạng có thể đã bị ngắt giữa chừng"
+                        )
+                    }
+
                     file
                 }
 
@@ -395,6 +453,9 @@ data class DashboardUiState(
     val startupStatus:     String              = "",
     /** v1.2.2: Trạng thái đăng nhập Golike — block start task khi chưa đăng nhập. */
     val isGolikeLoggedIn:  Boolean             = false,
+    /** v1.2.9: Số dư và tiền chờ duyệt Golike (hiển thị khi đăng nhập + chọn TASK mode). */
+    val golikeCoin:        Double              = 0.0,
+    val golikeHoldCoin:    Double              = 0.0,
     // [v1.0.5] Thông tin phiên bản mới từ GitHub — non-null = hiển thị dialog cập nhật
     val updateInfo:        UpdateInfo?         = null,
     // [v1.0.9] Tiến độ tải APK: -1=idle, 0–99=đang tải, -2=lỗi

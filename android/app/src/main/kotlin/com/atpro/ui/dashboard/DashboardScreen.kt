@@ -82,8 +82,8 @@ fun DashboardScreen(vm: DashboardViewModel) {
         if (!state.isStartingUp) isMinimized = false
     }
 
-    // [v1.0.5] Kiểm tra phiên bản mới khi mở Dashboard — chạy 1 lần
-    LaunchedEffect(Unit) { vm.checkForUpdate() }
+    // [v1.0.5 → v1.2.9] Kiểm tra phiên bản mới — ĐÃ CHUYỂN lên MainScreen.kt để popup
+    // không bị mất khi người dùng chuyển tab (DashboardScreen bị unmount khi rời tab Dashboard).
 
     Box(
         modifier = Modifier
@@ -141,15 +141,7 @@ fun DashboardScreen(vm: DashboardViewModel) {
             )
         }
 
-        // ── [v1.0.5] Update available dialog ─────────────────────────────────
-        state.updateInfo?.let { info ->
-            UpdateAvailableDialog(
-                info             = info,
-                downloadProgress = state.downloadProgress,
-                onDismiss        = vm::dismissUpdate,
-                onUpdate         = { vm.startUpdate() },
-            )
-        }
+        // [v1.0.5 → v1.2.9] Update dialog — ĐÃ CHUYỂN lên MainScreen.kt (xem comment ở trên).
     }
 }
 
@@ -392,7 +384,8 @@ private fun StartupStatusDialog(
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun UpdateAvailableDialog(
+// v1.2.9: bỏ "private" — được gọi từ MainScreen.kt để hiển thị bất kể tab đang chọn
+fun UpdateAvailableDialog(
     info:             UpdateInfo,
     downloadProgress: Int,           // -1=idle, 0–99=đang tải, -2=lỗi
     onDismiss:        () -> Unit,
@@ -722,14 +715,6 @@ private fun IdleView(state: DashboardUiState, vm: DashboardViewModel) {
                 ) {
                     AppLogo()
                 }
-                Spacer(Modifier.width(6.dp))
-                // v1.2.7: version badge
-                Text(
-                    text     = "v1.2.7",
-                    color    = TextMuted.copy(alpha = 0.55f),
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Medium,
-                )
             }
 
             Spacer(Modifier.weight(1f))
@@ -804,12 +789,43 @@ private fun IdleView(state: DashboardUiState, vm: DashboardViewModel) {
             when (state.serviceMode) {
                 com.atpro.automation.ServiceMode.FARM -> StartButton(
                     enabled = state.canStart, hint = state.startHint, onClick = vm::startFarm,
+                    labelText = "Bắt đầu nuôi TikTok",
                 )
-                com.atpro.automation.ServiceMode.TASK -> StartButton(
-                    enabled = state.canStart, hint = state.startHint, onClick = vm::startTask,
-                    labelText = "Bắt đầu làm nhiệm vụ",
-                    accentColor = androidx.compose.ui.graphics.Color(0xFF7C3AED),
-                )
+                com.atpro.automation.ServiceMode.TASK -> {
+                    if (com.atpro.security.AppConstants.GOLIKE_ENABLED && state.isGolikeLoggedIn) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                .background(androidx.compose.ui.graphics.Color(0xFF1A1030))
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column {
+                                Text("Số dư Golike", color = TextMuted, fontSize = 10.sp)
+                                Text(
+                                    "%.0f xu".format(state.golikeCoin),
+                                    color = Green, fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text("Chờ duyệt", color = TextMuted, fontSize = 10.sp)
+                                Text(
+                                    "%.0f xu".format(state.golikeHoldCoin),
+                                    color = Amber, fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    StartButton(
+                        enabled = state.canStart, hint = state.startHint, onClick = vm::startTask,
+                        labelText = "Bắt đầu làm nhiệm vụ",
+                        accentColor = androidx.compose.ui.graphics.Color(0xFF7C3AED),
+                    )
+                }
                 com.atpro.automation.ServiceMode.FACEBOOK_NURTURE -> StartButton(
                     enabled = state.canStart, hint = state.startHint, onClick = vm::startFacebookNurture,
                     labelText = "Bắt đầu nuôi Facebook",
@@ -1210,7 +1226,7 @@ private fun StartButton(
     enabled:     Boolean,
     hint:        String?,
     onClick:     () -> Unit,
-    labelText:   String                                    = "Bắt đầu farm",
+    labelText:   String                                    = "Bắt đầu nuôi TikTok",
     accentColor: androidx.compose.ui.graphics.Color       = Purple,
 ) {
     val interactionSource = remember { MutableInteractionSource() }

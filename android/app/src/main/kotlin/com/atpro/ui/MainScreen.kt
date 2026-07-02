@@ -16,14 +16,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.atpro.ui.accounts.AccountsScreen
 import com.atpro.ui.accounts.AccountsViewModel
 import com.atpro.ui.dashboard.DashboardScreen
 import com.atpro.ui.dashboard.DashboardViewModel
-import com.atpro.ui.logs.LogsScreen
-import com.atpro.ui.logs.LogsViewModel
+import com.atpro.ui.dashboard.UpdateAvailableDialog
 import com.atpro.ui.schedule.ScheduleScreen
 import com.atpro.ui.schedule.ScheduleViewModel
 import com.atpro.ui.services.ServicesScreen
@@ -38,7 +39,7 @@ private val TextMuted = Color(0xFF6B7280)
 
 // ─────────────────────────────────────────────────────────────
 //  Tab definition
-//  v1.2.8: Thêm tab SCHEDULE (Lịch) giữa ACCOUNTS và LOGS.
+//  v1.2.9: Xóa LOGS — Nhật ký chuyển vào Cài đặt.
 // ─────────────────────────────────────────────────────────────
 
 private enum class Tab(
@@ -50,7 +51,6 @@ private enum class Tab(
     STATS    ("Thống kê",  Icons.Rounded.BarChart),
     ACCOUNTS ("Tài khoản", Icons.Rounded.ManageAccounts),
     SCHEDULE ("Lịch",      Icons.Rounded.Schedule),
-    LOGS     ("Nhật ký",   Icons.Rounded.EventNote),
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -62,10 +62,16 @@ fun MainScreen(
     dashboardVm: DashboardViewModel,
     statsVm:     StatsViewModel,
     accountsVm:  AccountsViewModel,
-    logsVm:      LogsViewModel,
     scheduleVm:  ScheduleViewModel,
 ) {
     var selectedTab by remember { mutableStateOf(Tab.DASHBOARD) }
+    val dashboardState by dashboardVm.uiState.collectAsStateWithLifecycle()
+
+    // v1.2.9: Kiểm tra phiên bản mới ở cấp MainScreen (không phải DashboardScreen) —
+    // chạy đúng 1 lần cho cả phiên app, không bị huỷ/refire khi chuyển tab qua lại.
+    // Dialog cũng được render ở dưới (ngoài Scaffold) nên luôn hiện đè lên mọi tab,
+    // không chỉ riêng tab Dashboard.
+    LaunchedEffect(Unit) { dashboardVm.checkForUpdate() }
 
     Scaffold(
         containerColor      = BgDark,
@@ -88,10 +94,13 @@ fun MainScreen(
                             )
                         },
                         label = {
+                            // v1.2.9: softWrap=false + Ellipsis phòng mất chữ trên màn nhỏ
                             Text(
                                 tab.label,
-                                fontSize = 10.sp,
-                                maxLines = 1,
+                                fontSize  = 10.sp,
+                                maxLines  = 1,
+                                softWrap  = false,
+                                overflow  = TextOverflow.Ellipsis,
                             )
                         },
                         colors = NavigationBarItemDefaults.colors(
@@ -127,8 +136,17 @@ fun MainScreen(
                     Tab.DASHBOARD -> DashboardScreen(vm = dashboardVm)
 
                     Tab.SERVICES  -> ServicesScreen(
-                        onOpenFarmService = {
+                        isGolikeLoggedIn    = dashboardVm.uiState.collectAsState().value.isGolikeLoggedIn,
+                        golikeCoin          = dashboardVm.uiState.collectAsState().value.golikeCoin,
+                        golikeHoldCoin      = dashboardVm.uiState.collectAsState().value.golikeHoldCoin,
+                        onSaveGolikeToken   = dashboardVm::saveGolikeToken,
+                        onClearGolikeToken  = dashboardVm::clearGolikeToken,
+                        onOpenFarmService   = {
                             dashboardVm.setServiceMode(com.atpro.automation.ServiceMode.FARM)
+                            selectedTab = Tab.DASHBOARD
+                        },
+                        onOpenTaskService   = {
+                            dashboardVm.setServiceMode(com.atpro.automation.ServiceMode.TASK)
                             selectedTab = Tab.DASHBOARD
                         },
                         onOpenFacebookService = {
@@ -165,12 +183,19 @@ fun MainScreen(
                         vm           = scheduleVm,
                         onNavigateUp = { selectedTab = Tab.DASHBOARD },
                     )
-                    Tab.LOGS     -> LogsScreen(
-                        vm           = logsVm,
-                        onNavigateUp = { selectedTab = Tab.DASHBOARD },
-                    )
                 }
             }
         }
+    }
+
+    // v1.2.9: Update dialog ở cấp MainScreen — luôn hiện đè lên mọi tab (không chỉ
+    // Dashboard) vì state.updateInfo sống trong dashboardVm, ViewModel chung cho cả app.
+    dashboardState.updateInfo?.let { info ->
+        UpdateAvailableDialog(
+            info             = info,
+            downloadProgress = dashboardState.downloadProgress,
+            onDismiss        = dashboardVm::dismissUpdate,
+            onUpdate         = { dashboardVm.startUpdate() },
+        )
     }
 }

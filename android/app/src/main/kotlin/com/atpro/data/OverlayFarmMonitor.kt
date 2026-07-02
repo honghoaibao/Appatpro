@@ -71,9 +71,16 @@ object OverlayFarmMonitor {
     // Views
     private var tvHeader:       View?     = null
     private var statusDotBg:    GradientDrawable? = null
+    private var tvServiceLabel: TextView? = null   // v1.2.9: label đối diện AT PRO
     private var tvAccount:      TextView? = null
     private var tvSessionTime:  TextView? = null
     private var tvTotalTime:    TextView? = null
+    // v1.2.9: Golike task mode rows
+    private var tvTaskAccount:  TextView? = null
+    private var tvTaskProgress: TextView? = null
+    private var tvConsecErrors: TextView? = null
+    private var farmRows:       View?     = null   // timeRow chỉ dùng trong FARM mode
+    private var isTaskMode:     Boolean   = false
     private var btnPauseResume: TextView? = null
     private var btnStop:        TextView? = null
     private var btnMinimize:    View?     = null
@@ -111,11 +118,12 @@ object OverlayFarmMonitor {
     //  Public API
     // ─────────────────────────────────────────────────────────
 
-    fun show(context: Context) {
+    fun show(context: Context, serviceLabel: String = "") {
         if (overlayView != null) return
         if (!android.provider.Settings.canDrawOverlays(context)) {
             Log.w(TAG, "No overlay permission"); return
         }
+        isTaskMode = (serviceLabel == "NV TIKTOK")
         handler.post {
             try {
                 windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -140,7 +148,14 @@ object OverlayFarmMonitor {
                 }
 
                 windowManager!!.addView(overlayView, params)
-                Log.i(TAG, "Overlay shown")
+                // v1.2.9: apply service label + mode after view is built
+                tvServiceLabel?.text = serviceLabel
+                tvServiceLabel?.visibility = if (serviceLabel.isNotEmpty()) View.VISIBLE else View.GONE
+                farmRows?.visibility   = if (isTaskMode) View.GONE else View.VISIBLE
+                tvTaskAccount?.visibility  = if (isTaskMode) View.VISIBLE else View.GONE
+                tvTaskProgress?.visibility = if (isTaskMode) View.VISIBLE else View.GONE
+                tvConsecErrors?.visibility = if (isTaskMode) View.VISIBLE else View.GONE
+                Log.i(TAG, "Overlay shown [label=$serviceLabel taskMode=$isTaskMode]")
             } catch (e: Exception) {
                 Log.e(TAG, "show: ${e.message}")
             }
@@ -155,7 +170,10 @@ object OverlayFarmMonitor {
             } catch (_: Exception) {}
             overlayView    = null; windowManager  = null
             tvHeader       = null; tvAccount      = null; statusDotBg    = null
+            tvServiceLabel = null
             tvSessionTime  = null; tvTotalTime    = null
+            tvTaskAccount  = null; tvTaskProgress = null; tvConsecErrors = null
+            farmRows       = null; isTaskMode     = false
             btnPauseResume = null
             btnStop        = null; btnMinimize    = null
             contentArea    = null; isMinimized    = false
@@ -174,9 +192,35 @@ object OverlayFarmMonitor {
     }
 
     /**
-     * v1.2.8: setStartupStatus → hiển thị các bước khởi động lên popup.
-     * Trước đây là no-op sau khi tvAction bị xoá ở v1.2.7.
+     * v1.2.9: Cập nhật trạng thái popup khi làm nhiệm vụ Golike (isTaskMode = true).
+     * Hiển thị: tên acc, số nhiệm vụ thành công / tổng, lỗi liên tiếp, và log action.
      */
+    fun updateTask(
+        accountId:     String,
+        successCount:  Int,
+        totalCount:    Int,
+        consecErrors:  Int,
+        action:        String = "",
+    ) {
+        handler.post {
+            tvTaskAccount?.text  = "@$accountId"
+            tvTaskProgress?.text = "✓ $successCount nhiệm vụ   |   Tổng: $totalCount"
+            tvConsecErrors?.let { tv ->
+                tv.text      = "Lỗi liên tiếp: $consecErrors"
+                tv.setTextColor(if (consecErrors > 0) C_LOG_RED else C_LOG_GREEN)
+            }
+            if (action.isNotEmpty()) {
+                val entry = parseLogMsg(action) ?: LogEntry(action.take(42), C_LOG_MUTED)
+                stopDotsAnimation()
+                tvUserLog?.setTextColor(entry.color)
+                if (entry.dots) startDotsAnimation(entry.text) else {
+                    tvUserLog?.text = entry.text
+                    if (entry.pulse) pulseView(tvUserLog)
+                }
+            }
+        }
+    }
+
     fun setStartupStatus(msg: String) {
         val entry = parseStatusMsg(msg) ?: return
         showLogEntry(entry)
@@ -255,9 +299,11 @@ object OverlayFarmMonitor {
     private fun parseStatusMsg(msg: String): LogEntry? = when {
         msg.isBlank() -> null
 
-        // Mở TikTok
+        // Mở app — v1.2.9 FIX: trước đây hardcode "Đang mở TikTok" cho MỌI dịch vụ
+        // (Facebook/X/Instagram/Threads/Snapchat đều show nhầm chữ TikTok vì cùng
+        // dùng prefix ">>"). Giờ lấy đúng nội dung message thực tế.
         msg.startsWith(">>") ->
-            LogEntry("🚀 Đang mở TikTok", C_LOG_PURPLE, dots = true)
+            LogEntry("🚀 " + msg.removePrefix(">>").trim().take(42), C_LOG_PURPLE, dots = true)
 
         // Chờ feed
         msg.startsWith("Chờ feed") ->
@@ -575,6 +621,13 @@ object OverlayFarmMonitor {
                 setColor(C_BG)
                 setStroke(dp(2), C_PURPLE)
             }
+            // v1.2.9: clip content (icon) to oval shape to avoid corner bleed
+            clipToOutline = true
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: android.graphics.Outline) {
+                    outline.setOval(0, 0, view.width, view.height)
+                }
+            }
         }
         try {
             val icon = context.packageManager.getApplicationIcon(context.packageName)
@@ -617,7 +670,7 @@ object OverlayFarmMonitor {
                 typeface  = if (bold) Typeface.DEFAULT_BOLD else Typeface.MONOSPACE
             }
 
-        // ── Header: "AT PRO  ●  [─]" ──────────────────────
+        // ── Header: "AT PRO  ●  [spacer]  [LABEL]  [─]" ────────────────────
         val header = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity     = Gravity.CENTER_VERTICAL
@@ -639,6 +692,17 @@ object OverlayFarmMonitor {
             layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
         }
         header.addView(spacerH)
+
+        // v1.2.9: service label đối diện AT PRO
+        val tvLabel = text("", 8.5f, C_MUTED, bold = false).apply {
+            visibility = View.GONE
+            letterSpacing = 0.06f
+        }
+        tvServiceLabel = tvLabel
+        header.addView(tvLabel, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        ).apply { gravity = Gravity.CENTER_VERTICAL; setMargins(0, 0, dp(4), 0) })
 
         val minBtn = ImageButton(context).apply {
             val d = ContextCompat.getDrawable(context, R.drawable.ic_ov_min)?.mutate()
@@ -666,6 +730,7 @@ object OverlayFarmMonitor {
         }
         body.addView(divider())
 
+        // ── FARM mode: account row + time row ───────────────
         tvAccount = text("@—  ·  —/—", 10.5f, C_TEXT).also { body.addView(it) }
 
         val timeRow = LinearLayout(context).apply {
@@ -679,6 +744,22 @@ object OverlayFarmMonitor {
         timeRow.addView(lblSession); timeRow.addView(tvSessionTime)
         timeRow.addView(lblSep);     timeRow.addView(tvTotalTime)
         body.addView(timeRow)
+        farmRows = timeRow  // reference để ẩn/hiện theo mode
+
+        // ── TASK mode: account + progress + errors ───────────
+        tvTaskAccount = text("@—", 10.5f, C_TEXT).apply {
+            visibility = View.GONE
+        }.also { body.addView(it) }
+
+        tvTaskProgress = text("✓ 0 nhiệm vụ   |   Tổng: 0", 9f, C_GREEN).apply {
+            setPadding(0, dp(2), 0, 0)
+            visibility = View.GONE
+        }.also { body.addView(it) }
+
+        tvConsecErrors = text("Lỗi liên tiếp: 0", 8.5f, C_LOG_GREEN).apply {
+            setPadding(0, dp(1), 0, 0)
+            visibility = View.GONE
+        }.also { body.addView(it) }
 
         // ── Log area (v1.2.8: hỗ trợ màu động) ─────────────
         tvUserLog = TextView(context).apply {

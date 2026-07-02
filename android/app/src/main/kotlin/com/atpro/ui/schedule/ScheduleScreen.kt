@@ -50,16 +50,6 @@ fun ScheduleScreen(vm: ScheduleViewModel, onNavigateUp: () -> Unit = {}) {
         containerColor = BgDark,
         topBar = {
             TopAppBar(
-                navigationIcon = {
-                    IconButton(onClick = onNavigateUp) {
-                        Icon(
-                            Icons.Rounded.ArrowBackIosNew,
-                            contentDescription = "Quay lại",
-                            tint   = Color.White,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                },
                 title = {
                     Column {
                         Text("Lịch tự động", fontWeight = FontWeight.Bold, fontSize = 17.sp)
@@ -118,8 +108,8 @@ fun ScheduleScreen(vm: ScheduleViewModel, onNavigateUp: () -> Unit = {}) {
     if (showAdd) {
         AddScheduleDialog(
             onDismiss = { showAdd = false },
-            onAdd     = { label, hour, minute, days ->
-                vm.add(label, hour, minute, days)
+            onAdd     = { label, hour, minute, days, svcMode ->
+                vm.add(label, hour, minute, days, svcMode)
                 showAdd = false
             },
         )
@@ -178,6 +168,15 @@ private fun SwipeToDeleteScheduleRow(
 
 @Composable
 private fun ScheduleRow(schedule: FarmSchedule, onToggle: () -> Unit) {
+    // v1.2.9: label dịch vụ
+    val serviceLabel = when (schedule.serviceMode) {
+        "FACEBOOK_NURTURE"  -> "Nuôi Facebook"
+        "X_NURTURE"         -> "Nuôi X"
+        "INSTAGRAM_NURTURE" -> "Nuôi Instagram"
+        "THREADS_NURTURE"   -> "Nuôi Threads"
+        "SNAPCHAT_NURTURE"  -> "Nuôi Snapchat"
+        else                -> "Nuôi TikTok"
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -187,7 +186,17 @@ private fun ScheduleRow(schedule: FarmSchedule, onToggle: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(schedule.label, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(schedule.label, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Purple.copy(alpha = 0.15f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                ) {
+                    Text(serviceLabel, color = Purple, fontSize = 9.sp, fontWeight = FontWeight.Medium)
+                }
+            }
             Spacer(Modifier.height(4.dp))
             Text(
                 "%02d:%02d".format(schedule.hourOfDay, schedule.minute),
@@ -231,18 +240,30 @@ private fun ScheduleRow(schedule: FarmSchedule, onToggle: () -> Unit) {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  Add dialog
+//  Add dialog — v1.2.9: tách giờ/phút, thêm chọn dịch vụ
 // ─────────────────────────────────────────────────────────────
 
 @Composable
 private fun AddScheduleDialog(
     onDismiss: () -> Unit,
-    onAdd:     (label: String, hour: Int, minute: Int, days: List<Int>) -> Unit,
+    onAdd:     (label: String, hour: Int, minute: Int, days: List<Int>, serviceMode: String) -> Unit,
 ) {
     var label        by remember { mutableStateOf("Farm") }
     var hour         by remember { mutableIntStateOf(8) }
     var minute       by remember { mutableIntStateOf(0) }
     var selectedDays by remember { mutableStateOf(setOf(2, 3, 4, 5, 6, 7, 1)) }
+    var serviceMode  by remember { mutableStateOf("FARM") }
+
+    // Danh sách dịch vụ
+    data class SvcItem(val key: String, val label: String, val accent: Color)
+    val services = listOf(
+        SvcItem("FARM",              "Nuôi TikTok",    Color(0xFF69C9D0)),
+        SvcItem("FACEBOOK_NURTURE",  "Nuôi Facebook",  Color(0xFF1877F2)),
+        SvcItem("X_NURTURE",         "Nuôi X",         Color(0xFFEEEEEE)),
+        SvcItem("INSTAGRAM_NURTURE", "Nuôi Instagram", Color(0xFFFD1D1D)),
+        SvcItem("THREADS_NURTURE",   "Nuôi Threads",   Color(0xFFAAAAAA)),
+        SvcItem("SNAPCHAT_NURTURE",  "Nuôi Snapchat",  Color(0xFFFFFC00)),
+    )
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -251,40 +272,77 @@ private fun AddScheduleDialog(
         text  = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
 
+                // Tên lịch
                 OutlinedTextField(
                     value         = label,
                     onValueChange = { label = it },
                     label         = { Text("Tên lịch", color = TextSec, fontSize = 12.sp) },
                     singleLine    = true,
                     modifier      = Modifier.fillMaxWidth(),
-                    colors        = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor    = Purple, unfocusedBorderColor  = BorderDark,
-                        focusedTextColor      = Color.White, unfocusedTextColor = Color.White,
-                        focusedContainerColor = Color.Transparent,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor   = Purple, unfocusedBorderColor  = BorderDark,
+                        focusedTextColor     = Color.White, unfocusedTextColor = Color.White,
+                        focusedContainerColor   = Color.Transparent,
                         unfocusedContainerColor = Color.Transparent,
                     ),
                 )
 
+                // Chọn dịch vụ
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Dịch vụ:", color = TextSec, fontSize = 13.sp)
+                    androidx.compose.foundation.lazy.LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        items(services) { svc ->
+                            val sel = svc.key == serviceMode
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (sel) svc.accent.copy(0.2f) else Color(0xFF1E1E2E))
+                                    .border(
+                                        1.dp,
+                                        if (sel) svc.accent.copy(0.7f) else Color(0xFF2A2A40),
+                                        RoundedCornerShape(8.dp),
+                                    )
+                                    .clickable { serviceMode = svc.key }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                            ) {
+                                Text(
+                                    svc.label,
+                                    fontSize   = 11.sp,
+                                    color      = if (sel) svc.accent else TextMuted,
+                                    fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Giờ — row riêng
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Giờ:", color = TextSec, fontSize = 13.sp, modifier = Modifier.width(40.dp))
+                    Text("Giờ:", color = TextSec, fontSize = 13.sp, modifier = Modifier.width(44.dp))
                     TimeStepBtn(Icons.Rounded.Remove) { hour = (hour - 1 + 24) % 24 }
                     Text(
                         "%02d".format(hour),
-                        color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 12.dp),
+                        color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 14.dp),
                     )
                     TimeStepBtn(Icons.Rounded.Add) { hour = (hour + 1) % 24 }
-                    Spacer(Modifier.width(16.dp))
-                    Text("Phút:", color = TextSec, fontSize = 13.sp, modifier = Modifier.width(48.dp))
+                }
+
+                // Phút — row riêng (fix: trước đây cùng row với Giờ → tràn màn hình nhỏ)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Phút:", color = TextSec, fontSize = 13.sp, modifier = Modifier.width(44.dp))
                     TimeStepBtn(Icons.Rounded.Remove) { minute = (minute - 5 + 60) % 60 }
                     Text(
                         "%02d".format(minute),
-                        color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 12.dp),
+                        color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 14.dp),
                     )
                     TimeStepBtn(Icons.Rounded.Add) { minute = (minute + 5) % 60 }
                 }
 
+                // Ngày lặp
                 Column {
                     Text("Ngày trong tuần:", color = TextSec, fontSize = 13.sp)
                     Spacer(Modifier.height(8.dp))
@@ -316,8 +374,8 @@ private fun AddScheduleDialog(
         },
         confirmButton = {
             TextButton(
-                onClick  = { onAdd(label.ifBlank { "Farm" }, hour, minute, selectedDays.sorted()) },
-                enabled  = selectedDays.isNotEmpty(),
+                onClick = { onAdd(label.ifBlank { "Farm" }, hour, minute, selectedDays.sorted(), serviceMode) },
+                enabled = selectedDays.isNotEmpty(),
             ) {
                 Text("Thêm", color = Purple, fontWeight = FontWeight.Bold)
             }

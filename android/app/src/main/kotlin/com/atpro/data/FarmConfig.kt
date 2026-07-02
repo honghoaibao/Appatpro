@@ -50,6 +50,22 @@ data class FarmConfig(
      */
     val commentTexts: List<String> = emptyList(),
 
+    /**
+     * v1.2.9: Giới hạn số comment tối đa mỗi GIỜ (per account, tính theo phiên farm hiện tại).
+     * 0 = không giới hạn. Khuyến nghị 20–30 theo tài liệu chống bị flag "spam behavior".
+     */
+    val maxCommentsPerHour: Int = 20,
+
+    /**
+     * v1.2.9: Xem bình luận (không gõ gì, chỉ mở panel comment và cuộn xem).
+     * Khác với commentRate (gõ + gửi comment thật) — đây chỉ là hành vi xem thụ động.
+     * Mặc định 8%, khoá cùng nhóm với các setting nhạy cảm khác (Experiment Mode).
+     */
+    val commentViewRate: Float = 0.08f,
+    /** Số lần cuộn xem comment mỗi lần mở panel — random trong khoảng [min, max]. */
+    val commentViewScrollMin: Int = 1,
+    val commentViewScrollMax: Int = 5,
+
     /** Delay sau khi like (giây). */
     val delayAfterLike: Double = 0.5,
 
@@ -227,8 +243,17 @@ data class FarmConfig(
 
     /**
      * `v1.2.3` Xác suất thích (Like) 1 bài đăng sau mỗi lần lướt feed Facebook (0.0–1.0).
+     * v1.2.9: Mặc định đổi 20% → 10% + chuyển thành setting ẩn (mở qua Experiment),
+     * dùng chung cơ chế khoá với các setting nhạy cảm của TikTok.
      */
-    val facebookLikeRate: Float = 0.2f,
+    val facebookLikeRate: Float = 0.10f,
+
+    /**
+     * v1.2.9: Khoảng thời gian "đọc bài" (giây) trước khi quyết định like/lướt tiếp —
+     * thay cho delay cố định cũ, mô phỏng hành vi đọc tự nhiên hơn.
+     */
+    val facebookReadTimeMinSecs: Int = 8,
+    val facebookReadTimeMaxSecs: Int = 25,
 
     // ── Demo nuôi X (Twitter) [v1.2.4] ──────────────────────────────────────
 

@@ -219,6 +219,25 @@ object NodeTraverser {
     }
 
     /**
+     * v1.2.9: Tìm node theo contentDescription (phân biệt với text).
+     * Facebook dùng contentDescription cho các nút reaction (Like, Love...).
+     */
+    fun findByContentDesc(
+        root: AccessibilityNodeInfo?,
+        desc: String,
+        ignoreCase: Boolean = true,
+    ): NodeResult? {
+        root ?: return null
+        val query = if (ignoreCase) desc.lowercase() else desc
+
+        return traverseAll(root).firstOrNull { node ->
+            val cd = node.contentDescription?.toString() ?: return@firstOrNull false
+            val d = if (ignoreCase) cd.lowercase() else cd
+            d.contains(query)
+        }?.toResult()
+    }
+
+    /**
      * Tìm node theo resource-id
      * Tương đương: XMLParser dùng r'resource-id="[^"]*profile[^"]*"'
      */

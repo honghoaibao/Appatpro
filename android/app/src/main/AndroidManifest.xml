@@ -22,6 +22,20 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="tiktok" />
         </intent>
+
+        <!--
+            v1.2.9: Package visibility cho các app demo nuôi acc (Facebook, X, Instagram,
+            Threads, Snapchat). Thiếu khai báo này khiến getLaunchIntentForPackage() và
+            getPackageInfo() luôn trả null/false trên Android 11+ (API 30+), dù app đã cài
+            — đây là nguyên nhân chính của lỗi "Không mở được app có trong demo nuôi acc".
+        -->
+        <package android:name="com.facebook.katana" />
+        <package android:name="com.facebook.orca" />
+        <package android:name="com.facebook.android" />
+        <package android:name="com.twitter.android" />
+        <package android:name="com.instagram.android" />
+        <package android:name="com.instagram.barcelona" />
+        <package android:name="com.snapchat.android" />
     </queries>
 
     <uses-permission android:name="android.permission.INTERNET"/>

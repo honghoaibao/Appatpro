@@ -6,9 +6,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.material3.*
 import androidx.compose.ui.graphics.Color
+import com.atpro.ui.logs.LogsViewModel
 
 class ConfigActivity : AppCompatActivity() {
-    private val vm:       ConfigViewModel  by viewModels { ConfigViewModel.Factory(applicationContext) }
+    private val vm:     ConfigViewModel by viewModels { ConfigViewModel.Factory(applicationContext) }
+    private val logsVm: LogsViewModel   by viewModels { LogsViewModel.Factory(applicationContext) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -17,7 +19,7 @@ class ConfigActivity : AppCompatActivity() {
         setContent {
             MaterialTheme(darkColorScheme(
                 background = Color(0xFF0D0D14), surface = Color(0xFF1A1A2E),
-            )) { ConfigScreen(vm = vm) }
+            )) { ConfigScreen(vm = vm, logsVm = logsVm) }
         }
     }
 }

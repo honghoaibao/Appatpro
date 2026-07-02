@@ -64,8 +64,13 @@ object UpdateChecker {
             val release = json.decodeFromString<GhRelease>(rawJson)
             Log.d(TAG, "Latest: ${release.tag_name}, current: $currentTag")
 
-            // Đã là bản mới nhất — không hiển thị
-            if (isSameVersion(release.tag_name, currentTag)) return@withContext null
+            // v1.2.9 FIX: chỉ báo cập nhật khi remote MỚI HƠN local thực sự.
+            // Trước đây dùng isSameVersion() — chỉ check "khác nhau", nên nếu local đã
+            // build sẵn 1.2.9 nhưng GitHub release mới nhất vẫn là 1.2.8 (chưa kịp đăng),
+            // tool hiểu nhầm "khác bản" và báo cập nhật NGƯỢC về bản cũ hơn.
+            if (!isNewerVersion(remote = release.tag_name, local = currentTag)) {
+                return@withContext null
+            }
 
             // Ưu tiên file .apk đầu tiên trong assets; fallback về trang release
             val downloadUrl = release.assets
@@ -87,11 +92,32 @@ object UpdateChecker {
         }
     }
 
-    /** So sánh hai tag (e.g. "v1.0.5" vs "v1.0.5", bỏ qua prefix "v"). */
-    private fun isSameVersion(remote: String, local: String): Boolean =
-        remote.trimStart('v').trim().equals(
-            local.trimStart('v').trim(), ignoreCase = true
-        )
+    /**
+     * v1.2.9: So sánh semver đúng nghĩa — trả về true CHỈ KHI [remote] mới hơn [local]
+     * thực sự (không phải chỉ "khác nhau"). Hỗ trợ định dạng "v1.2.9", "1.2.9",
+     * "1.2.9.1", thiếu segment được coi là 0 (vd "1.3" == "1.3.0").
+     *
+     * Trước v1.2.9: dùng isSameVersion() chỉ check inequality — nếu remote khác local
+     * theo BẤT KỲ hướng nào (kể cả remote CŨ HƠN, ví dụ local đã build sẵn 1.2.9 nhưng
+     * GitHub release mới nhất vẫn là 1.2.8 do chưa kịp đăng) cũng bị coi là "có bản mới"
+     * và hiện popup cập nhật NGƯỢC về bản cũ hơn.
+     */
+    private fun isNewerVersion(remote: String, local: String): Boolean {
+        fun parse(v: String): List<Int> =
+            v.trimStart('v', 'V').trim()
+                .split('.')
+                .map { it.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
+
+        val r = parse(remote)
+        val l = parse(local)
+        val len = maxOf(r.size, l.size)
+        for (i in 0 until len) {
+            val rv = r.getOrElse(i) { 0 }
+            val lv = l.getOrElse(i) { 0 }
+            if (rv != lv) return rv > lv
+        }
+        return false  // hoàn toàn bằng nhau → không phải bản mới hơn
+    }
 }
 
 /** Thông tin về phiên bản mới lấy từ GitHub Releases. */

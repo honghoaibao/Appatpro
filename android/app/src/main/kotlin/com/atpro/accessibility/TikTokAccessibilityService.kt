@@ -3,6 +3,7 @@ package com.atpro.accessibility
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Bundle
@@ -128,26 +129,46 @@ class TikTokAccessibilityService : AccessibilityService(), IFarmHost {
         }
     }
 
-    override fun showFarmOverlay() { OverlayFarmMonitor.show(this) }
+    override fun showFarmOverlay(serviceLabel: String) { OverlayFarmMonitor.show(this, serviceLabel) }
     override fun hideFarmOverlay() { OverlayFarmMonitor.hide() }
 
     /**
-     * v1.2.3 — Mở app bất kỳ theo package name (vd Facebook).
-     * Dùng FLAGS_DEEP tương tự TikTokDeepLinks để clear back-stack cũ.
+     * v1.2.3 — Mở app bất kỳ theo package name.
+     * v1.2.9 — Dùng REORDER_TO_FRONT thay CLEAR_TOP:
+     *   Facebook FbMainTabActivity là singleTop — CLEAR_TOP gây recreate không cần thiết.
+     *   REORDER_TO_FRONT đưa task hiện có lên foreground mà không phá stack.
+     *   Cũng check isAppInstalled() trước để log lỗi rõ ràng hơn (app chưa cài
+     *   vs <queries> thiếu khai báo — cả hai đều khiến getLaunchIntentForPackage trả null).
      */
-    override fun launchApp(packageName: String): Boolean = try {
-        val intent = packageManager.getLaunchIntentForPackage(packageName)
-        if (intent != null) {
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            startActivity(intent)
-            true
-        } else {
-            Log.e(TAG, "launchApp($packageName): không có launch intent — app chưa cài?")
+    override fun launchApp(packageName: String): Boolean {
+        val installed = try {
+            packageManager.getPackageInfo(packageName, 0); true
+        } catch (e: PackageManager.NameNotFoundException) { false }
+
+        if (!installed) {
+            Log.e(TAG, "launchApp($packageName): app chưa cài đặt trên thiết bị này")
+            return false
+        }
+
+        return try {
+            val intent = packageManager.getLaunchIntentForPackage(packageName)
+            if (intent != null) {
+                intent.addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED or
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                )
+                startActivity(intent)
+                true
+            } else {
+                Log.e(TAG, "launchApp($packageName): app đã cài nhưng không có launch intent " +
+                    "— kiểm tra <queries> trong AndroidManifest.xml đã khai báo package này chưa")
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "launchApp($packageName): ${e.message}")
             false
         }
-    } catch (e: Exception) {
-        Log.e(TAG, "launchApp($packageName): ${e.message}")
-        false
     }
 
     /**

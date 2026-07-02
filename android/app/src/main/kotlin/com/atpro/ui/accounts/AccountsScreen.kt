@@ -51,7 +51,10 @@ private enum class AccPlatform(val label: String, val color: Color, val isDemo: 
 
 @Composable
 fun AccountsScreen(vm: AccountsViewModel, onNavigateUp: (() -> Unit)? = null) {
-    val accounts by vm.accounts.collectAsStateWithLifecycle()
+    val accounts       by vm.accounts.collectAsStateWithLifecycle()
+    val golikeAccounts by vm.golikeAccounts.collectAsStateWithLifecycle()
+    val golikeLoading  by vm.golikeLoading.collectAsStateWithLifecycle()
+    val golikeError    by vm.golikeError.collectAsStateWithLifecycle()
     var query    by remember { mutableStateOf("") }
     var filter   by remember { mutableStateOf("all") }
     var platform by remember { mutableStateOf(AccPlatform.TIKTOK) }
@@ -123,13 +126,17 @@ fun AccountsScreen(vm: AccountsViewModel, onNavigateUp: (() -> Unit)? = null) {
             DemoPlatformAccountsView(platform)
         } else {
             TikTokAccountsBody(
-                accounts = accounts,
-                filtered = filtered,
-                query    = query,
-                filter   = filter,
-                onQuery  = { query = it },
-                onFilter = { filter = it },
-                onDelete = vm::delete,
+                accounts       = accounts,
+                filtered       = filtered,
+                query          = query,
+                filter         = filter,
+                onQuery        = { query = it },
+                onFilter       = { filter = it },
+                onDelete       = vm::delete,
+                golikeAccounts = golikeAccounts,
+                golikeLoading  = golikeLoading,
+                golikeError    = golikeError,
+                onRefreshGolike = vm::refreshGolikeAccounts,
             )
         }
     }
@@ -141,13 +148,17 @@ fun AccountsScreen(vm: AccountsViewModel, onNavigateUp: (() -> Unit)? = null) {
 
 @Composable
 private fun TikTokAccountsBody(
-    accounts: List<AccountEntity>,
-    filtered: List<AccountEntity>,
-    query:    String,
-    filter:   String,
-    onQuery:  (String) -> Unit,
-    onFilter: (String) -> Unit,
-    onDelete: (String) -> Unit,
+    accounts:        List<AccountEntity>,
+    filtered:        List<AccountEntity>,
+    query:           String,
+    filter:          String,
+    onQuery:         (String) -> Unit,
+    onFilter:        (String) -> Unit,
+    onDelete:        (String) -> Unit,
+    golikeAccounts:  List<com.atpro.golike.TikTokAccountDto> = emptyList(),
+    golikeLoading:   Boolean = false,
+    golikeError:     String? = null,
+    onRefreshGolike: () -> Unit = {},
 ) {
     OutlinedTextField(
         value         = query,
@@ -210,7 +221,7 @@ private fun TikTokAccountsBody(
 
     Spacer(Modifier.height(4.dp))
 
-    if (accounts.isEmpty()) {
+    if (accounts.isEmpty() && golikeAccounts.isEmpty()) {
         EmptyAccountsView()
     } else {
         LazyColumn(
@@ -220,6 +231,86 @@ private fun TikTokAccountsBody(
             items(filtered, key = { it.username }) { account ->
                 SwipeToDeleteAccountRow(account, onDelete = { onDelete(account.username) })
             }
+
+            // v1.2.9: Golike TikTok linked accounts — ẩn khi GOLIKE_ENABLED = false
+            if (com.atpro.security.AppConstants.GOLIKE_ENABLED &&
+                (golikeAccounts.isNotEmpty() || golikeLoading || golikeError != null)) {
+                item {
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Box(Modifier
+                            .size(6.dp)
+                            .clip(androidx.compose.foundation.shape.CircleShape)
+                            .background(Color(0xFF6C63FF)))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Tài khoản Golike", color = Color(0xFF6C63FF), fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                        if (golikeLoading) {
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp),
+                                color = Color(0xFF6C63FF), strokeWidth = 1.5.dp)
+                        } else {
+                            IconButton(onClick = onRefreshGolike, modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Rounded.Refresh, null, tint = TextMuted, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                }
+                if (golikeError != null) {
+                    item {
+                        Text(golikeError!!, color = Color(0xFFEF4444), fontSize = 11.sp,
+                            modifier = Modifier.padding(start = 12.dp))
+                    }
+                }
+                items(golikeAccounts, key = { "golike_${it.id}" }) { acc ->
+                    GolikeTikTokAccountRow(acc)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GolikeTikTokAccountRow(acc: com.atpro.golike.TikTokAccountDto) {
+    val Green = Color(0xFF10B981)
+    val Red   = Color(0xFFEF4444)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+            .background(Color(0xFF141420))
+            .border(1.dp, Color(0xFF6C63FF).copy(alpha = 0.2f),
+                androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier.size(36.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .background(Color(0xFF252535)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Rounded.AccountCircle, null, tint = Color(0xFF6C63FF), modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text("@${acc.uniqueId}", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            if (acc.nickname.isNotEmpty()) {
+                Text(acc.nickname, color = TextMuted, fontSize = 11.sp)
+            }
+        }
+        Box(
+            modifier = Modifier
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                .background((if (acc.isBanned) Red else Green).copy(alpha = 0.12f))
+                .padding(horizontal = 8.dp, vertical = 3.dp),
+        ) {
+            Text(
+                if (acc.isBanned) "Banned" else acc.statusText.ifEmpty { "Hoạt động" },
+                color = if (acc.isBanned) Red else Green, fontSize = 10.sp,
+            )
         }
     }
 }

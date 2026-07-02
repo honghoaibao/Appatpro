@@ -178,6 +178,12 @@ class LocalRepository(context: Context) : IFarmRepository {
                                         .map { it.trim() }
                                         .filter { it.isNotEmpty() },
         delayAfterComment         = getConfigDouble("delay_after_comment",      1.5),
+        // v1.2.9: Rate-limit comment theo giờ
+        maxCommentsPerHour        = getConfigInt   ("max_comments_per_hour",    20),
+        // v1.2.9: Xem bình luận (thụ động, không gõ)
+        commentViewRate           = getConfigDouble("comment_view_rate",       0.08).toFloat(),
+        commentViewScrollMin      = getConfigInt   ("comment_view_scroll_min", 1),
+        commentViewScrollMax      = getConfigInt   ("comment_view_scroll_max", 5),
         // Existing delays
         delayAfterLike            = getConfigDouble("delay_after_like",         0.5),
         delayAfterFollow          = getConfigDouble("delay_after_follow",       1.0),
@@ -228,7 +234,10 @@ class LocalRepository(context: Context) : IFarmRepository {
         taskMaxConsecFailures     = getConfigInt   ("task_max_consec_failures",    3),
         // [v1.2.4] Demo nuôi acc
         facebookNurtureDurationSecs = getConfigInt   ("fb_nurture_duration_secs",     180),
-        facebookLikeRate            = getConfigDouble("fb_like_rate",                 0.2).toFloat(),
+        facebookLikeRate            = getConfigDouble("fb_like_rate",                 0.10).toFloat(),
+        // v1.2.9: Khoảng thời gian đọc bài Facebook
+        facebookReadTimeMinSecs     = getConfigInt   ("fb_read_time_min_secs",        8),
+        facebookReadTimeMaxSecs     = getConfigInt   ("fb_read_time_max_secs",        25),
         xNurtureDurationSecs        = getConfigInt   ("x_nurture_duration_secs",      120),
         xLikeRate                   = getConfigDouble("x_like_rate",                  0.25).toFloat(),
         xRetweetRate                = getConfigDouble("x_retweet_rate",               0.05).toFloat(),

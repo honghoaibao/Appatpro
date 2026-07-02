@@ -47,6 +47,12 @@ class GolikeRepository(private val local: LocalRepository) {
      */
     suspend fun saveWebToken(token: String) = saveToken(token)
 
+    /**
+     * v1.2.9: Lưu token nhập thủ công (JWT bearer) từ ô nhập athu ở màn hình Dịch vụ.
+     * Cùng storage key với saveWebToken — dùng chung slot.
+     */
+    suspend fun saveManualToken(token: String) = saveToken(token.trim().removePrefix("Bearer ").trim())
+
     suspend fun clearToken() {
         local.setConfig(KEY_TOKEN, "")
         local.setConfig(KEY_USERNAME, "")

@@ -22,13 +22,15 @@ object ScheduledFarmManager {
 
     @Serializable
     data class FarmSchedule(
-        val id:         String       = UUID.randomUUID().toString(),
-        val label:      String       = "Farm",
-        val hourOfDay:  Int          = 8,
-        val minute:     Int          = 0,
-        val daysOfWeek: List<Int>    = listOf(2, 3, 4, 5, 6, 7, 1),
-        val enabled:    Boolean      = true,
-        val accounts:   List<String> = emptyList(),
+        val id:          String       = UUID.randomUUID().toString(),
+        val label:       String       = "Farm",
+        val hourOfDay:   Int          = 8,
+        val minute:      Int          = 0,
+        val daysOfWeek:  List<Int>    = listOf(2, 3, 4, 5, 6, 7, 1),
+        val enabled:     Boolean      = true,
+        val accounts:    List<String> = emptyList(),
+        /** v1.2.9: dịch vụ sẽ chạy khi lịch kích hoạt: FARM | FACEBOOK_NURTURE | X_NURTURE | … */
+        val serviceMode: String       = "FARM",
     )
 
     fun setSchedule(context: Context, schedule: FarmSchedule) {
@@ -98,9 +100,16 @@ object ScheduledFarmManager {
         if (service == null)        { Log.w(TAG, "Service not running"); return false }
         if (service.engine.isFarming) { Log.w(TAG, "Already farming");  return false }
 
-        // Resolve mode + inputList:
-        //   accounts không rỗng → SELECTED_LIST với danh sách đã lưu
-        //   accounts rỗng       → ALL_LOCAL, engine tự discover từ TikTok
+        // v1.2.9: route theo serviceMode
+        when (schedule.serviceMode) {
+            "FACEBOOK_NURTURE"  -> { service.engine.startFacebookNurture(); return true }
+            "X_NURTURE"         -> { service.engine.startXNurture();         return true }
+            "INSTAGRAM_NURTURE" -> { service.engine.startInstagramNurture(); return true }
+            "THREADS_NURTURE"   -> { service.engine.startThreadsNurture();   return true }
+            "SNAPCHAT_NURTURE"  -> { service.engine.startSnapchatNurture();  return true }
+        }
+
+        // Default: FARM mode TikTok
         val (mode, inputList) = if (schedule.accounts.isNotEmpty()) {
             FarmMode.SELECTED_LIST to schedule.accounts
                 .map { it.trim().removePrefix("@") }
@@ -110,7 +119,7 @@ object ScheduledFarmManager {
             FarmMode.ALL_LOCAL to emptyList<String>()
         }
 
-        Log.i(TAG, "Scheduled farm: mode=\$mode accounts=\${inputList.size}")
+        Log.i(TAG, "Scheduled farm: mode=$mode accounts=${inputList.size}")
         service.engine.startFarm(mode, inputList)
         return true
     }

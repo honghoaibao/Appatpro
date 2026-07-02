@@ -1,13 +1,15 @@
 package com.atpro.ui.services
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,13 +26,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.Image
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import com.atpro.R
+import kotlinx.coroutines.launch
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 private val BgDark      = Color(0xFF0D0D14)
@@ -62,12 +65,19 @@ private val SnapYellow   = Color(0xFFFFFC00)   // v1.2.4 Snapchat
  */
 @Composable
 fun ServicesScreen(
-    onOpenFarmService:     () -> Unit  = {},
-    onOpenFacebookService: () -> Unit  = {},
-    onOpenXService:        () -> Unit  = {},
-    onOpenInstagramService:() -> Unit  = {},
-    onOpenThreadsService:  () -> Unit  = {},
-    onOpenSnapchatService: () -> Unit  = {},
+    // v1.2.9: Golike state + callbacks
+    isGolikeLoggedIn:     Boolean    = false,
+    golikeCoin:           Double     = 0.0,
+    golikeHoldCoin:       Double     = 0.0,
+    onSaveGolikeToken:    (String) -> Unit = {},
+    onClearGolikeToken:   () -> Unit = {},
+    onOpenFarmService:    () -> Unit = {},
+    onOpenTaskService:    () -> Unit = {},
+    onOpenFacebookService:() -> Unit = {},
+    onOpenXService:       () -> Unit = {},
+    onOpenInstagramService:() -> Unit = {},
+    onOpenThreadsService: () -> Unit = {},
+    onOpenSnapchatService:() -> Unit = {},
 ) {
     Column(
         modifier = Modifier
@@ -88,17 +98,42 @@ fun ServicesScreen(
         ) {
             // Card 1: Nuôi acc
             TikTokFarmCard(onClick = onOpenFarmService)
+        }
 
+        // ── Dịch vụ Facebook — v1.2.9: chính thức, tách khỏi nhóm Demo ───────
+        ServiceGroup(
+            title  = "Dịch vụ Facebook",
+            icon   = Icons.Rounded.ThumbUp,
+            accent = FacebookBlue,
+        ) {
+            FacebookNurtureCard(onClick = onOpenFacebookService)
+        }
+
+        // ── Golike TikTok — ẩn khi GOLIKE_ENABLED = false ────────────────────
+        if (com.atpro.security.AppConstants.GOLIKE_ENABLED) {
+            ServiceGroup(
+                title  = "Golike TikTok",
+                icon   = Icons.Rounded.MonetizationOn,
+                accent = Purple,
+            ) {
+                GolikeTikTokCard(
+                    isLoggedIn     = isGolikeLoggedIn,
+                    coin           = golikeCoin,
+                    holdCoin       = golikeHoldCoin,
+                    onSaveToken    = onSaveGolikeToken,
+                    onClearToken   = onClearGolikeToken,
+                    onStartTask    = onOpenTaskService,
+                )
+            }
         }
 
         // ── Demo nuôi acc khác [v1.2.3/v1.2.4] ──────────────────────────────────────
         ServiceGroup(
             title  = "Demo nuôi tài khoản khác",
-            icon   = Icons.Rounded.ThumbUp,
-            accent = FacebookBlue,
+            icon   = Icons.Rounded.Apps,
+            accent = Color(0xFF9CA3AF),
         ) {
             DemoNoticeBanner()
-            FacebookNurtureCard(onClick = onOpenFacebookService)
             XNurtureCard(onClick = onOpenXService)
             InstagramNurtureCard(onClick = onOpenInstagramService)
             ThreadsNurtureCard(onClick = onOpenThreadsService)
@@ -131,6 +166,25 @@ private fun ServicesHeader() {
             fontSize = 13.sp,
         )
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  v1.2.9: Hiệu ứng "được chọn" — mỗi dịch vụ có glow/pop riêng theo màu accent
+//  của nó khi người dùng bấm mở. Không chặn điều hướng (onClick gọi ngay),
+//  glow chạy song song trong lúc chuyển màn hình.
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun rememberSelectionGlow(): Pair<Float, () -> Unit> {
+    val glow  = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    val trigger: () -> Unit = {
+        scope.launch {
+            glow.snapTo(1f)
+            glow.animateTo(0f, animationSpec = tween(420, easing = FastOutSlowInEasing))
+        }
+    }
+    return glow.value to trigger
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -182,6 +236,7 @@ private fun TikTokFarmCard(onClick: () -> Unit) {
         animationSpec = tween(120),
         label         = "farm_card_scale",
     )
+    val (glowAlpha, triggerGlow) = rememberSelectionGlow()
 
     Box(
         modifier = Modifier
@@ -198,12 +253,14 @@ private fun TikTokFarmCard(onClick: () -> Unit) {
                     ),
                 )
             )
+            // v1.2.9: glow overlay khi vừa được chọn — màu TikTok cyan
+            .background(TikTokCyan.copy(alpha = glowAlpha * 0.22f))
             .border(
-                width = 0.8.dp,
+                width = (0.8f + glowAlpha * 1.4f).dp,
                 brush = Brush.linearGradient(
                     listOf(
-                        TikTokCyan.copy(alpha = 0.50f),
-                        TikTokRed.copy(alpha = 0.30f),
+                        TikTokCyan.copy(alpha = 0.50f + glowAlpha * 0.5f),
+                        TikTokRed.copy(alpha = 0.30f + glowAlpha * 0.4f),
                     )
                 ),
                 shape = RoundedCornerShape(20.dp),
@@ -215,7 +272,7 @@ private fun TikTokFarmCard(onClick: () -> Unit) {
                         tryAwaitRelease()
                         pressed = false
                     },
-                    onTap = { onClick() },
+                    onTap = { triggerGlow(); onClick() },
                 )
             }
             .padding(horizontal = 20.dp, vertical = 20.dp),
@@ -296,7 +353,7 @@ private fun TikTokFarmCard(onClick: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text       = "Bắt đầu farm",
+                    text       = "Mở dịch vụ",
                     color      = TikTokCyan,
                     fontSize   = 12.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -315,6 +372,166 @@ private fun TikTokFarmCard(onClick: () -> Unit) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Banner lưu ý demo [v1.2.4]
+// ─────────────────────────────────────────────────────────────────────────────
+//  v1.2.9: Golike TikTok card — nhập athu, xem số dư, bắt đầu nhiệm vụ
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun GolikeTikTokCard(
+    isLoggedIn:   Boolean,
+    coin:         Double,
+    holdCoin:     Double,
+    onSaveToken:  (String) -> Unit,
+    onClearToken: () -> Unit,
+    onStartTask:  () -> Unit,
+) {
+    val Green      = Color(0xFF10B981)
+    val Amber      = Color(0xFFF59E0B)
+    var tokenInput by remember { mutableStateOf("") }
+    var showInput  by remember { mutableStateOf(!isLoggedIn) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF141420))
+            .border(1.dp, if (isLoggedIn) Green.copy(0.35f) else Purple.copy(0.25f), RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        // Header
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Rounded.MonetizationOn,
+                contentDescription = null,
+                tint     = Purple,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("Nhiệm vụ TikTok Golike", color = TextPrim, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.weight(1f))
+            // Trạng thái đăng nhập
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (isLoggedIn) Green.copy(0.15f) else Color(0xFF252535))
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+            ) {
+                Text(
+                    if (isLoggedIn) "● Đã kết nối" else "○ Chưa kết nối",
+                    color    = if (isLoggedIn) Green else TextMuted,
+                    fontSize = 10.sp,
+                )
+            }
+        }
+
+        // Số dư (chỉ hiện khi đã đăng nhập)
+        if (isLoggedIn) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF1A1A2A))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column {
+                    Text("Số dư", color = TextMuted, fontSize = 10.sp)
+                    Text(
+                        "%.0f xu".format(coin),
+                        color = Green, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("Chờ duyệt", color = TextMuted, fontSize = 10.sp)
+                    Text(
+                        "%.0f xu".format(holdCoin),
+                        color = Amber, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+
+        // Ô nhập token (athu)
+        if (showInput || !isLoggedIn) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Token xác thực (JWT Bearer)", color = TextSec, fontSize = 11.sp)
+                OutlinedTextField(
+                    value         = tokenInput,
+                    onValueChange = { tokenInput = it },
+                    placeholder   = { Text("Dán token từ app.golike.net ...", color = TextMuted, fontSize = 11.sp) },
+                    singleLine    = false,
+                    maxLines      = 3,
+                    modifier      = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor   = Purple,
+                        unfocusedBorderColor = Color(0xFF2A2A40),
+                        focusedTextColor     = TextPrim,
+                        unfocusedTextColor   = TextPrim,
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            if (tokenInput.isNotBlank()) {
+                                onSaveToken(tokenInput.trim())
+                                showInput = false
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors   = ButtonDefaults.buttonColors(containerColor = Purple),
+                        shape    = RoundedCornerShape(8.dp),
+                    ) {
+                        Text("Lưu token", fontSize = 12.sp)
+                    }
+                    if (isLoggedIn) {
+                        OutlinedButton(
+                            onClick = { showInput = false },
+                            modifier = Modifier.wrapContentWidth(),
+                            shape    = RoundedCornerShape(8.dp),
+                            border   = BorderStroke(1.dp, TextMuted.copy(0.4f)),
+                        ) { Text("Hủy", fontSize = 12.sp, color = TextMuted) }
+                    }
+                }
+            }
+        }
+
+        // Nút đổi token khi đã kết nối
+        if (isLoggedIn && !showInput) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick  = onStartTask,
+                    modifier = Modifier.weight(1f),
+                    colors   = ButtonDefaults.buttonColors(containerColor = Purple),
+                    shape    = RoundedCornerShape(10.dp),
+                ) {
+                    Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Bắt đầu nhiệm vụ", fontSize = 12.sp)
+                }
+                OutlinedButton(
+                    onClick  = { showInput = true; tokenInput = "" },
+                    modifier = Modifier.wrapContentWidth(),
+                    shape    = RoundedCornerShape(10.dp),
+                    border   = BorderStroke(1.dp, Purple.copy(0.35f)),
+                ) {
+                    Icon(Icons.Rounded.Edit, null, tint = Purple, modifier = Modifier.size(14.dp))
+                }
+                OutlinedButton(
+                    onClick  = onClearToken,
+                    modifier = Modifier.wrapContentWidth(),
+                    shape    = RoundedCornerShape(10.dp),
+                    border   = BorderStroke(1.dp, Color(0xFFEF4444).copy(0.4f)),
+                ) {
+                    Icon(Icons.Rounded.Logout, null, tint = Color(0xFFEF4444), modifier = Modifier.size(14.dp))
+                }
+            }
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -494,6 +711,7 @@ private fun PlatformDemoCard(
         animationSpec = tween(120),
         label         = "demo_card_scale_$title",
     )
+    val (glowAlpha, triggerGlow) = rememberSelectionGlow()
 
     Box(
         modifier = Modifier
@@ -501,8 +719,10 @@ private fun PlatformDemoCard(
             .scale(scale)
             .clip(RoundedCornerShape(16.dp))
             .background(Brush.horizontalGradient(listOf(bgFrom, bgTo)))
-            .border(1.dp, borderColor, RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
+            // v1.2.9: glow overlay theo màu accent riêng của từng nền tảng
+            .background(accent.copy(alpha = glowAlpha * 0.20f))
+            .border((1f + glowAlpha * 1.2f).dp, borderColor.copy(alpha = 1f), RoundedCornerShape(16.dp))
+            .clickable(onClick = { triggerGlow(); onClick() })
             .padding(horizontal = 20.dp, vertical = 16.dp),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -557,7 +777,7 @@ private fun PlatformDemoCard(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Card: Demo nuôi tài khoản Facebook (v1.2.3)
+//  Card: Nuôi tài khoản Facebook — dịch vụ chính thức (v1.2.9, trước là demo v1.2.3)
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -568,6 +788,7 @@ private fun FacebookNurtureCard(onClick: () -> Unit) {
         animationSpec = tween(120),
         label         = "fb_card_scale",
     )
+    val (glowAlpha, triggerGlow) = rememberSelectionGlow()
 
     val AccentFb2 = Color(0xFF42A5F5) // lighter blue
 
@@ -585,14 +806,19 @@ private fun FacebookNurtureCard(onClick: () -> Unit) {
                     ),
                 )
             )
+            // v1.2.9: glow overlay khi vừa được chọn — màu Facebook blue
+            .background(FacebookBlue.copy(alpha = glowAlpha * 0.22f))
             .border(
-                width  = 1.dp,
+                width  = (1f + glowAlpha * 1.4f).dp,
                 brush  = Brush.horizontalGradient(
-                    listOf(FacebookBlue.copy(alpha = 0.4f), AccentFb2.copy(alpha = 0.2f))
+                    listOf(
+                        FacebookBlue.copy(alpha = 0.4f + glowAlpha * 0.5f),
+                        AccentFb2.copy(alpha = 0.2f + glowAlpha * 0.5f),
+                    )
                 ),
                 shape  = RoundedCornerShape(16.dp),
             )
-            .clickable(onClick = onClick, onClickLabel = "Mở demo nuôi tài khoản Facebook")
+            .clickable(onClick = { triggerGlow(); onClick() }, onClickLabel = "Mở dịch vụ nuôi tài khoản Facebook")
             .padding(horizontal = 20.dp, vertical = 18.dp),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -623,7 +849,7 @@ private fun FacebookNurtureCard(onClick: () -> Unit) {
                         letterSpacing = 0.2.sp,
                     )
                     Text(
-                        text     = "Lướt feed & thích bài viết tự động (demo)",
+                        text     = "Lướt feed & thích bài viết tự động",
                         color    = TextSec,
                         fontSize = 12.sp,
                     )

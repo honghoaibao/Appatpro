@@ -26,14 +26,15 @@ class ScheduleViewModel(private val context: Context) : ViewModel() {
         }
     }
 
-    fun add(label: String, hour: Int, minute: Int, days: List<Int>) {
+    fun add(label: String, hour: Int, minute: Int, days: List<Int>, serviceMode: String = "FARM") {
         val schedule = FarmSchedule(
-            id         = UUID.randomUUID().toString(),
-            label      = label,
-            hourOfDay  = hour,
-            minute     = minute,
-            daysOfWeek = days,
-            enabled    = true,
+            id          = UUID.randomUUID().toString(),
+            label       = label,
+            hourOfDay   = hour,
+            minute      = minute,
+            daysOfWeek  = days,
+            enabled     = true,
+            serviceMode = serviceMode,
         )
         ScheduledFarmManager.setSchedule(context, schedule)
         _schedules.update { it + schedule }

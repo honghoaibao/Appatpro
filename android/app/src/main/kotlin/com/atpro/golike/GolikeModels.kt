@@ -1,7 +1,38 @@
 package com.atpro.golike
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonPrimitive
+
+/**
+ * v1.2.9 — API Golike đôi khi trả `is_banned: 0` (int) thay vì `false` (bool).
+ * Serializer này xử lý cả hai dạng: 0/1 và false/true.
+ */
+object IntOrBoolSerializer : KSerializer<Boolean> {
+    override val descriptor = PrimitiveSerialDescriptor("IntOrBool", PrimitiveKind.BOOLEAN)
+    override fun serialize(encoder: Encoder, value: Boolean) = encoder.encodeBoolean(value)
+    override fun deserialize(decoder: Decoder): Boolean {
+        if (decoder is JsonDecoder) {
+            val el = decoder.decodeJsonElement()
+            if (el is JsonPrimitive) {
+                val content = el.content.trim()
+                // Xử lý boolean literal
+                if (content.equals("true",  ignoreCase = true)) return true
+                if (content.equals("false", ignoreCase = true)) return false
+                // Xử lý integer 0 / 1
+                val asInt = content.toIntOrNull()
+                if (asInt != null) return asInt != 0
+            }
+        }
+        return try { decoder.decodeBoolean() } catch (_: Exception) { false }
+    }
+}
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -60,7 +91,9 @@ data class TikTokAccountDto(
     @SerialName("avatar_thumb") val avatarThumb: String = "",
     val status:       Int     = 1,
     @SerialName("status_text") val statusText: String = "",
-    @SerialName("is_banned")   val isBanned:   Boolean = false,
+    @SerialName("is_banned")
+    @Serializable(with = IntOrBoolSerializer::class)
+    val isBanned: Boolean = false,
 )
 
 @Serializable

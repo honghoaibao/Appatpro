@@ -322,6 +322,26 @@ class AutomationEngine(
     private val screenH get() = host.screenHeight
     private var config = FarmConfig()
 
+    /**
+     * v1.2.9: Rate-limit comment theo giờ (per doc accessibility-comment-like-logic.md).
+     * Lưu timestamp các lần comment thành công trong phiên hiện tại — TikTok có cơ chế
+     * phát hiện "spam behavior" nếu comment quá nhiều/giờ, dẫn tới shadow-ban.
+     * Reset khi farm dừng (resetPauseTracking không xoá — chỉ xoá khi startFarm/startTask mới).
+     */
+    private val commentTimestamps = java.util.concurrent.CopyOnWriteArrayList<Long>()
+
+    /** Kiểm tra còn được phép comment trong giờ hiện tại không (dựa trên config.maxCommentsPerHour). */
+    private fun canCommentNow(): Boolean {
+        if (config.maxCommentsPerHour <= 0) return true  // 0 = không giới hạn
+        val oneHourAgo = System.currentTimeMillis() - 3_600_000L
+        commentTimestamps.removeAll { it < oneHourAgo }
+        return commentTimestamps.size < config.maxCommentsPerHour
+    }
+
+    private fun recordCommentSent() {
+        commentTimestamps.add(System.currentTimeMillis())
+    }
+
     // Watchdog state — cập nhật bởi farmOneAccount()
     @Volatile private var watchdogVideoCount = 0
     @Volatile private var watchdogLastTick   = 0L
@@ -396,7 +416,7 @@ class AutomationEngine(
 
         farmJob = host.scope.launch {
             config = repo.loadFarmConfig()
-            host.showFarmOverlay()
+            host.showFarmOverlay("NUÔI TKT")
 
             try {
                 runStateMachine(mode, inputList)
@@ -440,7 +460,7 @@ class AutomationEngine(
 
         farmJob = host.scope.launch {
             config = repo.loadFarmConfig()
-            host.showFarmOverlay()
+            host.showFarmOverlay("NV TIKTOK")
 
             try {
                 runTaskStateMachine(mode, inputList, golikeAccounts)
@@ -480,7 +500,7 @@ class AutomationEngine(
 
         farmJob = host.scope.launch {
             config = repo.loadFarmConfig()
-            host.showFarmOverlay()
+            host.showFarmOverlay("NUÔI TKFB")
 
             try {
                 runFacebookNurtureSession()
@@ -503,7 +523,7 @@ class AutomationEngine(
         isFarming = true; isPaused = false; isResting = false
         resetPauseTracking()
         farmJob = host.scope.launch {
-            config = repo.loadFarmConfig(); host.showFarmOverlay()
+            config = repo.loadFarmConfig(); host.showFarmOverlay("NUÔI TKX")
             try { runXNurtureSession() }
             catch (e: CancellationException) { log("Nuôi X bị hủy bởi người dùng"); throw e }
             catch (e: Exception) { log("ERR: Nuôi X lỗi: ${e.javaClass.simpleName} — ${e.message}") }
@@ -517,7 +537,7 @@ class AutomationEngine(
         isFarming = true; isPaused = false; isResting = false
         resetPauseTracking()
         farmJob = host.scope.launch {
-            config = repo.loadFarmConfig(); host.showFarmOverlay()
+            config = repo.loadFarmConfig(); host.showFarmOverlay("NUÔI TKIG")
             try { runInstagramNurtureSession() }
             catch (e: CancellationException) { log("Nuôi Instagram bị hủy bởi người dùng"); throw e }
             catch (e: Exception) { log("ERR: Nuôi Instagram lỗi: ${e.javaClass.simpleName} — ${e.message}") }
@@ -531,7 +551,7 @@ class AutomationEngine(
         isFarming = true; isPaused = false; isResting = false
         resetPauseTracking()
         farmJob = host.scope.launch {
-            config = repo.loadFarmConfig(); host.showFarmOverlay()
+            config = repo.loadFarmConfig(); host.showFarmOverlay("NUÔI TKTH")
             try { runThreadsNurtureSession() }
             catch (e: CancellationException) { log("Nuôi Threads bị hủy bởi người dùng"); throw e }
             catch (e: Exception) { log("ERR: Nuôi Threads lỗi: ${e.javaClass.simpleName} — ${e.message}") }
@@ -545,7 +565,7 @@ class AutomationEngine(
         isFarming = true; isPaused = false; isResting = false
         resetPauseTracking()
         farmJob = host.scope.launch {
-            config = repo.loadFarmConfig(); host.showFarmOverlay()
+            config = repo.loadFarmConfig(); host.showFarmOverlay("NUÔI TKSC")
             try { runSnapchatNurtureSession() }
             catch (e: CancellationException) { log("Nuôi Snapchat bị hủy bởi người dùng"); throw e }
             catch (e: Exception) { log("ERR: Nuôi Snapchat lỗi: ${e.javaClass.simpleName} — ${e.message}") }
@@ -1652,20 +1672,49 @@ class AutomationEngine(
                 // doFollowFromProfile() luôn back về feed trước khi trả kết quả
             }
 
-            // ── [10] Comment [v2.0] ───────────────────────────────────────
-            if (config.commentRate > 0f
+            // ── [10] Comment [v2.0, content-aware + rate-limit từ v1.2.9] ──
+            // v1.2.9: bỏ qua live/ad (giống Like/Follow) + giới hạn số lần/giờ
+            // theo khuyến nghị tài liệu accessibility-comment-like-logic.md —
+            // comment liên tục là tín hiệu bot rõ nhất, dễ bị flag "spam behavior".
+            if (!isLiveContent && !isAdContent
+                && config.commentRate > 0f
                 && config.commentTexts.isNotEmpty()
                 && Random.nextFloat() < config.commentRate
             ) {
-                OverlayFarmMonitor.update(idx + 1, total, account,
-                    sessionSecsRemain, totalSecsRemain, "CMT: Bình luận")
-                // v1.2.3 [FIX]: timeout 25s — panel comment đôi khi không mở/đóng đúng.
-                val commentOk = safeStep("comment_action", timeoutMs = 25_000L) {
-                    doComment(config.commentTexts)
+                if (canCommentNow()) {
+                    OverlayFarmMonitor.update(idx + 1, total, account,
+                        sessionSecsRemain, totalSecsRemain, "CMT: Bình luận")
+                    // v1.2.3 [FIX]: timeout 25s — panel comment đôi khi không mở/đóng đúng.
+                    val commentOk = safeStep("comment_action", timeoutMs = 25_000L) {
+                        doComment(config.commentTexts)
+                    }
+                    if (commentOk == true) {
+                        comments++
+                        recordCommentSent()
+                    }
+                    if (commentOk == null && !NodeTraverser.isOnFeedTab(host.getRootNode())) {
+                        log("WARN: Comment timeout/lỗi — recoverToFeed()")
+                        recoverToFeed()
+                    }
+                } else {
+                    log("CMT SKIP: Đã đạt giới hạn ${config.maxCommentsPerHour} comment/giờ")
                 }
-                if (commentOk == true) comments++
-                if (commentOk == null && !NodeTraverser.isOnFeedTab(host.getRootNode())) {
-                    log("WARN: Comment timeout/lỗi — recoverToFeed()")
+            } else if (isLiveContent || isAdContent) {
+                // im lặng bỏ qua — không log để tránh spam log với live/ad liên tục
+            }
+
+            // ── [10a] Xem bình luận (thụ động, v1.2.9) ────────────────────
+            // Khác Comment ở trên: KHÔNG gõ/gửi gì — chỉ mở panel, cuộn xem vài
+            // bình luận rồi đóng lại. Độc lập với commentRate — có thể xảy ra
+            // dù không post comment nào trong lượt này.
+            if (!isLiveContent && !isAdContent && Random.nextFloat() < config.commentViewRate) {
+                OverlayFarmMonitor.update(idx + 1, total, account,
+                    sessionSecsRemain, totalSecsRemain, "CMT: Xem bình luận")
+                val viewOk = safeStep("comment_view_action", timeoutMs = 20_000L) {
+                    doViewComments()
+                }
+                if (viewOk == null && !NodeTraverser.isOnFeedTab(host.getRootNode())) {
+                    log("WARN: Xem bình luận timeout/lỗi — recoverToFeed()")
                     recoverToFeed()
                 }
             }
@@ -1852,6 +1901,7 @@ class AutomationEngine(
         delay((config.delayAfterFollow * 1_000).toLong())
 
         // Bước 6: Back về feed
+        log("OK: Về feed")
         host.pressBack()
         Human.delay(900, 1_400)
 
@@ -1926,6 +1976,12 @@ class AutomationEngine(
      * Trả true nếu đã gửi comment thành công.
      */
     private suspend fun doComment(texts: List<String>): Boolean {
+        // v1.2.9: lọc dòng "Experiment" (magic word mở khoá setting ẩn) — không
+        // bao giờ được dùng làm nội dung comment thật, dù nó vẫn nằm trong list
+        // hiển thị trên UI để người dùng biết tính năng đang mở.
+        val realTexts = texts.filterNot { it.trim().equals("experiment", ignoreCase = true) }
+        if (realTexts.isEmpty()) return false
+
         val root = host.getRootNode()
 
         // Tìm nút mở comment panel
@@ -1977,6 +2033,63 @@ class AutomationEngine(
 
         log("CMT: Comment: \"${text.take(20)}${if (text.length > 20) "..." else ""}\"")
         delay((config.delayAfterComment * 1_000).toLong())
+        return true
+    }
+
+    /**
+     * v1.2.9: Xem bình luận thụ động — mở panel comment lên XEM (không gõ/gửi gì),
+     * cuộn xuống xem vài bình luận rồi đóng lại. Mô phỏng hành vi tò mò tự nhiên,
+     * khác hẳn doComment() (gõ + gửi text thật).
+     *
+     * Flow:
+     *   1. Tìm nút comment → click mở panel (dùng chung finder với doComment)
+     *   2. Chờ panel load xong
+     *   3. Cuộn ngẫu nhiên [commentViewScrollMin, commentViewScrollMax] lần
+     *   4. Đóng panel (back)
+     *
+     * Trả true nếu đã mở panel và xem được (kể cả khi số bình luận ít, không đủ
+     * để cuộn hết số lần dự kiến — không phải điều kiện thất bại).
+     */
+    private suspend fun doViewComments(): Boolean {
+        val root = host.getRootNode()
+
+        val commentBtn = NodeTraverser.findByResourceId(root, "btn_comment")
+            ?: NodeTraverser.findByResourceId(root, "comment_btn")
+            ?: NodeTraverser.findByResourceId(root, "comment_layout")
+            ?: NodeTraverser.findByText(root, "comment",   ignoreCase = true)
+            ?: NodeTraverser.findByText(root, "bình luận", ignoreCase = true)
+            ?: return false
+
+        log("CMT: Mở xem bình luận...")
+        host.clickNode(commentBtn.node)
+        Human.delay(1_200, 1_800)
+
+        val scrollTimes = Random.nextInt(
+            config.commentViewScrollMin,
+            config.commentViewScrollMax + 1,
+        ).coerceAtLeast(1)
+
+        repeat(scrollTimes) { i ->
+            // Panel comment TikTok chiếm nửa dưới màn hình — cuộn trong vùng đó
+            // để tránh vô tình vuốt trúng video nền phía sau panel.
+            host.swipeSuspend(
+                screenW / 2, (screenH * 0.75).toInt(),
+                screenW / 2, (screenH * 0.45).toInt(),
+                Human.swipeDuration(400),
+            )
+            Human.delay(900, 1_600)
+        }
+
+        log("CMT: Đã xem $scrollTimes lượt bình luận")
+
+        // Đóng panel — back về feed
+        host.pressBack()
+        delay(600)
+        if (!NodeTraverser.isOnFeedTab(host.getRootNode())) {
+            host.pressBack()
+            delay(600)
+        }
+
         return true
     }
 
@@ -2968,24 +3081,34 @@ class AutomationEngine(
      * ở 1 bước (vd Like) không làm dừng cả phiên, luôn tiến tới swipe feed tiếp.
      */
     private suspend fun runFacebookNurtureSession() {
-        val pkg = AppConstants.FACEBOOK_PKG
-
         log(">> [Facebook] Bắt đầu phiên nuôi acc Facebook")
         setStatus(">> Đang mở Facebook...")
-        // v1.2.7: thử lần lượt các gói Facebook (ngoại trừ Lite) cho đến khi mở được
+
+        // v1.2.9: thử lần lượt các gói Facebook cho đến khi mở được
         val fbPkg = AppConstants.FACEBOOK_PACKAGES.firstOrNull { pkgName ->
             val launched = host.launchApp(pkgName)
-            if (launched) {
-                log(">> [Facebook] Mở thành công với gói: $pkgName")
-            }
+            if (launched) log(">> [Facebook] Mở thành công: $pkgName")
             launched
         }
         if (fbPkg == null) {
-            log("ERR: Không mở được Facebook — thử: ${AppConstants.FACEBOOK_PACKAGES.joinToString()} — kiểm tra đã cài đặt")
-            setStatus("")
-            return
+            log("ERR: Không mở được Facebook — kiểm tra đã cài: ${AppConstants.FACEBOOK_PACKAGES.joinToString()}")
+            setStatus(""); return
         }
-        delay(4_000)  // chờ app khởi động + feed load
+
+        // v1.2.9: chờ FbMainTabActivity thực sự hiển thị (tối đa 10s)
+        // Manifest: com.facebook.katana.activity.FbMainTabActivity là màn hình chính
+        log("FB: Chờ Facebook tải...")
+        var waited = 0
+        while (waited < 20 && isFarming) {
+            delay(500)
+            waited++
+            val root = host.getRootNode()
+            if (root?.packageName == fbPkg) {
+                log("FB: Facebook đã sẵn sàng (${waited * 500}ms)")
+                break
+            }
+        }
+        delay(1_500) // thêm chút chờ feed render
 
         val durationSecs = config.facebookNurtureDurationSecs.toLong()
         val totalMs      = durationSecs * 1_000L
@@ -2999,70 +3122,96 @@ class AutomationEngine(
         var scrolled = 0
         var liked    = 0
 
-        log("FB: Lướt feed Facebook trong ${durationSecs}s (likeRate=${config.facebookLikeRate})")
+        log("FB: Lướt feed ${durationSecs}s (likeRate=${config.facebookLikeRate})")
 
         while (secsLeftNow() > 0L && isFarming) {
             awaitResumed()
             val secsLeft = secsLeftNow()
 
             OverlayFarmMonitor.update(
-                accountIndex    = 1,
-                accountTotal    = 1,
+                accountIndex    = 1, accountTotal = 1,
                 accountId       = "Facebook",
-                sessionSecsLeft = secsLeft,
-                totalSecsLeft   = secsLeft,
-                action          = "FB: Lướt feed (${secsLeft}s)",
+                sessionSecsLeft = secsLeft, totalSecsLeft = secsLeft,
+                action          = "FB: Đang đọc bài viết...",
             )
 
-            val iterationOk = safeStep("facebook_iter", timeoutMs = 30_000L) {
-                // Ngẫu nhiên thích bài đăng — tìm node "Thích"/"Like" trên màn hình.
+            val iterationOk = safeStep("facebook_iter", timeoutMs = 45_000L) {
+                // v1.2.9: Khoảng "đọc bài" 8–25s (config.facebookReadTimeMin/MaxSecs)
+                // trước khi quyết định like/lướt tiếp — thay cho delay cố định cũ,
+                // mô phỏng hành vi đọc tự nhiên thay vì lướt liên tục không dừng.
+                val readMs = Random.nextLong(
+                    config.facebookReadTimeMinSecs * 1_000L,
+                    (config.facebookReadTimeMaxSecs + 1) * 1_000L,
+                )
+                delay(readMs)
+
+                // v1.2.9: cải thiện tìm nút Like dựa trên phân tích manifest +
+                // tài liệu accessibility-comment-like-logic.md
+                // FbMainTabActivity dùng native view — Like button có text "Thích"/"Like"
+                // hoặc contentDescription tương ứng
                 if (Random.nextFloat() < config.facebookLikeRate) {
                     val root = host.getRootNode()
                     val likeBtn = NodeTraverser.findByText(root, "thích", ignoreCase = true)
                         ?: NodeTraverser.findByText(root, "like", ignoreCase = true)
+                        ?: NodeTraverser.findByContentDesc(root, "thích", ignoreCase = true)
+                        ?: NodeTraverser.findByContentDesc(root, "like", ignoreCase = true)
+
                     if (likeBtn != null) {
-                        val label = likeBtn.text?.lowercase() ?: ""
-                        // Bỏ qua nếu đã "Bỏ thích" / "Unlike" (đã like rồi)
-                        if ("bỏ thích" !in label && "unlike" !in label) {
+                        val label = (
+                            likeBtn.text?.toString()
+                                ?: likeBtn.node.contentDescription?.toString()
+                                ?: ""
+                        ).lowercase()
+                        // v1.2.9: check isChecked TRƯỚC (theo doc) — Facebook Like là toggle
+                        // button 2 trạng thái; isChecked = true nghĩa là ĐÃ like rồi, click
+                        // lại sẽ thành UNLIKE. Đây là bug phổ biến nhất khi auto-like Facebook.
+                        val alreadyLiked = likeBtn.node.isChecked ||
+                            "bỏ thích" in label || "unlike" in label || "đã thích" in label
+                        val isCommentBtn = "bình luận" in label || "comment" in label
+                        if (!alreadyLiked && !isCommentBtn) {
+                            log("FB: Bài viết hay đấy, để lại tim nào...")
                             Human.microPause()
                             host.clickNode(likeBtn.node)
                             liked++
-                            log("FB: Đã thích bài đăng (#$liked)")
+                            log("FB: Tim bài đăng #$liked ❤")
                             OverlayFarmMonitor.update(
-                                accountIndex    = 1,
-                                accountTotal    = 1,
-                                accountId       = "Facebook",
-                                sessionSecsLeft = secsLeftNow(),
-                                totalSecsLeft   = secsLeftNow(),
-                                action          = "FB: Đã thích bài #$liked",
+                                accountIndex = 1, accountTotal = 1,
+                                accountId = "Facebook",
+                                sessionSecsLeft = secsLeftNow(), totalSecsLeft = secsLeftNow(),
+                                action = "FB: Tim bài #$liked ❤",
                             )
                             Human.delay(800, 1_500)
                         }
                     }
+                } else {
+                    log("FB: Lướt tiếp xem có gì hay không...")
                 }
 
-                // Lướt feed lên — random duration giống TikTok swipeNext().
-                val xOff = Human.jitter(12)
-                val x    = screenW / 2 + xOff
+                OverlayFarmMonitor.update(
+                    accountIndex = 1, accountTotal = 1,
+                    accountId = "Facebook",
+                    sessionSecsLeft = secsLeftNow(), totalSecsLeft = secsLeftNow(),
+                    action = "FB: Chuẩn bị lướt tiếp...",
+                )
+
+                // Lướt feed lên
+                val x = screenW / 2 + Human.jitter(12)
                 host.swipeSuspend(
                     x, (screenH * 0.78).toInt(),
-                    x, (screenH * 0.25).toInt(),
-                    Human.swipeDuration(450),
+                    x, (screenH * 0.22).toInt(),
+                    Human.swipeDuration(480),
                 )
                 scrolled++
-                Human.delay(1_200, 2_500)
+                Human.delay(1_500, 3_000)
                 Human.occasionalPause(config.occasionalPauseChance)
             }
-            if (iterationOk == null) {
-                // Timeout/lỗi — vẫn tiếp tục, đợi 1 nhịp rồi thử lại.
-                delay(1_000)
-            }
+            if (iterationOk == null) delay(1_000)
         }
 
-        log("FB: Hoàn thành — lướt $scrolled lần, thích $liked bài đăng")
+        log("FB: Hoàn thành — lướt $scrolled lần, tim $liked bài")
         setStatus("FB: Đang đóng Facebook...")
         delay(500)
-        host.killApp(pkg)
+        host.killApp(fbPkg)
         setStatus("")
     }
 

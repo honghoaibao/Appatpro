@@ -70,20 +70,24 @@ private val TextMuted  = Color(0xFF5C5C78)
 private enum class Section(val label: String, val icon: ImageVector, val accent: Color) {
     PERMISSIONS  ("Quyền",      Icons.Rounded.AdminPanelSettings,   Green),
     NOTIFICATIONS("Thông báo",  Icons.Rounded.NotificationsNone,    Cyan),
+    LOGS         ("Nhật ký",    Icons.Rounded.EventNote,            Color(0xFF8B5CF6)),
     TIMING       ("Thời gian",  Icons.Rounded.Timer,                Purple),
     ACTIONS      ("Hành động",  Icons.Rounded.TouchApp,             Pink),
-    // v1.2.6 — Demo nuôi acc tách riêng từng nền tảng (giống cách Nuôi TikTok
-    // có tab Thời gian / Hành động riêng), thay vì dồn chung 1 trang dài.
-    DEMO_FACEBOOK ("Facebook",  Icons.Rounded.ThumbUp,   Color(0xFF1877F2)),
+    TASK_GOLIKE  ("Nhiệm vụ",   Icons.Rounded.MonetizationOn,       Color(0xFF6C63FF)),
+    // v1.2.9: Facebook lên chính thức — tách Timing/Actions giống TikTok,
+    // không còn chung nhóm "Demo nuôi acc".
+    FACEBOOK_TIMING ("Thời gian", Icons.Rounded.Timer,     Color(0xFF1877F2)),
+    FACEBOOK_ACTIONS("Hành động", Icons.Rounded.TouchApp,  Color(0xFF1877F2)),
     DEMO_X        ("X",         Icons.Rounded.Tag,       Color(0xFF000000)),
     DEMO_INSTAGRAM("Instagram", Icons.Rounded.CameraAlt, Color(0xFFC13584)),
     DEMO_THREADS  ("Threads",   Icons.Rounded.Forum,     Color(0xFF000000)),
     DEMO_SNAPCHAT ("Snapchat",  Icons.Rounded.Mood,      Color(0xFFFFFC00)),
 }
 
-/** v1.2.6 — true nếu section thuộc nhóm "Demo nuôi acc" → render [PlatformBadge] thật thay vì icon Material chung. */
+/** v1.2.6 — true nếu section thuộc nhóm "Demo nuôi acc" → render [PlatformBadge] thật thay vì icon Material chung.
+ *  v1.2.9: Facebook không còn nằm trong nhóm demo (đã lên dịch vụ chính thức). */
 private val Section.isDemoplatform: Boolean
-    get() = this in setOf(Section.DEMO_FACEBOOK, Section.DEMO_X, Section.DEMO_INSTAGRAM, Section.DEMO_THREADS, Section.DEMO_SNAPCHAT)
+    get() = this in setOf(Section.DEMO_X, Section.DEMO_INSTAGRAM, Section.DEMO_THREADS, Section.DEMO_SNAPCHAT)
 
 /**
  * Nhóm setting — mỗi nhóm có thể mở rộng / thu gọn trong sidebar.
@@ -98,40 +102,51 @@ private data class SettingsGroup(
     val sections: List<Section>,
 )
 
-private val SETTINGS_GROUPS = listOf(
-    SettingsGroup(
-        id       = "system",
-        label    = "Hệ thống",
-        icon     = Icons.Rounded.Settings,
-        accent   = Green,
-        sections = listOf(Section.PERMISSIONS, Section.NOTIFICATIONS),
-    ),
-    SettingsGroup(
-        id       = "farm",
-        label    = "Nuôi TikTok",
-        icon     = Icons.Rounded.AccountCircle,
-        accent   = Purple,
-        sections = listOf(Section.TIMING, Section.ACTIONS),
-    ),
-
-    SettingsGroup(
-        id       = "demo",
-        label    = "Demo nuôi acc",
-        icon     = Icons.Rounded.Apps,
-        accent   = Color(0xFF1877F2),
-        sections = listOf(
-            Section.DEMO_FACEBOOK, Section.DEMO_X, Section.DEMO_INSTAGRAM,
-            Section.DEMO_THREADS, Section.DEMO_SNAPCHAT,
-        ),
-    ),
-)
+private val SETTINGS_GROUPS: List<SettingsGroup> by lazy {
+    buildList {
+        add(SettingsGroup(
+            id = "system", label = "Hệ thống",
+            icon = Icons.Rounded.Settings, accent = Green,
+            sections = listOf(Section.PERMISSIONS, Section.NOTIFICATIONS, Section.LOGS),
+        ))
+        add(SettingsGroup(
+            id = "farm", label = "Nuôi TikTok",
+            icon = Icons.Rounded.AccountCircle, accent = Purple,
+            sections = listOf(Section.TIMING, Section.ACTIONS),
+        ))
+        // v1.2.9: Facebook lên dịch vụ chính thức — nhóm riêng giống TikTok
+        add(SettingsGroup(
+            id = "facebook", label = "Nuôi Facebook",
+            icon = Icons.Rounded.ThumbUp, accent = Color(0xFF1877F2),
+            sections = listOf(Section.FACEBOOK_TIMING, Section.FACEBOOK_ACTIONS),
+        ))
+        if (com.atpro.security.AppConstants.GOLIKE_ENABLED) {
+            add(SettingsGroup(
+                id = "golike", label = "Golike TikTok",
+                icon = Icons.Rounded.MonetizationOn, accent = Color(0xFF6C63FF),
+                sections = listOf(Section.TASK_GOLIKE),
+            ))
+        }
+        add(SettingsGroup(
+            id = "demo", label = "Demo nuôi acc",
+            icon = Icons.Rounded.Apps, accent = Color(0xFF1877F2),
+            sections = listOf(
+                Section.DEMO_X, Section.DEMO_INSTAGRAM,
+                Section.DEMO_THREADS, Section.DEMO_SNAPCHAT,
+            ),
+        ))
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Root
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-fun ConfigScreen(vm: ConfigViewModel) {
+fun ConfigScreen(
+    vm:     ConfigViewModel,
+    logsVm: com.atpro.ui.logs.LogsViewModel? = null,
+) {
     val state   by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
@@ -189,6 +204,7 @@ fun ConfigScreen(vm: ConfigViewModel) {
             onOpenAccessibility = { AccessibilitySettingsHelper.openAccessibilitySettings(context) },
             onOpenOverlay       = { AccessibilitySettingsHelper.openOverlaySettings(context) },
             onOpenNotification  = { AccessibilitySettingsHelper.openAppSettings(context) },
+            logsVm              = logsVm,
             modifier            = Modifier.padding(padding),
         )
     }
@@ -281,6 +297,7 @@ private fun SettingsLayout(
     onOpenAccessibility: () -> Unit,
     onOpenOverlay:       () -> Unit,
     onOpenNotification:  () -> Unit,
+    logsVm:              com.atpro.ui.logs.LogsViewModel? = null,
     modifier:            Modifier = Modifier,
 ) {
     // Mặc định mở nhóm "Hệ thống" và chọn mục "Quyền"
@@ -392,7 +409,16 @@ private fun SettingsLayout(
                 Section.ACTIONS        -> ActionsSection(state, onSet)
                 Section.NOTIFICATIONS  -> NotificationsSection(state, onSet)
                 Section.PERMISSIONS    -> PermissionsSection(state, onOpenAccessibility, onOpenOverlay, onOpenNotification)
-                Section.DEMO_FACEBOOK  -> FacebookDemoSection(state, onSet)
+                Section.TASK_GOLIKE    -> TaskGolikeSection(state, onSet)
+                Section.LOGS           -> if (logsVm != null) {
+                    com.atpro.ui.logs.LogsScreen(vm = logsVm, onNavigateUp = null)
+                } else {
+                    Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        Text("Nhật ký không khả dụng", color = TextMuted)
+                    }
+                }
+                Section.FACEBOOK_TIMING  -> FacebookTimingSection(state, onSet)
+                Section.FACEBOOK_ACTIONS -> FacebookActionsSection(state, onSet)
                 Section.DEMO_X         -> XDemoSection(state, onSet)
                 Section.DEMO_INSTAGRAM -> InstagramDemoSection(state, onSet)
                 Section.DEMO_THREADS   -> ThreadsDemoSection(state, onSet)
@@ -416,7 +442,7 @@ private fun SettingsLayout(
 private fun PlatformBadge(section: Section, size: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(size * 0.28f)
     when (section) {
-        Section.DEMO_FACEBOOK -> Box(
+        Section.FACEBOOK_TIMING, Section.FACEBOOK_ACTIONS -> Box(
             modifier = modifier.size(size).clip(shape).background(Color(0xFF1877F2)),
             contentAlignment = Alignment.Center,
         ) {
@@ -495,7 +521,10 @@ private fun TimingSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Conf
 
         // Farm duration card
         SettingCard {
-            CardLabel("Thời lượng mỗi tài khoản", Icons.Rounded.AccountCircle, Purple)
+            CardLabelWithNote("Thời lượng mỗi tài khoản", Icons.Rounded.AccountCircle, Purple,
+                note = "Tổng thời gian (tính bằng phút) tool sẽ nuôi mỗi tài khoản TikTok trong một phiên. " +
+                       "Sau khi hết thời gian, tool tự động chuyển sang tài khoản tiếp theo trong danh sách. " +
+                       "Khuyến nghị: 10–30 phút mỗi tài khoản để tránh bị phát hiện.")
             Spacer(Modifier.height(10.dp))
             CfgSlider(
                 label    = "Phút / tài khoản",
@@ -509,7 +538,10 @@ private fun TimingSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Conf
 
         // Watch time card
         SettingCard {
-            CardLabel("Thời lượng xem video", Icons.Rounded.Videocam, Cyan)
+            CardLabelWithNote("Thời lượng xem video", Icons.Rounded.Videocam, Cyan,
+                note = "Khoảng thời gian tool dừng lại để xem mỗi video trước khi vuốt sang video tiếp theo. " +
+                       "Giá trị Min–Max tạo thời gian ngẫu nhiên để hành vi trông tự nhiên hơn. " +
+                       "Ví dụ: Min 3s – Max 8s → mỗi video xem 3 đến 8 giây.")
             Spacer(Modifier.height(10.dp))
 
             val safeMin = state.watchMin.toFloat()
@@ -548,7 +580,10 @@ private fun TimingSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Conf
 
         // Rest card
         SettingCard {
-            CardLabel("Nghỉ giữa tài khoản", Icons.Rounded.Coffee, Amber)
+            CardLabelWithNote("Nghỉ giữa tài khoản", Icons.Rounded.Coffee, Amber,
+                note = "Thời gian nghỉ (tính bằng giây) giữa mỗi lần chuyển tài khoản. " +
+                       "Tool sẽ đóng ứng dụng TikTok, chờ một khoảng thời gian ngẫu nhiên trong khoảng này " +
+                       "rồi mới mở tài khoản tiếp theo. Giúp tránh bị phát hiện là tự động hóa.")
             Spacer(Modifier.height(10.dp))
             CfgSwitch(
                 label    = "Bật thời gian nghỉ",
@@ -579,7 +614,10 @@ private fun TimingSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Conf
 
         // Recovery card
         SettingCard {
-            CardLabel("Khôi phục", Icons.Rounded.Refresh, Pink)
+            CardLabelWithNote("Khôi phục", Icons.Rounded.Refresh, Pink,
+                note = "Khi tool phát hiện TikTok đang không ở đúng trạng thái (vd: màn hình lạ, popup xuất hiện), " +
+                       "tool sẽ thực hiện các bước khôi phục: nhấn Back, về trang chủ, v.v. " +
+                       "Số lần tối đa trước khi bỏ qua tài khoản có thể cấu hình ở đây.")
             Spacer(Modifier.height(10.dp))
             CfgStepper(
                 label    = "Số lần nhấn Back tối đa",
@@ -609,70 +647,200 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
     ) {
         SectionTitle("Hành động tự động", Icons.Rounded.TouchApp, Pink)
 
+        // v1.2.9: Banner giải thích Experiment Mode
+        ExperimentModeBanner(unlocked = state.isExperimentUnlocked)
+
         // Interaction rates card
         SettingCard {
-            CardLabel("Tỉ lệ tương tác", Icons.Rounded.Favorite, Pink)
+            CardLabelWithNote("Tỉ lệ tương tác", Icons.Rounded.Favorite, Pink,
+                note = "Xác suất (%) tool sẽ thực hiện hành động tương tác (tim, follow) trên mỗi video. " +
+                       "Các tỉ lệ này được khoá ở mức an toàn mặc định — mở Experiment Mode để chỉnh tay.")
             Spacer(Modifier.height(10.dp))
 
-            // Like rate with inline mini bar
+            // Like rate — locked at 18% by default, editable only in Experiment Mode
             RateRow(
                 icon    = Icons.Rounded.Favorite,
                 label   = "Tỉ lệ thích",
-                value   = state.likeRate,
+                value   = if (state.isExperimentUnlocked) state.likeRate else LockedDefaults.LIKE_RATE,
                 color   = Pink,
             )
             Spacer(Modifier.height(6.dp))
-            CfgSlider(
-                label    = "",
-                display  = "${(state.likeRate * 100).toInt()}%",
-                value    = state.likeRate,
-                range    = 0f..1f, steps = 99,
-                accent   = Pink,
-                onChanged = { onSet { copy(likeRate = it) } },
-            )
+            if (state.isExperimentUnlocked) {
+                CfgSlider(
+                    label    = "",
+                    display  = "${(state.likeRate * 100).toInt()}%",
+                    value    = state.likeRate,
+                    range    = 0f..1f, steps = 99,
+                    accent   = Pink,
+                    onChanged = { onSet { copy(likeRate = it) } },
+                )
+            } else {
+                LockedValueBadge(displayText = "🔒 Khoá ở 18%", accent = Pink)
+            }
 
             Spacer(Modifier.height(12.dp))
             ThinDivider()
             Spacer(Modifier.height(12.dp))
 
+            // Follow rate — locked at 0.2% by default, finer-precision slider when unlocked
             RateRow(
                 icon    = Icons.Rounded.PersonAdd,
                 label   = "Tỉ lệ theo dõi",
-                value   = state.followRate,
+                value   = if (state.isExperimentUnlocked) state.followRate else LockedDefaults.FOLLOW_RATE,
                 color   = Green,
             )
             Spacer(Modifier.height(6.dp))
-            CfgSlider(
-                label    = "",
-                display  = "${(state.followRate * 100).toInt()}%",
-                value    = state.followRate,
-                range    = 0f..1f, steps = 99,
-                accent   = Green,
-                onChanged = { onSet { copy(followRate = it) } },
+            if (state.isExperimentUnlocked) {
+                // v1.2.9: dùng range hẹp (0–5%) với step 0.1% — đủ độ chính xác để
+                // đạt chuẩn 0.2% mà slider 0–100% (step 1%) trước đây không làm được.
+                CfgSlider(
+                    label    = "",
+                    display  = "${"%.1f".format(state.followRate * 100)}%",
+                    value    = state.followRate,
+                    range    = 0f..0.05f, steps = 49,
+                    accent   = Green,
+                    onChanged = { onSet { copy(followRate = it) } },
+                )
+            } else {
+                LockedValueBadge(displayText = "🔒 Khoá ở 0.2%", accent = Green)
+            }
+        }
+
+        // ── v1.2.9: Comment ngẫu nhiên ────────────────────────────────────
+        SettingCard {
+            CardLabelWithNote("Comment ngẫu nhiên", Icons.Rounded.ChatBubbleOutline, Cyan,
+                note = "Tool sẽ để lại bình luận ngẫu nhiên trên video theo tỉ lệ đã đặt. " +
+                       "Mỗi lần chọn ngẫu nhiên 1 câu từ danh sách bên dưới — tránh dùng câu " +
+                       "giống hệt nhau liên tục vì đây là tín hiệu bot rõ nhất, dễ bị TikTok " +
+                       "flag \"spam behavior\" dẫn tới shadow-ban.\n\n" +
+                       "Tool tự động bỏ qua video Live/Quảng cáo và giới hạn số comment/giờ " +
+                       "để hành vi trông tự nhiên.")
+            Spacer(Modifier.height(10.dp))
+
+            RateRow(
+                icon  = Icons.Rounded.ChatBubbleOutline,
+                label = "Tỉ lệ comment",
+                value = if (state.isExperimentUnlocked) state.commentRate else LockedDefaults.COMMENT_RATE,
+                color = Cyan,
             )
+            Spacer(Modifier.height(6.dp))
+            if (state.isExperimentUnlocked) {
+                CfgSlider(
+                    label    = "",
+                    display  = "${(state.commentRate * 100).toInt()}%",
+                    value    = state.commentRate,
+                    range    = 0f..1f, steps = 99,
+                    accent   = Cyan,
+                    onChanged = { onSet { copy(commentRate = it) } },
+                )
+            } else {
+                LockedValueBadge(displayText = "🔒 Khoá ở 2%", accent = Cyan)
+            }
+
+            Spacer(Modifier.height(12.dp))
+            ThinDivider()
+            Spacer(Modifier.height(12.dp))
+
+            CfgMultilineTextField(
+                label     = "Danh sách comment (mỗi dòng 1 câu)",
+                value     = state.commentTexts.joinToString("\n"),
+                hint      = "hay quá 🔥\nvideo đỉnh thế\nxem hoài không chán\n👍👍👍",
+                onChanged = { raw ->
+                    onSet {
+                        copy(commentTexts = raw.split("\n").map { it.trim() }.filter { it.isNotEmpty() })
+                    }
+                },
+            )
+
+            Spacer(Modifier.height(12.dp))
+            CfgSlider(
+                label    = "Giới hạn comment / giờ",
+                display  = if (state.maxCommentsPerHour == 0) "Không giới hạn"
+                           else "${state.maxCommentsPerHour} lần",
+                value    = state.maxCommentsPerHour.toFloat(),
+                range    = 0f..60f, steps = 59,
+                accent   = Cyan,
+                onChanged = { onSet { copy(maxCommentsPerHour = it.toInt()) } },
+            )
+        }
+
+        // ── v1.2.9: Xem bình luận (thụ động — chỉ mở lên xem, không gõ gì) ──
+        SettingCard {
+            CardLabelWithNote("Xem bình luận", Icons.Rounded.Visibility, Cyan,
+                note = "Tool sẽ thỉnh thoảng mở phần bình luận của video lên XEM (không gõ hay " +
+                       "gửi gì cả), cuộn xuống xem vài bình luận rồi đóng lại — mô phỏng hành vi " +
+                       "tò mò tự nhiên của người dùng thật. Khác với \"Comment ngẫu nhiên\" ở trên " +
+                       "(tính năng đó GÕ và GỬI bình luận thật).")
+            Spacer(Modifier.height(10.dp))
+
+            RateRow(
+                icon  = Icons.Rounded.Visibility,
+                label = "Tỉ lệ xem bình luận",
+                value = if (state.isExperimentUnlocked) state.commentViewRate else LockedDefaults.COMMENT_VIEW_RATE,
+                color = Cyan,
+            )
+            Spacer(Modifier.height(6.dp))
+            if (state.isExperimentUnlocked) {
+                CfgSlider(
+                    label    = "",
+                    display  = "${(state.commentViewRate * 100).toInt()}%",
+                    value    = state.commentViewRate,
+                    range    = 0f..0.5f, steps = 49,
+                    accent   = Cyan,
+                    onChanged = { onSet { copy(commentViewRate = it) } },
+                )
+
+                Spacer(Modifier.height(10.dp))
+                ThinDivider()
+                Spacer(Modifier.height(10.dp))
+
+                RangeSliderPair(
+                    label    = "Số lần cuộn xem",
+                    minValue = state.commentViewScrollMin,
+                    maxValue = state.commentViewScrollMax,
+                    range    = 1..10,
+                    accent   = Cyan,
+                    summaryPrefix = "Mỗi lần xem: ",
+                    summarySuffix = " lần cuộn",
+                    onMinChanged = { onSet { copy(commentViewScrollMin = it) } },
+                    onMaxChanged = { onSet { copy(commentViewScrollMax = it) } },
+                )
+            } else {
+                LockedValueBadge(displayText = "🔒 Khoá ở 8%", accent = Cyan)
+            }
         }
 
         // Behavior card
         SettingCard {
-            CardLabel("Hành vi", Icons.Rounded.SmartToy, Purple)
+            CardLabelWithNote("Hành vi", Icons.Rounded.SmartToy, Purple,
+                note = "Bỏ qua Live/Quảng cáo được khoá BẬT mặc định (an toàn nhất). " +
+                       "Mở Experiment Mode nếu muốn tắt để tool dừng lại xem Live/Quảng cáo.")
             Spacer(Modifier.height(10.dp))
-            CfgSwitch(
-                label    = "Bỏ qua video trực tiếp",
-                subtitle = "Tự động vuốt qua khi gặp livestream",
-                value    = state.skipLive,
-                accent   = Purple,
-                onChanged = { onSet { copy(skipLive = it) } },
-            )
+            if (state.isExperimentUnlocked) {
+                CfgSwitch(
+                    label    = "Bỏ qua video trực tiếp",
+                    subtitle = "Tự động vuốt qua khi gặp livestream",
+                    value    = state.skipLive,
+                    accent   = Purple,
+                    onChanged = { onSet { copy(skipLive = it) } },
+                )
+            } else {
+                LockedValueBadge(displayText = "🔒 Bỏ qua Live: BẬT", accent = Purple)
+            }
             Spacer(Modifier.height(4.dp))
             ThinDivider()
             Spacer(Modifier.height(4.dp))
-            CfgSwitch(
-                label    = "Bỏ qua quảng cáo",
-                subtitle = "Tự động vuốt qua khi gặp quảng cáo TikTok",
-                value    = state.skipAds,
-                accent   = Amber,
-                onChanged = { onSet { copy(skipAds = it) } },
-            )
+            if (state.isExperimentUnlocked) {
+                CfgSwitch(
+                    label    = "Bỏ qua quảng cáo",
+                    subtitle = "Tự động vuốt qua khi gặp quảng cáo TikTok",
+                    value    = state.skipAds,
+                    accent   = Amber,
+                    onChanged = { onSet { copy(skipAds = it) } },
+                )
+            } else {
+                LockedValueBadge(displayText = "🔒 Bỏ qua Quảng cáo: BẬT", accent = Amber)
+            }
             Spacer(Modifier.height(4.dp))
             ThinDivider()
             Spacer(Modifier.height(4.dp))
@@ -717,7 +885,11 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
         // ── [v1.1.9+] Ghé qua tab khác ──────────────────────────────────
         Spacer(Modifier.height(16.dp))
         SettingCard {
-            CardLabel("Ghé qua tab khác", Icons.Rounded.Explore, Cyan)
+            CardLabelWithNote("Ghé qua tab khác", Icons.Rounded.Explore, Cyan,
+                note = "Đôi khi tool sẽ ghé sang các tab khác của TikTok (Discover, Following, ...) " +
+                       "trong một thời gian ngắn trước khi quay lại For You. " +
+                       "Giúp profile hoạt động trông tự nhiên và đa dạng hơn. " +
+                       "Tắt nếu muốn tool chỉ tập trung vào tab For You.")
             Spacer(Modifier.height(4.dp))
             Text(
                 text = "Thỉnh thoảng ghé Hộp thư / Cửa hàng sau khi xem video — tăng tính tự nhiên",
@@ -731,29 +903,33 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
             RateRow(
                 icon  = Icons.Rounded.Inbox,
                 label = "Tỉ lệ ghé Hộp thư",
-                value = state.inboxViewRate,
+                value = if (state.isExperimentUnlocked) state.inboxViewRate else LockedDefaults.INBOX_RATE,
                 color = Cyan,
             )
             Spacer(Modifier.height(6.dp))
-            CfgSlider(
-                label    = "",
-                display  = if (state.inboxViewRate <= 0f) "Tắt"
-                           else "${(state.inboxViewRate * 100).toInt()}%",
-                value    = state.inboxViewRate,
-                range    = 0f..0.5f, steps = 49,
-                accent   = Cyan,
-                onChanged = { onSet { copy(inboxViewRate = it) } },
-            )
-            Spacer(Modifier.height(4.dp))
-            CfgSlider(
-                label    = "Thời gian xem (giây)",
-                display  = "${state.inboxViewDurationSecs}s",
-                value    = state.inboxViewDurationSecs.toFloat(),
-                range    = 5f..60f, steps = 10,
-                accent   = Cyan,
-                enabled  = state.inboxViewRate > 0f,
-                onChanged = { onSet { copy(inboxViewDurationSecs = it.toInt()) } },
-            )
+            if (state.isExperimentUnlocked) {
+                CfgSlider(
+                    label    = "",
+                    display  = if (state.inboxViewRate <= 0f) "Tắt"
+                               else "${(state.inboxViewRate * 100).toInt()}%",
+                    value    = state.inboxViewRate,
+                    range    = 0f..0.5f, steps = 49,
+                    accent   = Cyan,
+                    onChanged = { onSet { copy(inboxViewRate = it) } },
+                )
+                Spacer(Modifier.height(4.dp))
+                CfgSlider(
+                    label    = "Thời gian xem (giây)",
+                    display  = "${state.inboxViewDurationSecs}s",
+                    value    = state.inboxViewDurationSecs.toFloat(),
+                    range    = 5f..60f, steps = 10,
+                    accent   = Cyan,
+                    enabled  = state.inboxViewRate > 0f,
+                    onChanged = { onSet { copy(inboxViewDurationSecs = it.toInt()) } },
+                )
+            } else {
+                LockedValueBadge(displayText = "🔒 Khoá ở 1%", accent = Cyan)
+            }
 
             Spacer(Modifier.height(10.dp))
             ThinDivider()
@@ -763,36 +939,43 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
             RateRow(
                 icon  = Icons.Rounded.ShoppingBag,
                 label = "Tỉ lệ ghé Cửa hàng",
-                value = state.shopViewRate,
+                value = if (state.isExperimentUnlocked) state.shopViewRate else LockedDefaults.SHOP_RATE,
                 color = Amber,
             )
             Spacer(Modifier.height(6.dp))
-            CfgSlider(
-                label    = "",
-                display  = if (state.shopViewRate <= 0f) "Tắt"
-                           else "${(state.shopViewRate * 100).toInt()}%",
-                value    = state.shopViewRate,
-                range    = 0f..0.5f, steps = 49,
-                accent   = Amber,
-                onChanged = { onSet { copy(shopViewRate = it) } },
-            )
-            Spacer(Modifier.height(4.dp))
-            CfgSlider(
-                label    = "Số lần cuộn Cửa hàng",
-                display  = "${state.shopScrollCount} lần",
-                value    = state.shopScrollCount.toFloat(),
-                range    = 1f..10f, steps = 8,
-                accent   = Amber,
-                enabled  = state.shopViewRate > 0f,
-                onChanged = { onSet { copy(shopScrollCount = it.toInt()) } },
-            )
+            if (state.isExperimentUnlocked) {
+                CfgSlider(
+                    label    = "",
+                    display  = if (state.shopViewRate <= 0f) "Tắt"
+                               else "${(state.shopViewRate * 100).toInt()}%",
+                    value    = state.shopViewRate,
+                    range    = 0f..0.5f, steps = 49,
+                    accent   = Amber,
+                    onChanged = { onSet { copy(shopViewRate = it) } },
+                )
+                Spacer(Modifier.height(4.dp))
+                CfgSlider(
+                    label    = "Số lần cuộn Cửa hàng",
+                    display  = "${state.shopScrollCount} lần",
+                    value    = state.shopScrollCount.toFloat(),
+                    range    = 1f..10f, steps = 8,
+                    accent   = Amber,
+                    enabled  = state.shopViewRate > 0f,
+                    onChanged = { onSet { copy(shopScrollCount = it.toInt()) } },
+                )
+            } else {
+                LockedValueBadge(displayText = "🔒 Khoá ở 2%", accent = Amber)
+            }
         }
 
 
         // ── [v1.2.0] Tim video theo nội dung ─────────────────────────────────
         Spacer(Modifier.height(16.dp))
         SettingCard {
-            CardLabel("Tim theo nội dung", Icons.Rounded.Favorite, Pink)
+            CardLabelWithNote("Tim theo nội dung", Icons.Rounded.Favorite, Pink,
+                note = "Khi bật, tool chỉ tim video nếu nội dung phù hợp với danh sách từ khoá bạn thiết lập. " +
+                       "Ví dụ: chỉ tim video về 'ẩm thực', 'du lịch'. " +
+                       "Khi tắt, tool tim ngẫu nhiên theo tỉ lệ đã cài ở mục Tỉ lệ tương tác.")
             Spacer(Modifier.height(4.dp))
             Text(
                 text = "Like video khớp từ khoá caption hoặc hashtag — bỏ qua likeRate cho video khớp",
@@ -842,7 +1025,11 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
         // ── [v1.2.0] Tìm kiếm theo từ khoá ──────────────────────────────────
         Spacer(Modifier.height(16.dp))
         SettingCard {
-            CardLabel("Tìm kiếm từ khoá", Icons.Rounded.Search, Purple)
+            CardLabelWithNote("Tìm kiếm từ khoá", Icons.Rounded.Search, Purple,
+                note = "Danh sách từ khoá tool sẽ dùng để ghé qua tab Tìm kiếm và lướt kết quả. " +
+                       "Mỗi từ khoá trên một dòng. " +
+                       "Tool sẽ chọn ngẫu nhiên một từ khoá, tìm kiếm và lướt kết quả trong thời gian ngắn " +
+                       "trước khi quay về For You. Để trống nếu không muốn dùng tính năng này.")
             Spacer(Modifier.height(4.dp))
             Text(
                 text = "Định kỳ tìm kiếm từ khoá, xem vài video rồi về feed — tăng tính tự nhiên",
@@ -852,48 +1039,52 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
             )
             Spacer(Modifier.height(10.dp))
 
-            CfgSwitch(
-                label    = "Bật tìm kiếm",
-                subtitle = "Thỉnh thoảng tự động tìm kiếm theo từ khoá",
-                value    = state.searchEnabled,
-                accent   = Purple,
-                onChanged = { onSet { copy(searchEnabled = it) } },
-            )
-            Spacer(Modifier.height(6.dp))
-            CfgTextField(
-                label     = "Từ khoá tìm kiếm (cách nhau bằng dấu phẩy)",
-                value     = state.searchKeywords,
-                hint      = "dance, cooking, travel, funny...",
-                onChanged = { onSet { copy(searchKeywords = it) } },
-            )
-            Spacer(Modifier.height(4.dp))
-            CfgSlider(
-                label    = "Số video xem mỗi phiên search",
-                display  = "${state.searchVideosPerSession} video",
-                value    = state.searchVideosPerSession.toFloat(),
-                range    = 1f..10f, steps = 8,
-                accent   = Purple,
-                enabled  = state.searchEnabled,
-                onChanged = { onSet { copy(searchVideosPerSession = it.toInt()) } },
-            )
-            Spacer(Modifier.height(4.dp))
-            RateRow(
-                icon  = Icons.Rounded.Search,
-                label = "Tỉ lệ tìm kiếm",
-                value = state.searchRate,
-                color = Purple,
-            )
-            Spacer(Modifier.height(6.dp))
-            CfgSlider(
-                label    = "",
-                display  = if (state.searchRate <= 0f) "Tắt"
-                           else "${(state.searchRate * 100).toInt()}%",
-                value    = state.searchRate,
-                range    = 0f..0.3f, steps = 29,
-                accent   = Purple,
-                enabled  = state.searchEnabled,
-                onChanged = { onSet { copy(searchRate = it) } },
-            )
+            if (state.isExperimentUnlocked) {
+                CfgSwitch(
+                    label    = "Bật tìm kiếm",
+                    subtitle = "Thỉnh thoảng tự động tìm kiếm theo từ khoá",
+                    value    = state.searchEnabled,
+                    accent   = Purple,
+                    onChanged = { onSet { copy(searchEnabled = it) } },
+                )
+                Spacer(Modifier.height(6.dp))
+                CfgTextField(
+                    label     = "Từ khoá tìm kiếm (cách nhau bằng dấu phẩy)",
+                    value     = state.searchKeywords,
+                    hint      = "dance, cooking, travel, funny...",
+                    onChanged = { onSet { copy(searchKeywords = it) } },
+                )
+                Spacer(Modifier.height(4.dp))
+                CfgSlider(
+                    label    = "Số video xem mỗi phiên search",
+                    display  = "${state.searchVideosPerSession} video",
+                    value    = state.searchVideosPerSession.toFloat(),
+                    range    = 1f..10f, steps = 8,
+                    accent   = Purple,
+                    enabled  = state.searchEnabled,
+                    onChanged = { onSet { copy(searchVideosPerSession = it.toInt()) } },
+                )
+                Spacer(Modifier.height(4.dp))
+                RateRow(
+                    icon  = Icons.Rounded.Search,
+                    label = "Tỉ lệ tìm kiếm",
+                    value = state.searchRate,
+                    color = Purple,
+                )
+                Spacer(Modifier.height(6.dp))
+                CfgSlider(
+                    label    = "",
+                    display  = if (state.searchRate <= 0f) "Tắt"
+                               else "${(state.searchRate * 100).toInt()}%",
+                    value    = state.searchRate,
+                    range    = 0f..0.3f, steps = 29,
+                    accent   = Purple,
+                    enabled  = state.searchEnabled,
+                    onChanged = { onSet { copy(searchRate = it) } },
+                )
+            } else {
+                LockedValueBadge(displayText = "🔒 Tìm kiếm: TẮT", accent = Purple)
+            }
         }
 
         Spacer(Modifier.height(24.dp))
@@ -1152,12 +1343,19 @@ private fun PermissionCard(
                 OutlinedButton(
                     onClick  = onAction,
                     shape    = RoundedCornerShape(9.dp),
-                    modifier = Modifier.height(34.dp),
+                    // v1.2.9: widthIn phòng tràn màn hình nhỏ
+                    modifier = Modifier.height(34.dp).widthIn(min = 76.dp, max = 100.dp),
                     colors   = ButtonDefaults.outlinedButtonColors(contentColor = iconColor),
                     border   = BorderStroke(1.dp, SolidColor(iconColor.copy(alpha = 0.45f))),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                 ) {
-                    Text("Cấp quyền", fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                    Text(
+                        "Cấp quyền",
+                        fontSize  = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines  = 1,
+                        softWrap  = false,
+                    )
                 }
             }
         }
@@ -1244,6 +1442,51 @@ private fun CardLabel(text: String, icon: ImageVector, accent: Color) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Icon(icon, null, tint = accent.copy(alpha = 0.75f), modifier = Modifier.size(13.dp))
         Text(text, color = accent.copy(alpha = 0.85f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/** v1.2.9: CardLabel có biểu tượng ghi chú — bấm để xem giải thích chi tiết. */
+@Composable
+private fun CardLabelWithNote(text: String, icon: ImageVector, accent: Color, note: String) {
+    var showNote by remember { mutableStateOf(false) }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(icon, null, tint = accent.copy(alpha = 0.75f), modifier = Modifier.size(13.dp))
+        Text(text, color = accent.copy(alpha = 0.85f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f, fill = false))
+        IconButton(
+            onClick  = { showNote = true },
+            modifier = Modifier.size(22.dp),
+        ) {
+            Icon(
+                Icons.Rounded.Notes,
+                contentDescription = "Ghi chú",
+                tint     = accent.copy(alpha = 0.50f),
+                modifier = Modifier.size(14.dp),
+            )
+        }
+    }
+    if (showNote) {
+        AlertDialog(
+            onDismissRequest = { showNote = false },
+            containerColor   = Color(0xFF1E1E30),
+            icon = {
+                Icon(Icons.Rounded.Notes, null, tint = accent, modifier = Modifier.size(22.dp))
+            },
+            title = {
+                Text(text, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text(note, color = Color(0xFFB0B0C8), fontSize = 13.sp, lineHeight = 20.sp)
+            },
+            confirmButton = {
+                TextButton(onClick = { showNote = false }) {
+                    Text("Đã hiểu", color = accent, fontWeight = FontWeight.Medium)
+                }
+            },
+        )
     }
 }
 
@@ -1528,15 +1771,55 @@ private fun CfgTextField(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Section: Cài đặt nhiệm vụ Golike (v1.2.1)
+
+/**
+ * v1.2.9: TextField nhiều dòng — dùng cho danh sách comment ngẫu nhiên.
+ * Mỗi dòng = 1 câu comment riêng (không split theo dấu phẩy như CfgTextField,
+ * vì câu comment có thể chứa dấu phẩy tự nhiên).
+ */
+@Composable
+private fun CfgMultilineTextField(
+    label:     String,
+    value:     String,
+    hint:      String = "",
+    minLines:  Int    = 3,
+    maxLines:  Int    = 6,
+    onChanged: (String) -> Unit,
+) {
+    Column(Modifier.padding(bottom = 0.dp)) {
+        Text(label, color = TextMuted, fontSize = 11.sp, modifier = Modifier.padding(bottom = 5.dp))
+        OutlinedTextField(
+            value         = value,
+            onValueChange = onChanged,
+            modifier      = Modifier.fillMaxWidth(),
+            placeholder   = { Text(hint, color = Color(0xFF3A3A52), fontSize = 12.sp) },
+            singleLine    = false,
+            minLines      = minLines,
+            maxLines      = maxLines,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+            shape  = RoundedCornerShape(10.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor   = BgDeeper,
+                unfocusedContainerColor = BgDeeper,
+                focusedBorderColor      = Purple,
+                unfocusedBorderColor    = BorderDark,
+                focusedTextColor        = Color.White,
+                unfocusedTextColor      = Color.White,
+            ),
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Cài đặt nhiệm vụ Golike TikTok  [v1.2.9]
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun TaskSettingsSection(
+private fun TaskGolikeSection(
     state: ConfigUiState,
     onSet: (ConfigUiState.() -> ConfigUiState) -> Unit,
 ) {
-    val AccentTask = Color(0xFF7C3AED)
+    val AccentTask = Color(0xFF6C63FF)
 
     Column(
         Modifier
@@ -1546,65 +1829,88 @@ private fun TaskSettingsSection(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
 
+    InfoBanner(
+        "Cấu hình cách tool thực hiện nhiệm vụ TikTok trên Golike. " +
+        "Cần đăng nhập Golike (nhập token ở tab Dịch vụ) và thiết lập Quyền trợ năng trước.",
+        AccentTask,
+    )
+
     SectionTitle("Loại nhiệm vụ", Icons.Rounded.AssignmentTurnedIn, AccentTask)
 
-    // Job type selector
-    val jobTypes = listOf("LIKE" to "Tim video ❤️", "FOLLOW" to "Follow 👤", "BOTH" to "Cả hai")
-    Row(
-        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        jobTypes.forEach { (value, label) ->
-            val selected = state.taskJobType == value
-            Surface(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable { onSet { copy(taskJobType = value) } },
-                shape  = RoundedCornerShape(10.dp),
-                color  = if (selected) AccentTask.copy(alpha = 0.2f) else BgDeeper,
-                border = BorderStroke(
-                    1.dp,
-                    if (selected) AccentTask.copy(alpha = 0.7f) else BorderDark,
-                ),
-            ) {
-                Text(
-                    text       = label,
-                    color      = if (selected) AccentTask else TextSec,
-                    fontSize   = 11.sp,
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                    textAlign  = androidx.compose.ui.text.style.TextAlign.Center,
-                    modifier   = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
-                )
+    SettingCard {
+        CardLabelWithNote("Loại job sẽ làm", Icons.Rounded.WorkOutline, AccentTask,
+            note = "Chọn loại nhiệm vụ tool sẽ thực hiện:\n\n" +
+                   "• Tim video ❤️: tool mở link TikTok và nhấn tim.\n" +
+                   "• Follow 👤: tool mở trang profile và nhấn theo dõi.\n" +
+                   "• Cả hai: tool làm cả tim lẫn follow tuỳ job Golike giao.")
+        Spacer(Modifier.height(10.dp))
+        val jobTypes = listOf("LIKE" to "Tim video ❤️", "FOLLOW" to "Follow 👤", "BOTH" to "Cả hai")
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            jobTypes.forEach { (value, label) ->
+                val selected = state.taskJobType == value
+                Surface(
+                    modifier = Modifier.weight(1f).clickable { onSet { copy(taskJobType = value) } },
+                    shape  = RoundedCornerShape(10.dp),
+                    color  = if (selected) AccentTask.copy(alpha = 0.2f) else BgDeeper,
+                    border = BorderStroke(1.dp, if (selected) AccentTask.copy(alpha = 0.7f) else BorderDark),
+                ) {
+                    Text(label,
+                        color = if (selected) AccentTask else TextSec,
+                        fontSize = 11.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
+                    )
+                }
             }
         }
     }
 
+    ThinDivider()
     SectionTitle("Thời gian & Giới hạn", Icons.Rounded.Timer, AccentTask)
 
-    SettingSliderInt(
-        label    = "Nuôi acc trước mỗi job (giây)",
-        value    = state.taskFarmBeforeJobSecs,
-        min      = 20, max = 300, step = 10,
-        onChange = { onSet { copy(taskFarmBeforeJobSecs = it) } },
-    )
-    SettingSliderInt(
-        label    = "Delay sau khi mở link job (giây)",
-        value    = state.taskJobDelaySecs,
-        min      = 2, max = 15, step = 1,
-        onChange = { onSet { copy(taskJobDelaySecs = it) } },
-    )
-    SettingSliderInt(
-        label    = "Số job mỗi acc trước khi chuyển",
-        value    = state.taskJobsPerAccount,
-        min      = 1, max = 20, step = 1,
-        onChange = { onSet { copy(taskJobsPerAccount = it) } },
-    )
-    SettingSliderInt(
-        label    = "Số lần thất bại liên tiếp tối đa",
-        value    = state.taskMaxConsecFailures,
-        min      = 1, max = 10, step = 1,
-        onChange = { onSet { copy(taskMaxConsecFailures = it) } },
-    )
+    SettingCard {
+        CardLabelWithNote("Nuôi TikTok trước mỗi job", Icons.Rounded.Videocam, AccentTask,
+            note = "Thời gian (giây) tool lướt TikTok bình thường TRƯỚC khi mở link job. " +
+                   "Giúp hành vi tự nhiên hơn. Khuyến nghị: 30–90 giây.")
+        Spacer(Modifier.height(8.dp))
+        SettingSliderInt("Thời gian nuôi trước job (giây)", state.taskFarmBeforeJobSecs, 20, 300, 10) {
+            onSet { copy(taskFarmBeforeJobSecs = it) }
+        }
+    }
+
+    SettingCard {
+        CardLabelWithNote("Delay sau khi mở link job", Icons.Rounded.HourglassTop, AccentTask,
+            note = "Giây tool chờ sau khi mở link TikTok trước khi tim/follow. " +
+                   "Cho video tải xong và tránh bị mark là bot. Khuyến nghị: 4–8 giây.")
+        Spacer(Modifier.height(8.dp))
+        SettingSliderInt("Delay mở link (giây)", state.taskJobDelaySecs, 2, 15, 1) {
+            onSet { copy(taskJobDelaySecs = it) }
+        }
+    }
+
+    SettingCard {
+        CardLabelWithNote("Số job mỗi tài khoản", Icons.Rounded.ListAlt, AccentTask,
+            note = "Số nhiệm vụ tối đa mỗi tài khoản TikTok trong một lượt chạy. " +
+                   "Sau đó tool chuyển sang tài khoản tiếp theo. Khuyến nghị: 3–10.")
+        Spacer(Modifier.height(8.dp))
+        SettingSliderInt("Job mỗi tài khoản", state.taskJobsPerAccount, 1, 20, 1) {
+            onSet { copy(taskJobsPerAccount = it) }
+        }
+    }
+
+    SettingCard {
+        CardLabelWithNote("Lỗi liên tiếp tối đa", Icons.Rounded.ErrorOutline, AccentTask,
+            note = "Số lần thất bại liên tiếp trước khi bỏ qua tài khoản hiện tại. " +
+                   "Bao gồm: không có job, job bị lock, không thực hiện được. Khuyến nghị: 3–5.")
+        Spacer(Modifier.height(8.dp))
+        SettingSliderInt("Lỗi liên tiếp tối đa", state.taskMaxConsecFailures, 1, 10, 1) {
+            onSet { copy(taskMaxConsecFailures = it) }
+        }
+    }
 
     } // end Column
 }
@@ -1636,27 +1942,86 @@ private fun DemoNoticeBanner() {
 }
 
 @Composable
-private fun FacebookDemoSection(state: ConfigUiState, onSet: (ConfigUiState.() -> ConfigUiState) -> Unit) {
+private fun FacebookTimingSection(state: ConfigUiState, onSet: (ConfigUiState.() -> ConfigUiState) -> Unit) {
+    val FbBlue = Color(0xFF1877F2)
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        DemoNoticeBanner()
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PlatformBadge(Section.DEMO_FACEBOOK, size = 22.dp)
-            Text("Facebook", color = Color(0xFF1877F2), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            PlatformBadge(Section.FACEBOOK_TIMING, size = 22.dp)
+            Text("Nuôi Facebook", color = FbBlue, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         }
-        SettingSliderInt("Thời gian nuôi (giây)", state.facebookNurtureDurationSecs, 60, 3600, 60) {
-            onSet { copy(facebookNurtureDurationSecs = it) }
+
+        SectionTitle("Thời gian phiên", Icons.Rounded.Timer, FbBlue)
+        SettingCard {
+            CardLabelWithNote("Thời lượng nuôi mỗi phiên", Icons.Rounded.Schedule, FbBlue,
+                note = "Tổng thời gian (giây) tool sẽ lướt feed Facebook trong một phiên chạy. " +
+                       "Sau khi hết thời gian, tool tự động đóng Facebook và kết thúc.")
+            Spacer(Modifier.height(8.dp))
+            SettingSliderInt("Thời gian nuôi (giây)", state.facebookNurtureDurationSecs, 60, 3600, 60) {
+                onSet { copy(facebookNurtureDurationSecs = it) }
+            }
         }
-        CfgSlider(
-            label     = "Xác suất like bài đăng",
-            display   = "${(state.facebookLikeRate * 100).toInt()}%",
-            value     = state.facebookLikeRate,
-            range     = 0f..0.8f,
-            steps     = 79,
-            onChanged = { v -> onSet { copy(facebookLikeRate = v) } },
-        )
+
+        ThinDivider()
+        SectionTitle("Tốc độ đọc bài", Icons.Rounded.MenuBook, FbBlue)
+        SettingCard {
+            CardLabelWithNote("Thời gian đọc mỗi bài", Icons.Rounded.MenuBook, FbBlue,
+                note = "Khoảng thời gian (giây) tool dừng lại \"đọc\" mỗi bài đăng trước khi " +
+                       "quyết định thích hay lướt tiếp — mô phỏng hành vi đọc tự nhiên thay vì " +
+                       "lướt liên tục. Khuyến nghị: 8–25 giây.")
+            Spacer(Modifier.height(10.dp))
+            RangeSliderPair(
+                label    = "Khoảng đọc bài (giây)",
+                minValue = state.facebookReadTimeMinSecs,
+                maxValue = state.facebookReadTimeMaxSecs,
+                range    = 3..60,
+                accent   = FbBlue,
+                onMinChanged = { onSet { copy(facebookReadTimeMinSecs = it) } },
+                onMaxChanged = { onSet { copy(facebookReadTimeMaxSecs = it) } },
+            )
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun FacebookActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> ConfigUiState) -> Unit) {
+    val FbBlue = Color(0xFF1877F2)
+    val unlocked = state.isExperimentUnlocked
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PlatformBadge(Section.FACEBOOK_ACTIONS, size = 22.dp)
+            Text("Hành động Facebook", color = FbBlue, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        }
+
+        SectionTitle("Tương tác", Icons.Rounded.Favorite, FbBlue)
+        SettingCard {
+            CardLabelWithNote("Tỉ lệ thích bài đăng", Icons.Rounded.ThumbUp, FbBlue,
+                note = "Xác suất tool sẽ bấm Thích (Like) sau khi đọc xong mỗi bài đăng. " +
+                       "Setting này dùng chung cơ chế khoá với các setting nhạy cảm của TikTok " +
+                       "— mặc định khoá ở mức an toàn 10%, chỉ hiện slider chỉnh tay khi đã " +
+                       "mở Experiment Mode (xem ghi chú trong phần Comment ngẫu nhiên TikTok).")
+            Spacer(Modifier.height(10.dp))
+            if (unlocked) {
+                CfgSlider(
+                    label     = "",
+                    display   = "${(state.facebookLikeRate * 100).toInt()}%",
+                    value     = state.facebookLikeRate,
+                    range     = 0f..0.8f,
+                    steps     = 79,
+                    accent    = FbBlue,
+                    onChanged = { v -> onSet { copy(facebookLikeRate = v) } },
+                )
+            } else {
+                LockedValueBadge(displayText = "🔒 Khoá ở 10%", accent = FbBlue)
+            }
+        }
         Spacer(Modifier.height(24.dp))
     }
 }
@@ -1773,6 +2138,107 @@ private fun SnapchatDemoSection(state: ConfigUiState, onSet: (ConfigUiState.() -
             onSet { copy(snapchatStoryViewSecs = it) }
         }
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+/**
+ * v1.2.9: Cặp slider min/max dùng chung 1 label — ví dụ khoảng thời gian đọc bài Facebook.
+ * Tự động đảm bảo min ≤ max (kẹp giá trị nếu người dùng kéo chéo).
+ */
+@Composable
+private fun RangeSliderPair(
+    label:          String,
+    minValue:       Int,
+    maxValue:       Int,
+    range:          IntRange,
+    accent:         Color  = Purple,
+    summaryPrefix:  String = "Mỗi bài: ",
+    summarySuffix:  String = "s",
+    onMinChanged:   (Int) -> Unit,
+    onMaxChanged:   (Int) -> Unit,
+) {
+    Column {
+        Text(label, color = TextSec, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.weight(1f)) {
+                Text("Tối thiểu", color = TextMuted, fontSize = 10.sp)
+                SettingSliderInt("", minValue, range.first, maxValue, 1) { v ->
+                    onMinChanged(minOf(v, maxValue))
+                }
+            }
+            Column(Modifier.weight(1f)) {
+                Text("Tối đa", color = TextMuted, fontSize = 10.sp)
+                SettingSliderInt("", maxValue, minValue, range.last, 1) { v ->
+                    onMaxChanged(maxOf(v, minValue))
+                }
+            }
+        }
+        Text(
+            "$summaryPrefix${minValue}–${maxValue}$summarySuffix",
+            color = accent, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+    }
+}
+
+/**
+ * v1.2.9: Badge hiển thị giá trị ĐÃ KHOÁ (Experiment Mode tắt) — thay cho slider
+ * tương tác. Có icon ổ khoá + gợi ý cách mở khoá.
+ */
+@Composable
+private fun LockedValueBadge(displayText: String, accent: Color) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(accent.copy(alpha = 0.08f))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment     = Alignment.CenterVertically,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(Icons.Rounded.Lock, null, tint = accent.copy(alpha = 0.7f), modifier = Modifier.size(14.dp))
+            Text(displayText, color = accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
+        Text("Khoá an toàn", color = TextMuted, fontSize = 10.sp)
+    }
+}
+
+/**
+ * v1.2.9: Banner giải thích cơ chế Experiment Mode — đặt ở đầu phần Hành động TikTok.
+ */
+@Composable
+private fun ExperimentModeBanner(unlocked: Boolean) {
+    val accent = if (unlocked) Color(0xFF10B981) else Amber
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(accent.copy(alpha = 0.08f))
+            .border(1.dp, accent.copy(alpha = 0.22f), RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            if (unlocked) Icons.Rounded.LockOpen else Icons.Rounded.Lock,
+            null, tint = accent, modifier = Modifier.size(16.dp).padding(top = 1.dp),
+        )
+        Column {
+            Text(
+                if (unlocked) "Experiment Mode: ĐANG MỞ" else "Một số setting đang bị khoá an toàn",
+                color = accent, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+            )
+            Text(
+                if (unlocked)
+                    "Bạn có thể chỉnh tay các setting nhạy cảm bên dưới. Để khoá lại, xoá dòng " +
+                    "\"Experiment\" khỏi ô nhập comment."
+                else
+                    "Để mở khoá chỉnh tay tỉ lệ tim/follow/comment, bỏ qua quảng cáo & live, hộp thư, " +
+                    "shop, tìm kiếm — gõ một dòng \"Experiment\" vào ô nhập comment ngẫu nhiên bên dưới.",
+                color = TextSec, fontSize = 11.sp, lineHeight = 16.sp,
+            )
+        }
     }
 }
 

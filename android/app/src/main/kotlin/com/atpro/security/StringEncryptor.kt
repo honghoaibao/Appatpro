@@ -37,6 +37,9 @@ object AppConstants {
     )
 
     /** v1.2.3 — Package Facebook chính thức (Facebook app). Dùng cho demo nuôi acc Facebook. */
+    /** v1.2.9: Tạm ẩn toàn bộ giao diện Golike — đặt true để bật lại. */
+    const val GOLIKE_ENABLED = false
+
     const val FACEBOOK_PKG = "com.facebook.katana"   // Facebook chính
     // v1.2.7: Danh sách gói Facebook theo thứ tự ưu tiên (không gồm Lite)
     val FACEBOOK_PACKAGES = listOf(

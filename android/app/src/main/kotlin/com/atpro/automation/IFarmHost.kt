@@ -47,8 +47,9 @@ interface IFarmHost {
      * KILL_BACKGROUND_PROCESSES chỉ hoạt động với background process — HOME trước.
      */
     suspend fun killTikTok()
-    /** Hiện floating overlay. OverlayFarmMonitor tự xử lý thread. */
-    fun showFarmOverlay()
+    /** Hiện floating overlay. OverlayFarmMonitor tự xử lý thread.
+     *  [serviceLabel] hiển thị đối diện với "AT PRO" trên header popup, vd "NUÔI TKT", "NV TIKTOK". */
+    fun showFarmOverlay(serviceLabel: String = "")
     /** Ẩn floating overlay. */
     fun hideFarmOverlay()
 
