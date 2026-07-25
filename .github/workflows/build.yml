@@ -9,13 +9,13 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version (vd: 1.0.7)'
+        description: 'Version (vd: 1.3.0)'
         required: true
-        default:  '1.2.9'
+        default:  '1.3.0'
       build:
         description: 'Build number'
         required: true
-        default:  '31'
+        default:  '32'
 
 permissions:
   contents: write
@@ -101,7 +101,16 @@ jobs:
           VER="${{ github.ref_name }}"; VER="${VER#v}"
           BLD="${{ github.run_number }}"
         else
-          VER="1.2.9"
+          # v1.3.0 FIX: trước đây hardcode VER="1.2.9" ở đây — mỗi lần bump version
+          # trong build.gradle mà quên sửa dòng này thì build thường (push không
+          # kèm tag/không phải workflow_dispatch) vẫn ra APK với version CŨ dù
+          # build.gradle đã đúng. Giờ đọc thẳng versionName từ build.gradle để
+          # tự động khớp, không cần sửa 2 chỗ mỗi lần release.
+          VER=$(grep -oP 'versionName\s+"v\K[^"]+' android/app/build.gradle)
+          if [ -z "$VER" ]; then
+            echo "WARN: Không đọc được versionName từ build.gradle — fallback 0.0.0"
+            VER="0.0.0"
+          fi
           BLD="${{ github.run_number }}"
         fi
         echo "version=$VER"  >> $GITHUB_OUTPUT

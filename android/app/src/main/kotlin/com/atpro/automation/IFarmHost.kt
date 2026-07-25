@@ -27,6 +27,13 @@ interface IFarmHost {
     suspend fun clickNode(node: AccessibilityNodeInfo): Boolean
     suspend fun clickSuspend(x: Int, y: Int): Boolean
     suspend fun swipeSuspend(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Long = 400): Boolean
+    /**
+     * v1.3.0 — Đúp (double-tap) vào toạ độ (x, y), dùng cho hành vi "thích" trên
+     * các màn hình dạng short-form video (Reels Facebook...) không có nút Like
+     * rõ ràng — app chỉ nhận diện 2 lần chạm liên tiếp trong khoảng thời gian ngắn.
+     * Trả false nếu 1 trong 2 lần chạm bị gesture reject (vd toạ độ âm).
+     */
+    suspend fun doubleTapSuspend(x: Int, y: Int): Boolean
     fun pressBack(): Boolean
     fun typeText(node: AccessibilityNodeInfo, text: String): Boolean
 

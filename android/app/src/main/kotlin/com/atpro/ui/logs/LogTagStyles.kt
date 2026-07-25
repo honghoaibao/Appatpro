@@ -93,6 +93,14 @@ private val TAG_STYLES: Map<String, LogTagStyle> = mapOf(
 
     // Demo nuôi Facebook [v1.2.3]
     "FB"           to LogTagStyle(FacebookBlue, Icons.Rounded.ThumbUp,         LOG_LEVEL_INFO),
+    // v1.3.0 — Reels Facebook
+    "FB REELS"     to LogTagStyle(FacebookBlue, Icons.Rounded.SmartDisplay,    LOG_LEVEL_INFO),
+
+    // Demo nuôi X / Instagram / Threads / Snapchat [v1.2.4, tag riêng từ v1.3.0]
+    "X"            to LogTagStyle(Slate,        Icons.Rounded.Bolt,           LOG_LEVEL_INFO),
+    "IG"           to LogTagStyle(Pink,         Icons.Rounded.PhotoCamera,    LOG_LEVEL_INFO),
+    "THREADS"      to LogTagStyle(Slate,        Icons.Rounded.AlternateEmail, LOG_LEVEL_INFO),
+    "SNAPCHAT"     to LogTagStyle(Amber,        Icons.Rounded.Bolt,           LOG_LEVEL_INFO),
 )
 
 /** Kết quả parse 1 dòng log: tag (nếu có) + nội dung + style hiển thị. */

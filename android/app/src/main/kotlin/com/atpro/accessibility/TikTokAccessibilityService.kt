@@ -105,6 +105,24 @@ class TikTokAccessibilityService : AccessibilityService(), IFarmHost {
         }
     }
 
+    /**
+     * v1.3.0 — 2 lần chạm liên tiếp cùng toạ độ, cách nhau ~120ms (khoảng thời gian
+     * mà hầu hết app short-form video nhận diện là double-tap-to-like).
+     * Không dùng 2 lần gọi clickSuspend() riêng lẻ vì mỗi lần đó chờ callback
+     * hoàn tất (~50ms gesture + round-trip) → khoảng cách thực tế dễ vượt
+     * ngưỡng double-tap của app đích. Ở đây tự quản lý delay giữa 2 lần chạm.
+     */
+    override suspend fun doubleTapSuspend(x: Int, y: Int): Boolean {
+        if (x < 0 || y < 0) {
+            Log.w(TAG, "doubleTapSuspend($x, $y): negative coords — skipping gesture")
+            return false
+        }
+        val first = clickSuspend(x, y)
+        delay(120)
+        val second = clickSuspend(x, y)
+        return first && second
+    }
+
     override fun pressBack(): Boolean  = performGlobalAction(GLOBAL_ACTION_BACK)
     override fun typeText(node: AccessibilityNodeInfo, text: String): Boolean {
         val args = Bundle().apply {

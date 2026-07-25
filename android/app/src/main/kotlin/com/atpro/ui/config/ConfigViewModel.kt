@@ -86,16 +86,27 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
                 facebookLikeRate            = repo.getConfigDouble("fb_like_rate",              0.10).toFloat(),
                 facebookReadTimeMinSecs     = repo.getConfigInt   ("fb_read_time_min_secs",      8),
                 facebookReadTimeMaxSecs     = repo.getConfigInt   ("fb_read_time_max_secs",      25),
+                // v1.3.0: Xem bình luận + Reels Facebook
+                facebookCommentViewRate          = repo.getConfigDouble("fb_comment_view_rate",            0.05).toFloat(),
+                facebookReelsViewRate            = repo.getConfigDouble("fb_reels_view_rate",              0.05).toFloat(),
+                facebookReelsViewDurationMinSecs = repo.getConfigInt   ("fb_reels_view_duration_min_secs", 600),
+                facebookReelsViewDurationMaxSecs = repo.getConfigInt   ("fb_reels_view_duration_max_secs", 1200),
+                facebookReelsLikeRate            = repo.getConfigDouble("fb_reels_like_rate",              0.20).toFloat(),
                 xNurtureDurationSecs        = repo.getConfigInt   ("x_nurture_duration_secs",   480),
                 xLikeRate                   = repo.getConfigDouble("x_like_rate",               0.25).toFloat(),
                 xRetweetRate                = repo.getConfigDouble("x_retweet_rate",            0.05).toFloat(),
+                xReplyViewRate              = repo.getConfigDouble("x_reply_view_rate",         0.05).toFloat(),  // v1.3.0
                 instagramNurtureDurationSecs= repo.getConfigInt   ("ig_nurture_duration_secs",  600),
                 instagramLikeRate           = repo.getConfigDouble("ig_like_rate",              0.30).toFloat(),
                 instagramFollowRate         = repo.getConfigDouble("ig_follow_rate",            0.08).toFloat(),
+                instagramCommentViewRate    = repo.getConfigDouble("ig_comment_view_rate",      0.05).toFloat(), // v1.3.0
                 threadsNurtureDurationSecs  = repo.getConfigInt   ("threads_nurture_duration_secs", 480),
                 threadsLikeRate             = repo.getConfigDouble("threads_like_rate",         0.20).toFloat(),
+                threadsReplyViewRate        = repo.getConfigDouble("threads_reply_view_rate",   0.05).toFloat(), // v1.3.0
                 snapchatNurtureDurationSecs = repo.getConfigInt   ("snap_nurture_duration_secs", 360),
                 snapchatStoryViewSecs       = repo.getConfigInt   ("snap_story_view_secs",       8),
+                snapchatLikeRate            = repo.getConfigDouble("snap_like_rate",            0.20).toFloat(),  // v1.3.0
+                discordWebhookUrl           = repo.getConfig      ("discord_webhook_url",       ""),
             )
             // [v1.1.4.1 FIX] Dùng update thay vì assignment trực tiếp để giữ lại
             // trạng thái quyền đã được refreshPermissions() cập nhật. Nếu dùng
@@ -117,20 +128,9 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
 
     fun save() {
         val s = _state.value
-        // v1.2.9: Khi Experiment Mode TẮT, ép các setting nhạy cảm về giá trị khoá
-        // an toàn TRƯỚC khi ghi xuống DB — đảm bảo engine luôn chạy đúng giá trị
-        // khoá dù trước đó DB có giá trị cũ khác (vd: từng mở Experiment rồi tắt lại).
-        val unlocked = s.isExperimentUnlocked
-        val effLikeRate    = if (unlocked) s.likeRate    else LockedDefaults.LIKE_RATE
-        val effFollowRate  = if (unlocked) s.followRate  else LockedDefaults.FOLLOW_RATE
-        val effCommentRate = if (unlocked) s.commentRate else LockedDefaults.COMMENT_RATE
-        val effSkipAds     = if (unlocked) s.skipAds     else LockedDefaults.SKIP_ADS
-        val effSkipLive    = if (unlocked) s.skipLive    else LockedDefaults.SKIP_LIVE
-        val effInboxRate   = if (unlocked) s.inboxViewRate else LockedDefaults.INBOX_RATE
-        val effShopRate    = if (unlocked) s.shopViewRate  else LockedDefaults.SHOP_RATE
-        val effSearchOn    = if (unlocked) s.searchEnabled else LockedDefaults.SEARCH_ENABLED
-        val effFbLikeRate  = if (unlocked) s.facebookLikeRate else LockedDefaults.FB_LIKE_RATE
-        val effCommentViewRate = if (unlocked) s.commentViewRate else LockedDefaults.COMMENT_VIEW_RATE
+        // v1.3.0: Bỏ hẳn cơ chế khoá "Experiment Mode" — mọi setting nuôi acc
+        // (TikTok + Facebook + X/Instagram/Threads/Snapchat) giờ luôn ghi thẳng
+        // giá trị người dùng chỉnh tay xuống DB, không còn ép về LockedDefaults.
 
         viewModelScope.launch {
             _state.update { it.copy(isSaving = true) }
@@ -140,27 +140,27 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
             repo.setConfig("enable_rest",                  "${s.enableRest}")
             repo.setConfig("rest_minutes",                 "${s.restMinutes}")
             repo.setConfig("max_back_attempts",            "${s.maxBackAttempts}")
-            repo.setConfig("like_rate",                    "$effLikeRate")
-            repo.setConfig("follow_rate",                  "$effFollowRate")
+            repo.setConfig("like_rate",                    "${s.likeRate}")
+            repo.setConfig("follow_rate",                  "${s.followRate}")
             // v1.2.9: Comment ngẫu nhiên
-            repo.setConfig("comment_rate",             "$effCommentRate")
+            repo.setConfig("comment_rate",             "${s.commentRate}")
             repo.setConfig("comment_texts",            s.commentTexts.joinToString("||"))
             repo.setConfig("delay_after_comment",      "${s.delayAfterComment}")
             repo.setConfig("max_comments_per_hour",    "${s.maxCommentsPerHour}")
             // v1.2.9: Xem bình luận (thụ động)
-            repo.setConfig("comment_view_rate",        "$effCommentViewRate")
+            repo.setConfig("comment_view_rate",        "${s.commentViewRate}")
             repo.setConfig("comment_view_scroll_min",  "${s.commentViewScrollMin}")
             repo.setConfig("comment_view_scroll_max",  "${s.commentViewScrollMax}")
-            repo.setConfig("skip_live",                    "$effSkipLive")
-            repo.setConfig("skip_ads",                     "$effSkipAds")
+            repo.setConfig("skip_live",                    "${s.skipLive}")
+            repo.setConfig("skip_ads",                     "${s.skipAds}")
             repo.setConfig("normalize_enabled",            "${s.normalizeEnabled}") // v1.2.6
             repo.setConfig("like_ads",                     "${s.likeAds}")  // [v1.1.8]
             repo.setConfig("verify_account",               "${s.verifyAccount}")
             repo.setConfig("enable_system_notifications",  "${s.enableSystemNotifications}")
             // [v1.1.9+] Tab ghé thăm
-            repo.setConfig("inbox_view_rate",          "$effInboxRate")
+            repo.setConfig("inbox_view_rate",          "${s.inboxViewRate}")
             repo.setConfig("inbox_view_duration_secs", "${s.inboxViewDurationSecs}")
-            repo.setConfig("shop_view_rate",           "$effShopRate")
+            repo.setConfig("shop_view_rate",           "${s.shopViewRate}")
             repo.setConfig("shop_scroll_count",        "${s.shopScrollCount}")
             // [v1.2.0] Tim video theo nội dung
             repo.setConfig("like_by_caption",          "${s.likeByCaption}")
@@ -168,7 +168,7 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
             repo.setConfig("like_by_hashtag",          "${s.likeByHashtag}")
             repo.setConfig("hashtag_keywords",         s.hashtagKeywords)
             // [v1.2.0] Tìm kiếm theo từ khoá
-            repo.setConfig("search_enabled",           "$effSearchOn")
+            repo.setConfig("search_enabled",           "${s.searchEnabled}")
             repo.setConfig("search_keywords",          s.searchKeywords)
             repo.setConfig("search_videos_per_session","${s.searchVideosPerSession}")
             repo.setConfig("search_rate",              "${s.searchRate}")
@@ -180,19 +180,30 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
             repo.setConfig("task_max_consec_failures", "${s.taskMaxConsecFailures}")
             // [v1.2.4] Demo nuôi acc
             repo.setConfig("fb_nurture_duration_secs",       "${s.facebookNurtureDurationSecs}")
-            repo.setConfig("fb_like_rate",                   "$effFbLikeRate")
+            repo.setConfig("fb_like_rate",                   "${s.facebookLikeRate}")
             repo.setConfig("fb_read_time_min_secs",          "${s.facebookReadTimeMinSecs}")
             repo.setConfig("fb_read_time_max_secs",          "${s.facebookReadTimeMaxSecs}")
+            // v1.3.0: Xem bình luận Facebook + Reels
+            repo.setConfig("fb_comment_view_rate",           "${s.facebookCommentViewRate}")
+            repo.setConfig("fb_reels_view_rate",             "${s.facebookReelsViewRate}")
+            repo.setConfig("fb_reels_view_duration_min_secs","${s.facebookReelsViewDurationMinSecs}")
+            repo.setConfig("fb_reels_view_duration_max_secs","${s.facebookReelsViewDurationMaxSecs}")
+            repo.setConfig("fb_reels_like_rate",             "${s.facebookReelsLikeRate}")
             repo.setConfig("x_nurture_duration_secs",        "${s.xNurtureDurationSecs}")
             repo.setConfig("x_like_rate",                    "${s.xLikeRate}")
             repo.setConfig("x_retweet_rate",                 "${s.xRetweetRate}")
+            repo.setConfig("x_reply_view_rate",              "${s.xReplyViewRate}")           // v1.3.0
             repo.setConfig("ig_nurture_duration_secs",       "${s.instagramNurtureDurationSecs}")
             repo.setConfig("ig_like_rate",                   "${s.instagramLikeRate}")
             repo.setConfig("ig_follow_rate",                 "${s.instagramFollowRate}")
+            repo.setConfig("ig_comment_view_rate",           "${s.instagramCommentViewRate}")  // v1.3.0
             repo.setConfig("threads_nurture_duration_secs",  "${s.threadsNurtureDurationSecs}")
             repo.setConfig("threads_like_rate",              "${s.threadsLikeRate}")
+            repo.setConfig("threads_reply_view_rate",        "${s.threadsReplyViewRate}")      // v1.3.0
             repo.setConfig("snap_nurture_duration_secs",     "${s.snapchatNurtureDurationSecs}")
             repo.setConfig("snap_story_view_secs",           "${s.snapchatStoryViewSecs}")
+            repo.setConfig("snap_like_rate",                 "${s.snapchatLikeRate}")          // v1.3.0
+            repo.setConfig("discord_webhook_url",            s.discordWebhookUrl)
 
             // Áp dụng ngay vào runtime manager
             AtProNotificationManager.enableSystemNotifications = s.enableSystemNotifications
@@ -298,45 +309,37 @@ data class ConfigUiState(
     val facebookLikeRate:            Float = 0.10f,
     val facebookReadTimeMinSecs:     Int   = 8,
     val facebookReadTimeMaxSecs:     Int   = 25,
+    // v1.3.0: Xem bình luận + Reels Facebook
+    val facebookCommentViewRate:          Float = 0.05f,
+    val facebookReelsViewRate:            Float = 0.05f,
+    val facebookReelsViewDurationMinSecs: Int   = 600,
+    val facebookReelsViewDurationMaxSecs: Int   = 1200,
+    val facebookReelsLikeRate:            Float = 0.20f,
     val xNurtureDurationSecs:        Int   = 120,
     val xLikeRate:                   Float = 0.25f,
     val xRetweetRate:                Float = 0.05f,
+    val xReplyViewRate:              Float = 0.05f,   // v1.3.0
     val instagramNurtureDurationSecs:Int   = 180,
     val instagramLikeRate:           Float = 0.30f,
     val instagramFollowRate:         Float = 0.08f,
+    val instagramCommentViewRate:    Float = 0.05f,   // v1.3.0
     val threadsNurtureDurationSecs:  Int   = 120,
     val threadsLikeRate:             Float = 0.20f,
+    val threadsReplyViewRate:        Float = 0.05f,   // v1.3.0
     val snapchatNurtureDurationSecs: Int   = 90,
     val snapchatStoryViewSecs:       Int   = 8,
+    val snapchatLikeRate:            Float = 0.20f,   // v1.3.0
+
+    // v1.3.0: Thông báo Discord
+    val discordWebhookUrl: String = "",
     // ── Permission state (read-only, refreshed via refreshPermissions()) ──
     val accessibilityGranted:     Boolean = false,
     val overlayGranted:           Boolean = false,
     val notificationGranted:      Boolean = false,
 )
 
-/**
- * v1.2.9: "Experiment Mode" — mở khoá các setting nhạy cảm (tỉ lệ tim/follow/comment,
- * bỏ qua quảng cáo & live, tỉ lệ ghé hộp thư/shop, tìm kiếm video, tỉ lệ like Facebook)
- * khi người dùng gõ đúng từ "Experiment" (không phân biệt hoa thường) làm MỘT DÒNG
- * riêng trong ô nhập nội dung comment ngẫu nhiên.
- *
- * Dòng "Experiment" không bị xoá khỏi UI khi đang gõ (để còn thấy nó hoạt động),
- * nhưng được lọc ra trước khi đưa vào danh sách comment thật sự (xem
- * AutomationEngine.doComment()) — không bao giờ được dùng làm nội dung comment.
- */
-val ConfigUiState.isExperimentUnlocked: Boolean
-    get() = commentTexts.any { it.trim().equals("experiment", ignoreCase = true) }
-
-/** Các giá trị khoá mặc định khi Experiment Mode đang TẮT — đảm bảo an toàn cho người mới. */
-object LockedDefaults {
-    const val LIKE_RATE     = 0.18f
-    const val FOLLOW_RATE   = 0.002f   // 0.2%
-    const val COMMENT_RATE  = 0.02f
-    const val SKIP_ADS      = true
-    const val SKIP_LIVE     = true
-    const val INBOX_RATE    = 0.01f
-    const val SHOP_RATE     = 0.02f
-    const val SEARCH_ENABLED = false
-    const val FB_LIKE_RATE  = 0.10f
-    const val COMMENT_VIEW_RATE = 0.08f
-}
+// v1.3.0: Đã bỏ hẳn cơ chế khoá "Experiment Mode" (gõ "Experiment" để mở khoá) —
+// mọi setting nuôi acc (TikTok + Facebook + X/Instagram/Threads/Snapchat) giờ
+// luôn hiện slider chỉnh tay được, không còn trạng thái khoá/LockedDefaults nữa.
+// Dòng "experiment" trong danh sách comment (nếu người dùng từng gõ ở bản cũ)
+// vẫn được lọc ra khỏi comment thật sự — xem AutomationEngine.doComment().

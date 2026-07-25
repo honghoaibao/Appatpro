@@ -255,6 +255,25 @@ data class FarmConfig(
     val facebookReadTimeMinSecs: Int = 8,
     val facebookReadTimeMaxSecs: Int = 25,
 
+    /**
+     * v1.3.0: Xác suất xem bình luận (thụ động, không gõ) sau khi đọc xong 1 bài đăng.
+     * Cùng cơ chế với commentViewRate của TikTok nhưng riêng cho Facebook.
+     */
+    val facebookCommentViewRate: Float = 0.05f,
+
+    /**
+     * v1.3.0 — Tính năng xem Reels Facebook.
+     * Sau mỗi lần lướt feed, có [facebookReelsViewRate] xác suất tool sẽ ghé qua
+     * tab Reels, lướt trong khoảng [facebookReelsViewDurationMinSecs,
+     * facebookReelsViewDurationMaxSecs] giây, thỉnh thoảng thích video bằng cách
+     * đúp (double-tap) vào màn hình, rồi quay lại feed.
+     */
+    val facebookReelsViewRate: Float = 0.05f,
+    val facebookReelsViewDurationMinSecs: Int = 600,   // 10 phút
+    val facebookReelsViewDurationMaxSecs: Int = 1200,  // 20 phút
+    /** Xác suất đúp màn hình để thích mỗi Reel đang xem (0.0–1.0). */
+    val facebookReelsLikeRate: Float = 0.20f,
+
     // ── Demo nuôi X (Twitter) [v1.2.4] ──────────────────────────────────────
 
     /** `v1.2.4` Thời gian (giây) lướt timeline X trong mỗi phiên nuôi acc. */
@@ -265,6 +284,9 @@ data class FarmConfig(
 
     /** `v1.2.4` Xác suất repost tweet khi lướt timeline X (0.0–1.0). */
     val xRetweetRate: Float = 0.05f,
+
+    /** v1.3.0: Xác suất mở xem reply (thụ động) sau khi like/lướt qua 1 tweet. */
+    val xReplyViewRate: Float = 0.05f,
 
     // ── Demo nuôi Instagram [v1.2.4] ────────────────────────────────────────
 
@@ -277,6 +299,9 @@ data class FarmConfig(
     /** `v1.2.4` Xác suất follow tác giả reel trên Instagram (0.0–1.0). */
     val instagramFollowRate: Float = 0.08f,
 
+    /** v1.3.0: Xác suất xem bình luận (thụ động) sau khi like/lướt qua 1 bài/reel. */
+    val instagramCommentViewRate: Float = 0.05f,
+
     // ── Demo nuôi Threads [v1.2.4] ──────────────────────────────────────────
 
     /** `v1.2.4` Thời gian (giây) lướt feed Threads trong mỗi phiên nuôi acc. */
@@ -285,6 +310,9 @@ data class FarmConfig(
     /** `v1.2.4` Xác suất like bài trên Threads (0.0–1.0). */
     val threadsLikeRate: Float = 0.20f,
 
+    /** v1.3.0: Xác suất mở xem reply (thụ động) sau khi like/lướt qua 1 bài. */
+    val threadsReplyViewRate: Float = 0.05f,
+
     // ── Demo nuôi Snapchat [v1.2.4] ─────────────────────────────────────────
 
     /** `v1.2.4` Thời gian (giây) xem Spotlight / Stories trên Snapchat. */
@@ -292,4 +320,18 @@ data class FarmConfig(
 
     /** `v1.2.4` Số giây xem mỗi Story / Spotlight trước khi swipe tiếp. */
     val snapchatStoryViewSecs: Int = 8,
+
+    /**
+     * v1.3.0: Xác suất thích (nút Like) mỗi Story/Spotlight đang xem trên Snapchat.
+     * Snapchat trước đây chỉ xem (swipe qua), chưa có hành động thích.
+     */
+    val snapchatLikeRate: Float = 0.20f,
+
+    // ── Thông báo Discord [v1.3.0] ──────────────────────────────────────────
+
+    /**
+     * v1.3.0: Discord Webhook URL — nếu để trống, không gửi thông báo gì.
+     * Gửi khi: bắt đầu nuôi, hoàn thành/dừng phiên nuôi, lỗi nghiêm trọng.
+     */
+    val discordWebhookUrl: String = "",
 )

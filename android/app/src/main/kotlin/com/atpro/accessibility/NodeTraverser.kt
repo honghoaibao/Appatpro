@@ -22,6 +22,11 @@ object NodeTraverser {
         val className: String?,
         val isClickable: Boolean,
         val isEnabled: Boolean,
+        // v1.3.0 — Facebook/X/Instagram/Threads/Snapchat báo trạng thái "đã thích"
+        // qua isChecked (toggle button) hoặc isSelected, không chỉ qua text/content-desc.
+        // Dùng để tránh bấm trúng nút Unlike (bỏ thích) khi bài đã được thích từ trước.
+        val isChecked: Boolean = false,
+        val isSelected: Boolean = false,
     ) {
         val centerX: Int get() = (bounds.left + bounds.right) / 2
         val centerY: Int get() = (bounds.top + bounds.bottom) / 2
@@ -234,6 +239,29 @@ object NodeTraverser {
             val cd = node.contentDescription?.toString() ?: return@firstOrNull false
             val d = if (ignoreCase) cd.lowercase() else cd
             d.contains(query)
+        }?.toResult()
+    }
+
+    /**
+     * v1.3.0 — Tìm node theo contentDescription khớp CHÍNH XÁC (sau trim/lowercase),
+     * không dùng contains(). Dùng cho nút Like/Comment của Facebook/X/Instagram/
+     * Threads/Snapchat — nếu dùng contains("like") sẽ bắt nhầm "Unlike"/"Liked"
+     * (đều chứa "like" như substring), khiến tool bấm bỏ-thích thay vì thích.
+     * Ưu tiên gọi hàm này TRƯỚC findByContentDesc() (contains) khi cần phân biệt
+     * trạng thái đã-thích / chưa-thích.
+     */
+    fun findByContentDescExact(
+        root: AccessibilityNodeInfo?,
+        vararg descs: String,
+        ignoreCase: Boolean = true,
+    ): NodeResult? {
+        root ?: return null
+        val queries = if (ignoreCase) descs.map { it.lowercase() } else descs.toList()
+
+        return traverseAll(root).firstOrNull { node ->
+            val cd = node.contentDescription?.toString()?.trim() ?: return@firstOrNull false
+            val d = if (ignoreCase) cd.lowercase() else cd
+            queries.any { d == it }
         }?.toResult()
     }
 
@@ -1383,6 +1411,8 @@ object NodeTraverser {
             className   = className?.toString(),
             isClickable = isClickable,
             isEnabled   = isEnabled,
+            isChecked   = isChecked,
+            isSelected  = isSelected,
         )
     }
 

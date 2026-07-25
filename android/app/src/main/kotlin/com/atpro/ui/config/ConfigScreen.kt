@@ -628,13 +628,26 @@ private fun TimingSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Conf
             )
         }
 
+        // v1.3.0: Thông báo Discord
+        SettingCard {
+            CardLabelWithNote("Thông báo Discord", Icons.Rounded.Notifications, Green,
+                note = "Dán Discord Webhook URL để nhận thông báo khi bắt đầu nuôi, hoàn thành/dừng " +
+                       "phiên, hoặc gặp lỗi nghiêm trọng. Tạo webhook tại: Server Settings → " +
+                       "Integrations → Webhooks → New Webhook → Copy Webhook URL. Để trống nếu " +
+                       "không muốn nhận thông báo.")
+            Spacer(Modifier.height(10.dp))
+            CfgTextField(
+                label     = "Webhook URL",
+                value     = state.discordWebhookUrl,
+                hint      = "https://discord.com/api/webhooks/...",
+                isLast    = true,
+                onChanged = { onSet { copy(discordWebhookUrl = it) } },
+            )
+        }
+
         Spacer(Modifier.height(24.dp))
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Section: Actions
-// ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> ConfigUiState) -> Unit) {
@@ -647,63 +660,50 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
     ) {
         SectionTitle("Hành động tự động", Icons.Rounded.TouchApp, Pink)
 
-        // v1.2.9: Banner giải thích Experiment Mode
-        ExperimentModeBanner(unlocked = state.isExperimentUnlocked)
-
         // Interaction rates card
         SettingCard {
             CardLabelWithNote("Tỉ lệ tương tác", Icons.Rounded.Favorite, Pink,
-                note = "Xác suất (%) tool sẽ thực hiện hành động tương tác (tim, follow) trên mỗi video. " +
-                       "Các tỉ lệ này được khoá ở mức an toàn mặc định — mở Experiment Mode để chỉnh tay.")
+                note = "Xác suất (%) tool sẽ thực hiện hành động tương tác (tim, follow) trên mỗi video.")
             Spacer(Modifier.height(10.dp))
 
-            // Like rate — locked at 18% by default, editable only in Experiment Mode
+            // v1.3.0: Bỏ khoá — luôn chỉnh tay được, không còn Experiment Mode.
             RateRow(
                 icon    = Icons.Rounded.Favorite,
                 label   = "Tỉ lệ thích",
-                value   = if (state.isExperimentUnlocked) state.likeRate else LockedDefaults.LIKE_RATE,
+                value   = state.likeRate,
                 color   = Pink,
             )
             Spacer(Modifier.height(6.dp))
-            if (state.isExperimentUnlocked) {
-                CfgSlider(
-                    label    = "",
-                    display  = "${(state.likeRate * 100).toInt()}%",
-                    value    = state.likeRate,
-                    range    = 0f..1f, steps = 99,
-                    accent   = Pink,
-                    onChanged = { onSet { copy(likeRate = it) } },
-                )
-            } else {
-                LockedValueBadge(displayText = "🔒 Khoá ở 18%", accent = Pink)
-            }
+            CfgSlider(
+                label    = "",
+                display  = "${(state.likeRate * 100).toInt()}%",
+                value    = state.likeRate,
+                range    = 0f..1f, steps = 99,
+                accent   = Pink,
+                onChanged = { onSet { copy(likeRate = it) } },
+            )
 
             Spacer(Modifier.height(12.dp))
             ThinDivider()
             Spacer(Modifier.height(12.dp))
 
-            // Follow rate — locked at 0.2% by default, finer-precision slider when unlocked
             RateRow(
                 icon    = Icons.Rounded.PersonAdd,
                 label   = "Tỉ lệ theo dõi",
-                value   = if (state.isExperimentUnlocked) state.followRate else LockedDefaults.FOLLOW_RATE,
+                value   = state.followRate,
                 color   = Green,
             )
             Spacer(Modifier.height(6.dp))
-            if (state.isExperimentUnlocked) {
-                // v1.2.9: dùng range hẹp (0–5%) với step 0.1% — đủ độ chính xác để
-                // đạt chuẩn 0.2% mà slider 0–100% (step 1%) trước đây không làm được.
-                CfgSlider(
-                    label    = "",
-                    display  = "${"%.1f".format(state.followRate * 100)}%",
-                    value    = state.followRate,
-                    range    = 0f..0.05f, steps = 49,
-                    accent   = Green,
-                    onChanged = { onSet { copy(followRate = it) } },
-                )
-            } else {
-                LockedValueBadge(displayText = "🔒 Khoá ở 0.2%", accent = Green)
-            }
+            // v1.2.9: dùng range hẹp (0–5%) với step 0.1% — đủ độ chính xác để
+            // đạt chuẩn 0.2% mà slider 0–100% (step 1%) trước đây không làm được.
+            CfgSlider(
+                label    = "",
+                display  = "${"%.1f".format(state.followRate * 100)}%",
+                value    = state.followRate,
+                range    = 0f..0.05f, steps = 49,
+                accent   = Green,
+                onChanged = { onSet { copy(followRate = it) } },
+            )
         }
 
         // ── v1.2.9: Comment ngẫu nhiên ────────────────────────────────────
@@ -720,22 +720,18 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
             RateRow(
                 icon  = Icons.Rounded.ChatBubbleOutline,
                 label = "Tỉ lệ comment",
-                value = if (state.isExperimentUnlocked) state.commentRate else LockedDefaults.COMMENT_RATE,
+                value = state.commentRate,
                 color = Cyan,
             )
             Spacer(Modifier.height(6.dp))
-            if (state.isExperimentUnlocked) {
-                CfgSlider(
-                    label    = "",
-                    display  = "${(state.commentRate * 100).toInt()}%",
-                    value    = state.commentRate,
-                    range    = 0f..1f, steps = 99,
-                    accent   = Cyan,
-                    onChanged = { onSet { copy(commentRate = it) } },
-                )
-            } else {
-                LockedValueBadge(displayText = "🔒 Khoá ở 2%", accent = Cyan)
-            }
+            CfgSlider(
+                label    = "",
+                display  = "${(state.commentRate * 100).toInt()}%",
+                value    = state.commentRate,
+                range    = 0f..1f, steps = 99,
+                accent   = Cyan,
+                onChanged = { onSet { copy(commentRate = it) } },
+            )
 
             Spacer(Modifier.height(12.dp))
             ThinDivider()
@@ -776,71 +772,58 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
             RateRow(
                 icon  = Icons.Rounded.Visibility,
                 label = "Tỉ lệ xem bình luận",
-                value = if (state.isExperimentUnlocked) state.commentViewRate else LockedDefaults.COMMENT_VIEW_RATE,
+                value = state.commentViewRate,
                 color = Cyan,
             )
             Spacer(Modifier.height(6.dp))
-            if (state.isExperimentUnlocked) {
-                CfgSlider(
-                    label    = "",
-                    display  = "${(state.commentViewRate * 100).toInt()}%",
-                    value    = state.commentViewRate,
-                    range    = 0f..0.5f, steps = 49,
-                    accent   = Cyan,
-                    onChanged = { onSet { copy(commentViewRate = it) } },
-                )
+            CfgSlider(
+                label    = "",
+                display  = "${(state.commentViewRate * 100).toInt()}%",
+                value    = state.commentViewRate,
+                range    = 0f..0.5f, steps = 49,
+                accent   = Cyan,
+                onChanged = { onSet { copy(commentViewRate = it) } },
+            )
 
-                Spacer(Modifier.height(10.dp))
-                ThinDivider()
-                Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(10.dp))
+            ThinDivider()
+            Spacer(Modifier.height(10.dp))
 
-                RangeSliderPair(
-                    label    = "Số lần cuộn xem",
-                    minValue = state.commentViewScrollMin,
-                    maxValue = state.commentViewScrollMax,
-                    range    = 1..10,
-                    accent   = Cyan,
-                    summaryPrefix = "Mỗi lần xem: ",
-                    summarySuffix = " lần cuộn",
-                    onMinChanged = { onSet { copy(commentViewScrollMin = it) } },
-                    onMaxChanged = { onSet { copy(commentViewScrollMax = it) } },
-                )
-            } else {
-                LockedValueBadge(displayText = "🔒 Khoá ở 8%", accent = Cyan)
-            }
+            RangeSliderPair(
+                label    = "Số lần cuộn xem",
+                minValue = state.commentViewScrollMin,
+                maxValue = state.commentViewScrollMax,
+                range    = 1..10,
+                accent   = Cyan,
+                summaryPrefix = "Mỗi lần xem: ",
+                summarySuffix = " lần cuộn",
+                onMinChanged = { onSet { copy(commentViewScrollMin = it) } },
+                onMaxChanged = { onSet { copy(commentViewScrollMax = it) } },
+            )
         }
 
         // Behavior card
         SettingCard {
             CardLabelWithNote("Hành vi", Icons.Rounded.SmartToy, Purple,
-                note = "Bỏ qua Live/Quảng cáo được khoá BẬT mặc định (an toàn nhất). " +
-                       "Mở Experiment Mode nếu muốn tắt để tool dừng lại xem Live/Quảng cáo.")
+                note = "Bỏ qua Live/Quảng cáo — bật để tool tự động vuốt qua khi gặp.")
             Spacer(Modifier.height(10.dp))
-            if (state.isExperimentUnlocked) {
-                CfgSwitch(
-                    label    = "Bỏ qua video trực tiếp",
-                    subtitle = "Tự động vuốt qua khi gặp livestream",
-                    value    = state.skipLive,
-                    accent   = Purple,
-                    onChanged = { onSet { copy(skipLive = it) } },
-                )
-            } else {
-                LockedValueBadge(displayText = "🔒 Bỏ qua Live: BẬT", accent = Purple)
-            }
+            CfgSwitch(
+                label    = "Bỏ qua video trực tiếp",
+                subtitle = "Tự động vuốt qua khi gặp livestream",
+                value    = state.skipLive,
+                accent   = Purple,
+                onChanged = { onSet { copy(skipLive = it) } },
+            )
             Spacer(Modifier.height(4.dp))
             ThinDivider()
             Spacer(Modifier.height(4.dp))
-            if (state.isExperimentUnlocked) {
-                CfgSwitch(
-                    label    = "Bỏ qua quảng cáo",
-                    subtitle = "Tự động vuốt qua khi gặp quảng cáo TikTok",
-                    value    = state.skipAds,
-                    accent   = Amber,
-                    onChanged = { onSet { copy(skipAds = it) } },
-                )
-            } else {
-                LockedValueBadge(displayText = "🔒 Bỏ qua Quảng cáo: BẬT", accent = Amber)
-            }
+            CfgSwitch(
+                label    = "Bỏ qua quảng cáo",
+                subtitle = "Tự động vuốt qua khi gặp quảng cáo TikTok",
+                value    = state.skipAds,
+                accent   = Amber,
+                onChanged = { onSet { copy(skipAds = it) } },
+            )
             Spacer(Modifier.height(4.dp))
             ThinDivider()
             Spacer(Modifier.height(4.dp))
@@ -903,33 +886,29 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
             RateRow(
                 icon  = Icons.Rounded.Inbox,
                 label = "Tỉ lệ ghé Hộp thư",
-                value = if (state.isExperimentUnlocked) state.inboxViewRate else LockedDefaults.INBOX_RATE,
+                value = state.inboxViewRate,
                 color = Cyan,
             )
             Spacer(Modifier.height(6.dp))
-            if (state.isExperimentUnlocked) {
-                CfgSlider(
-                    label    = "",
-                    display  = if (state.inboxViewRate <= 0f) "Tắt"
-                               else "${(state.inboxViewRate * 100).toInt()}%",
-                    value    = state.inboxViewRate,
-                    range    = 0f..0.5f, steps = 49,
-                    accent   = Cyan,
-                    onChanged = { onSet { copy(inboxViewRate = it) } },
-                )
-                Spacer(Modifier.height(4.dp))
-                CfgSlider(
-                    label    = "Thời gian xem (giây)",
-                    display  = "${state.inboxViewDurationSecs}s",
-                    value    = state.inboxViewDurationSecs.toFloat(),
-                    range    = 5f..60f, steps = 10,
-                    accent   = Cyan,
-                    enabled  = state.inboxViewRate > 0f,
-                    onChanged = { onSet { copy(inboxViewDurationSecs = it.toInt()) } },
-                )
-            } else {
-                LockedValueBadge(displayText = "🔒 Khoá ở 1%", accent = Cyan)
-            }
+            CfgSlider(
+                label    = "",
+                display  = if (state.inboxViewRate <= 0f) "Tắt"
+                           else "${(state.inboxViewRate * 100).toInt()}%",
+                value    = state.inboxViewRate,
+                range    = 0f..0.5f, steps = 49,
+                accent   = Cyan,
+                onChanged = { onSet { copy(inboxViewRate = it) } },
+            )
+            Spacer(Modifier.height(4.dp))
+            CfgSlider(
+                label    = "Thời gian xem (giây)",
+                display  = "${state.inboxViewDurationSecs}s",
+                value    = state.inboxViewDurationSecs.toFloat(),
+                range    = 5f..60f, steps = 10,
+                accent   = Cyan,
+                enabled  = state.inboxViewRate > 0f,
+                onChanged = { onSet { copy(inboxViewDurationSecs = it.toInt()) } },
+            )
 
             Spacer(Modifier.height(10.dp))
             ThinDivider()
@@ -939,33 +918,29 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
             RateRow(
                 icon  = Icons.Rounded.ShoppingBag,
                 label = "Tỉ lệ ghé Cửa hàng",
-                value = if (state.isExperimentUnlocked) state.shopViewRate else LockedDefaults.SHOP_RATE,
+                value = state.shopViewRate,
                 color = Amber,
             )
             Spacer(Modifier.height(6.dp))
-            if (state.isExperimentUnlocked) {
-                CfgSlider(
-                    label    = "",
-                    display  = if (state.shopViewRate <= 0f) "Tắt"
-                               else "${(state.shopViewRate * 100).toInt()}%",
-                    value    = state.shopViewRate,
-                    range    = 0f..0.5f, steps = 49,
-                    accent   = Amber,
-                    onChanged = { onSet { copy(shopViewRate = it) } },
-                )
-                Spacer(Modifier.height(4.dp))
-                CfgSlider(
-                    label    = "Số lần cuộn Cửa hàng",
-                    display  = "${state.shopScrollCount} lần",
-                    value    = state.shopScrollCount.toFloat(),
-                    range    = 1f..10f, steps = 8,
-                    accent   = Amber,
-                    enabled  = state.shopViewRate > 0f,
-                    onChanged = { onSet { copy(shopScrollCount = it.toInt()) } },
-                )
-            } else {
-                LockedValueBadge(displayText = "🔒 Khoá ở 2%", accent = Amber)
-            }
+            CfgSlider(
+                label    = "",
+                display  = if (state.shopViewRate <= 0f) "Tắt"
+                           else "${(state.shopViewRate * 100).toInt()}%",
+                value    = state.shopViewRate,
+                range    = 0f..0.5f, steps = 49,
+                accent   = Amber,
+                onChanged = { onSet { copy(shopViewRate = it) } },
+            )
+            Spacer(Modifier.height(4.dp))
+            CfgSlider(
+                label    = "Số lần cuộn Cửa hàng",
+                display  = "${state.shopScrollCount} lần",
+                value    = state.shopScrollCount.toFloat(),
+                range    = 1f..10f, steps = 8,
+                accent   = Amber,
+                enabled  = state.shopViewRate > 0f,
+                onChanged = { onSet { copy(shopScrollCount = it.toInt()) } },
+            )
         }
 
 
@@ -1039,52 +1014,48 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
             )
             Spacer(Modifier.height(10.dp))
 
-            if (state.isExperimentUnlocked) {
-                CfgSwitch(
-                    label    = "Bật tìm kiếm",
-                    subtitle = "Thỉnh thoảng tự động tìm kiếm theo từ khoá",
-                    value    = state.searchEnabled,
-                    accent   = Purple,
-                    onChanged = { onSet { copy(searchEnabled = it) } },
-                )
-                Spacer(Modifier.height(6.dp))
-                CfgTextField(
-                    label     = "Từ khoá tìm kiếm (cách nhau bằng dấu phẩy)",
-                    value     = state.searchKeywords,
-                    hint      = "dance, cooking, travel, funny...",
-                    onChanged = { onSet { copy(searchKeywords = it) } },
-                )
-                Spacer(Modifier.height(4.dp))
-                CfgSlider(
-                    label    = "Số video xem mỗi phiên search",
-                    display  = "${state.searchVideosPerSession} video",
-                    value    = state.searchVideosPerSession.toFloat(),
-                    range    = 1f..10f, steps = 8,
-                    accent   = Purple,
-                    enabled  = state.searchEnabled,
-                    onChanged = { onSet { copy(searchVideosPerSession = it.toInt()) } },
-                )
-                Spacer(Modifier.height(4.dp))
-                RateRow(
-                    icon  = Icons.Rounded.Search,
-                    label = "Tỉ lệ tìm kiếm",
-                    value = state.searchRate,
-                    color = Purple,
-                )
-                Spacer(Modifier.height(6.dp))
-                CfgSlider(
-                    label    = "",
-                    display  = if (state.searchRate <= 0f) "Tắt"
-                               else "${(state.searchRate * 100).toInt()}%",
-                    value    = state.searchRate,
-                    range    = 0f..0.3f, steps = 29,
-                    accent   = Purple,
-                    enabled  = state.searchEnabled,
-                    onChanged = { onSet { copy(searchRate = it) } },
-                )
-            } else {
-                LockedValueBadge(displayText = "🔒 Tìm kiếm: TẮT", accent = Purple)
-            }
+            CfgSwitch(
+                label    = "Bật tìm kiếm",
+                subtitle = "Thỉnh thoảng tự động tìm kiếm theo từ khoá",
+                value    = state.searchEnabled,
+                accent   = Purple,
+                onChanged = { onSet { copy(searchEnabled = it) } },
+            )
+            Spacer(Modifier.height(6.dp))
+            CfgTextField(
+                label     = "Từ khoá tìm kiếm (cách nhau bằng dấu phẩy)",
+                value     = state.searchKeywords,
+                hint      = "dance, cooking, travel, funny...",
+                onChanged = { onSet { copy(searchKeywords = it) } },
+            )
+            Spacer(Modifier.height(4.dp))
+            CfgSlider(
+                label    = "Số video xem mỗi phiên search",
+                display  = "${state.searchVideosPerSession} video",
+                value    = state.searchVideosPerSession.toFloat(),
+                range    = 1f..10f, steps = 8,
+                accent   = Purple,
+                enabled  = state.searchEnabled,
+                onChanged = { onSet { copy(searchVideosPerSession = it.toInt()) } },
+            )
+            Spacer(Modifier.height(4.dp))
+            RateRow(
+                icon  = Icons.Rounded.Search,
+                label = "Tỉ lệ tìm kiếm",
+                value = state.searchRate,
+                color = Purple,
+            )
+            Spacer(Modifier.height(6.dp))
+            CfgSlider(
+                label    = "",
+                display  = if (state.searchRate <= 0f) "Tắt"
+                           else "${(state.searchRate * 100).toInt()}%",
+                value    = state.searchRate,
+                range    = 0f..0.3f, steps = 29,
+                accent   = Purple,
+                enabled  = state.searchEnabled,
+                onChanged = { onSet { copy(searchRate = it) } },
+            )
         }
 
         Spacer(Modifier.height(24.dp))
@@ -1989,7 +1960,6 @@ private fun FacebookTimingSection(state: ConfigUiState, onSet: (ConfigUiState.()
 @Composable
 private fun FacebookActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> ConfigUiState) -> Unit) {
     val FbBlue = Color(0xFF1877F2)
-    val unlocked = state.isExperimentUnlocked
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 16.dp),
@@ -2003,24 +1973,77 @@ private fun FacebookActionsSection(state: ConfigUiState, onSet: (ConfigUiState.(
         SectionTitle("Tương tác", Icons.Rounded.Favorite, FbBlue)
         SettingCard {
             CardLabelWithNote("Tỉ lệ thích bài đăng", Icons.Rounded.ThumbUp, FbBlue,
-                note = "Xác suất tool sẽ bấm Thích (Like) sau khi đọc xong mỗi bài đăng. " +
-                       "Setting này dùng chung cơ chế khoá với các setting nhạy cảm của TikTok " +
-                       "— mặc định khoá ở mức an toàn 10%, chỉ hiện slider chỉnh tay khi đã " +
-                       "mở Experiment Mode (xem ghi chú trong phần Comment ngẫu nhiên TikTok).")
+                note = "Xác suất tool sẽ bấm Thích (Like) sau khi đọc xong mỗi bài đăng.")
             Spacer(Modifier.height(10.dp))
-            if (unlocked) {
-                CfgSlider(
-                    label     = "",
-                    display   = "${(state.facebookLikeRate * 100).toInt()}%",
-                    value     = state.facebookLikeRate,
-                    range     = 0f..0.8f,
-                    steps     = 79,
-                    accent    = FbBlue,
-                    onChanged = { v -> onSet { copy(facebookLikeRate = v) } },
-                )
-            } else {
-                LockedValueBadge(displayText = "🔒 Khoá ở 10%", accent = FbBlue)
-            }
+            CfgSlider(
+                label     = "",
+                display   = "${(state.facebookLikeRate * 100).toInt()}%",
+                value     = state.facebookLikeRate,
+                range     = 0f..0.8f,
+                steps     = 79,
+                accent    = FbBlue,
+                onChanged = { v -> onSet { copy(facebookLikeRate = v) } },
+            )
+        }
+
+        ThinDivider()
+        SectionTitle("Xem bình luận", Icons.Rounded.Visibility, FbBlue)
+        SettingCard {
+            CardLabelWithNote("Tỉ lệ xem bình luận", Icons.Rounded.Visibility, FbBlue,
+                note = "Xác suất tool sẽ mở phần bình luận lên XEM (không gõ/gửi gì) sau khi đọc " +
+                       "xong mỗi bài đăng, mô phỏng hành vi tò mò tự nhiên.")
+            Spacer(Modifier.height(10.dp))
+            CfgSlider(
+                label     = "",
+                display   = "${(state.facebookCommentViewRate * 100).toInt()}%",
+                value     = state.facebookCommentViewRate,
+                range     = 0f..0.5f,
+                steps     = 49,
+                accent    = FbBlue,
+                onChanged = { v -> onSet { copy(facebookCommentViewRate = v) } },
+            )
+        }
+
+        ThinDivider()
+        SectionTitle("Reels", Icons.Rounded.SmartDisplay, FbBlue)
+        SettingCard {
+            CardLabelWithNote("Xem Reels", Icons.Rounded.SmartDisplay, FbBlue,
+                note = "Xác suất tool sẽ ghé qua tab Reels sau mỗi lần lướt feed, lướt xem trong " +
+                       "một khoảng thời gian, thỉnh thoảng đúp màn hình để thích video, rồi quay " +
+                       "lại feed.")
+            Spacer(Modifier.height(10.dp))
+            CfgSlider(
+                label     = "Tỉ lệ ghé Reels",
+                display   = if (state.facebookReelsViewRate <= 0f) "Tắt"
+                            else "${(state.facebookReelsViewRate * 100).toInt()}%",
+                value     = state.facebookReelsViewRate,
+                range     = 0f..0.5f,
+                steps     = 49,
+                accent    = FbBlue,
+                onChanged = { v -> onSet { copy(facebookReelsViewRate = v) } },
+            )
+            Spacer(Modifier.height(10.dp))
+            RangeSliderPair(
+                label    = "Thời gian xem Reels (giây)",
+                minValue = state.facebookReelsViewDurationMinSecs,
+                maxValue = state.facebookReelsViewDurationMaxSecs,
+                range    = 30..1800,
+                accent   = FbBlue,
+                summarySuffix = "s",
+                onMinChanged = { onSet { copy(facebookReelsViewDurationMinSecs = it) } },
+                onMaxChanged = { onSet { copy(facebookReelsViewDurationMaxSecs = it) } },
+            )
+            Spacer(Modifier.height(10.dp))
+            CfgSlider(
+                label     = "Tỉ lệ đúp màn hình thích Reel",
+                display   = "${(state.facebookReelsLikeRate * 100).toInt()}%",
+                value     = state.facebookReelsLikeRate,
+                range     = 0f..0.8f,
+                steps     = 79,
+                accent    = FbBlue,
+                enabled   = state.facebookReelsViewRate > 0f,
+                onChanged = { v -> onSet { copy(facebookReelsLikeRate = v) } },
+            )
         }
         Spacer(Modifier.height(24.dp))
     }
@@ -2056,6 +2079,14 @@ private fun XDemoSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Confi
             steps     = 29,
             onChanged = { v -> onSet { copy(xRetweetRate = v) } },
         )
+        CfgSlider(
+            label     = "Xác suất xem reply",
+            display   = "${(state.xReplyViewRate * 100).toInt()}%",
+            value     = state.xReplyViewRate,
+            range     = 0f..0.5f,
+            steps     = 49,
+            onChanged = { v -> onSet { copy(xReplyViewRate = v) } },
+        )
         Spacer(Modifier.height(24.dp))
     }
 }
@@ -2090,6 +2121,14 @@ private fun InstagramDemoSection(state: ConfigUiState, onSet: (ConfigUiState.() 
             steps     = 29,
             onChanged = { v -> onSet { copy(instagramFollowRate = v) } },
         )
+        CfgSlider(
+            label     = "Xác suất xem bình luận",
+            display   = "${(state.instagramCommentViewRate * 100).toInt()}%",
+            value     = state.instagramCommentViewRate,
+            range     = 0f..0.5f,
+            steps     = 49,
+            onChanged = { v -> onSet { copy(instagramCommentViewRate = v) } },
+        )
         Spacer(Modifier.height(24.dp))
     }
 }
@@ -2116,6 +2155,14 @@ private fun ThreadsDemoSection(state: ConfigUiState, onSet: (ConfigUiState.() ->
             steps     = 79,
             onChanged = { v -> onSet { copy(threadsLikeRate = v) } },
         )
+        CfgSlider(
+            label     = "Xác suất xem reply",
+            display   = "${(state.threadsReplyViewRate * 100).toInt()}%",
+            value     = state.threadsReplyViewRate,
+            range     = 0f..0.5f,
+            steps     = 49,
+            onChanged = { v -> onSet { copy(threadsReplyViewRate = v) } },
+        )
         Spacer(Modifier.height(24.dp))
     }
 }
@@ -2137,6 +2184,14 @@ private fun SnapchatDemoSection(state: ConfigUiState, onSet: (ConfigUiState.() -
         SettingSliderInt("Thời gian xem mỗi Story (giây)", state.snapchatStoryViewSecs, 3, 30, 1) {
             onSet { copy(snapchatStoryViewSecs = it) }
         }
+        CfgSlider(
+            label     = "Xác suất thích Story/Spotlight",
+            display   = "${(state.snapchatLikeRate * 100).toInt()}%",
+            value     = state.snapchatLikeRate,
+            range     = 0f..0.8f,
+            steps     = 79,
+            onChanged = { v -> onSet { copy(snapchatLikeRate = v) } },
+        )
         Spacer(Modifier.height(24.dp))
     }
 }
@@ -2181,66 +2236,8 @@ private fun RangeSliderPair(
     }
 }
 
-/**
- * v1.2.9: Badge hiển thị giá trị ĐÃ KHOÁ (Experiment Mode tắt) — thay cho slider
- * tương tác. Có icon ổ khoá + gợi ý cách mở khoá.
- */
-@Composable
-private fun LockedValueBadge(displayText: String, accent: Color) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(accent.copy(alpha = 0.08f))
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment     = Alignment.CenterVertically,
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Icon(Icons.Rounded.Lock, null, tint = accent.copy(alpha = 0.7f), modifier = Modifier.size(14.dp))
-            Text(displayText, color = accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        }
-        Text("Khoá an toàn", color = TextMuted, fontSize = 10.sp)
-    }
-}
-
-/**
- * v1.2.9: Banner giải thích cơ chế Experiment Mode — đặt ở đầu phần Hành động TikTok.
- */
-@Composable
-private fun ExperimentModeBanner(unlocked: Boolean) {
-    val accent = if (unlocked) Color(0xFF10B981) else Amber
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(accent.copy(alpha = 0.08f))
-            .border(1.dp, accent.copy(alpha = 0.22f), RoundedCornerShape(12.dp))
-            .padding(12.dp),
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Icon(
-            if (unlocked) Icons.Rounded.LockOpen else Icons.Rounded.Lock,
-            null, tint = accent, modifier = Modifier.size(16.dp).padding(top = 1.dp),
-        )
-        Column {
-            Text(
-                if (unlocked) "Experiment Mode: ĐANG MỞ" else "Một số setting đang bị khoá an toàn",
-                color = accent, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-            )
-            Text(
-                if (unlocked)
-                    "Bạn có thể chỉnh tay các setting nhạy cảm bên dưới. Để khoá lại, xoá dòng " +
-                    "\"Experiment\" khỏi ô nhập comment."
-                else
-                    "Để mở khoá chỉnh tay tỉ lệ tim/follow/comment, bỏ qua quảng cáo & live, hộp thư, " +
-                    "shop, tìm kiếm — gõ một dòng \"Experiment\" vào ô nhập comment ngẫu nhiên bên dưới.",
-                color = TextSec, fontSize = 11.sp, lineHeight = 16.sp,
-            )
-        }
-    }
-}
+// v1.3.0: Đã xoá LockedValueBadge / ExperimentModeBanner — không còn setting nào
+// bị khoá nữa, mọi slider nuôi acc luôn hiện chỉnh tay được.
 
 // Reuse existing helper — simple Int slider row
 @Composable

@@ -238,16 +238,27 @@ class LocalRepository(context: Context) : IFarmRepository {
         // v1.2.9: Khoảng thời gian đọc bài Facebook
         facebookReadTimeMinSecs     = getConfigInt   ("fb_read_time_min_secs",        8),
         facebookReadTimeMaxSecs     = getConfigInt   ("fb_read_time_max_secs",        25),
+        // v1.3.0: Xem bình luận + Reels Facebook
+        facebookCommentViewRate          = getConfigDouble("fb_comment_view_rate",            0.05).toFloat(),
+        facebookReelsViewRate            = getConfigDouble("fb_reels_view_rate",              0.05).toFloat(),
+        facebookReelsViewDurationMinSecs = getConfigInt   ("fb_reels_view_duration_min_secs", 600),
+        facebookReelsViewDurationMaxSecs = getConfigInt   ("fb_reels_view_duration_max_secs", 1200),
+        facebookReelsLikeRate            = getConfigDouble("fb_reels_like_rate",              0.20).toFloat(),
         xNurtureDurationSecs        = getConfigInt   ("x_nurture_duration_secs",      120),
         xLikeRate                   = getConfigDouble("x_like_rate",                  0.25).toFloat(),
         xRetweetRate                = getConfigDouble("x_retweet_rate",               0.05).toFloat(),
+        xReplyViewRate              = getConfigDouble("x_reply_view_rate",            0.05).toFloat(),  // v1.3.0
         instagramNurtureDurationSecs= getConfigInt   ("ig_nurture_duration_secs",     180),
         instagramLikeRate           = getConfigDouble("ig_like_rate",                 0.30).toFloat(),
         instagramFollowRate         = getConfigDouble("ig_follow_rate",               0.08).toFloat(),
+        instagramCommentViewRate    = getConfigDouble("ig_comment_view_rate",         0.05).toFloat(), // v1.3.0
         threadsNurtureDurationSecs  = getConfigInt   ("threads_nurture_duration_secs", 120),
         threadsLikeRate             = getConfigDouble("threads_like_rate",             0.20).toFloat(),
+        threadsReplyViewRate        = getConfigDouble("threads_reply_view_rate",       0.05).toFloat(), // v1.3.0
         snapchatNurtureDurationSecs = getConfigInt   ("snap_nurture_duration_secs",    90),
         snapchatStoryViewSecs       = getConfigInt   ("snap_story_view_secs",          8),
+        snapchatLikeRate            = getConfigDouble("snap_like_rate",                0.20).toFloat(),  // v1.3.0
+        discordWebhookUrl           = getConfig      ("discord_webhook_url",           ""),
     )
 
     /** Lưu danh sách comment, phân cách bằng "||" trong DB. */

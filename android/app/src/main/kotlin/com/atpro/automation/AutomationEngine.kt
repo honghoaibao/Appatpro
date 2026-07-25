@@ -13,6 +13,7 @@ import com.atpro.golike.TikTokAccountDto
 import com.atpro.golike.TikTokJobDto
 import com.atpro.golike.GolikeResult
 import com.atpro.network.LanWebSocketServer
+import com.atpro.network.DiscordNotifier
 import com.atpro.notification.AtProNotificationManager
 import com.atpro.security.AppConstants
 import kotlinx.coroutines.*
@@ -715,6 +716,8 @@ class AutomationEngine(
         LanWebSocketServer.broadcast("farmStatus",
             mapOf("status" to "started", "total" to farmList.size))
         AtProNotificationManager.notifyFarmStarted(farmList.size)
+        notifyDiscord("🚀 **AT Pro** — Bắt đầu nuôi **${farmList.size}** tài khoản TikTok " +
+            "(~${farmList.size * config.minutesPerAccount} phút dự kiến)")
 
         // Bước 4: Position acc đầu tiên (popup đang mở — dùng trực tiếp)
         // v1.2.7: Nếu có normalize thì dùng postNormalizeActiveAcc (stale currentAcc gây click lại acc hiện tại)
@@ -829,11 +832,18 @@ class AutomationEngine(
                 delay(1_000)
 
                 // [v1.1.9] Đếm ngược từng giây thay vì delay tĩnh
+                // v1.3.0: Ngoài cập nhật overlay mỗi giây, log định kỳ mỗi phút
+                // (và ngay từ giây đầu) để người dùng thấy tiến trình đếm ngược
+                // ngay trong màn hình Log, không chỉ trên overlay.
                 for (remaining in restSecs downTo 1L) {
                     awaitResumed()
                     val mm = remaining / 60L
                     val ss = remaining % 60L
-                    setStatus("REST: Đang nghỉ %02d:%02d...".format(mm, ss))
+                    val timeStr = "%02d:%02d".format(mm, ss)
+                    setStatus("REST: Đang nghỉ $timeStr...")
+                    if (remaining == restSecs || ss == 0L) {
+                        log("REST: Đang nghỉ... còn lại $timeStr")
+                    }
                     delay(1_000L)
                 }
 
@@ -859,6 +869,10 @@ class AutomationEngine(
         AtProNotificationManager.notifyFarmCompleted(
             farmList.size, sessionLikes, sessionFollows, sessionVideos,
             farmList.size * config.minutesPerAccount,
+        )
+        notifyDiscord(
+            "✅ **AT Pro** — Hoàn thành nuôi **${farmList.size}** tài khoản TikTok\n" +
+            "▫️ Video xem: $sessionVideos  ▫️ Tim: $sessionLikes  ▫️ Follow: $sessionFollows"
         )
 
         // [v1.1.9+] Thoát TikTok sau khi nuôi xong — không để app chạy nền
@@ -903,42 +917,83 @@ class AutomationEngine(
 
         // v1.2.5: Đọc danh sách kèm node — phân loại valid/invalid
         val entries  = NodeTraverser.parseAccountListWithNodes(host.getRootNode(), screenW, screenH)
-        val valid    = entries.filter { !it.isNeedsNormalize }
 
-        // ── Xử lý acc ĐẦU TIÊN bị invalid (= acc đang đăng nhập) ──────────
-        // Không thể click vào entry[0] để switch vì TikTok chỉ đóng popup.
-        // Fix: nếu entry[0] invalid → switch tạm sang 1 acc hợp lệ khác,
-        //      sau đó entry[0] sẽ rời vị trí 0 → có thể chuẩn hoá bình thường.
-        val firstEntry = entries.firstOrNull()
-        var currentEntries = entries
+        // ── Xử lý acc ĐẦU TIÊN (= acc đang đăng nhập hiện tại) ─────────────
+        // v1.3.0: viết lại theo đúng 3 trường hợp:
+        //   TH1: acc đầu cần chuẩn hoá VÀ còn acc khác (không phải đầu) cũng cần
+        //        chuẩn hoá → chuẩn hoá CÁC ACC KHÁC TRƯỚC (chúng không ở vị trí 0
+        //        nên switch bình thường được). Sau khi chuẩn hoá xong acc cuối cùng
+        //        trong nhóm đó, acc đầu tiên ban đầu KHÔNG CÒN ở vị trí 0 nữa →
+        //        chuẩn hoá nó như 1 entry bình thường (switch thật sự vào nó).
+        //   TH2: CHỈ acc đầu cần chuẩn hoá, không có acc nào khác cần chuẩn hoá →
+        //        không click switch (click vào chính acc đang login = no-op, popup
+        //        chỉ đóng lại chứ không chuyển gì) — thay vào đó về thẳng feed,
+        //        vào Hồ sơ để xác nhận @username thật, xong.
+        //   TH3: acc đầu KHÔNG cần chuẩn hoá → xử lý như bình thường, không có gì
+        //        đặc biệt (rơi xuống nhánh else bên dưới).
+        val firstEntry  = entries.firstOrNull()
+        val restInvalid = entries.drop(1).filter { it.isNeedsNormalize }
+        val discovered  = entries.filter { !it.isNeedsNormalize }.map { it.displayText }.toMutableList()
 
-        if (firstEntry != null && firstEntry.isNeedsNormalize && config.normalizeEnabled) {
-            val tempTarget = entries.drop(1).firstOrNull { !it.isNeedsNormalize }
-            if (tempTarget != null) {
-                log("FIX: Acc đang login '${firstEntry.displayText}' invalid → " +
-                    "switch tạm sang '${tempTarget.displayText}' để đưa ra khỏi vị trí đầu")
-                setStatus("FIX: Chuyển tạm sang '${tempTarget.displayText}'...")
-                host.clickNode(tempTarget.node)
-                delay((config.delayAfterSwitchClick * 1_000).toLong().coerceAtLeast(1_800L))
-                host.killTikTok(); delay(2_500); host.launchTikTok()
-                waitFeedLoad()
-                // Mở lại popup → re-parse (entry đầu invalid giờ ở vị trí != 0)
-                host.openTikTokSettings(); delay(2_200)
-                if (scrollUntilSwitchFound(maxScrolls = 8)) {
-                    delay(800)
-                    findSwitchBtnNode()?.let { b ->
-                        host.clickNode(b.node); delay(1_500)
-                        currentEntries = NodeTraverser
-                            .parseAccountListWithNodes(host.getRootNode(), screenW, screenH)
+        if (config.normalizeEnabled && firstEntry != null && firstEntry.isNeedsNormalize) {
+            // Đóng popup hiện tại — các nhánh bên dưới tự quản lý popup riêng.
+            host.pressBack(); delay(800); host.pressBack(); delay(800)
+
+            if (restInvalid.isNotEmpty()) {
+                // TH1 — chuẩn hoá acc khác trước để "đẩy" acc đầu ra khỏi vị trí 0.
+                log("FIX: Acc đang login '${firstEntry.displayText}' cũng cần chuẩn hoá — " +
+                    "chuẩn hoá ${restInvalid.size} acc khác trước (${restInvalid.joinToString { "'${it.displayText}'" }})")
+                val fixedOthers = normalizeInvalidAccountIds(restInvalid.map { it.displayText })
+                discovered.addAll(fixedOthers)
+
+                if (fixedOthers.isNotEmpty()) {
+                    // Acc cuối vừa chuẩn hoá đang active → acc đầu tiên chắc chắn
+                    // không còn ở vị trí 0 nữa, chuẩn hoá nó như entry bình thường.
+                    log("FIX: Đã chuẩn hoá xong acc khác — giờ chuẩn hoá acc đầu tiên '${firstEntry.displayText}'")
+                    val fixedFirst = normalizeInvalidAccountIds(listOf(firstEntry.displayText))
+                    discovered.addAll(fixedFirst)
+                    postNormalizeActiveAcc = (fixedFirst.ifEmpty { fixedOthers }).last()
+                    log("FIX: Chuẩn hoá xong — active hiện tại: @${postNormalizeActiveAcc}")
+                } else {
+                    // Không chuẩn hoá được acc nào khác → không đảm bảo acc đầu đã
+                    // rời vị trí 0 → fallback an toàn giống TH2 (xác nhận qua Hồ sơ).
+                    log("WARN: FIX: Không chuẩn hoá được acc nào khác → fallback xác nhận " +
+                        "ID qua Hồ sơ cho acc đầu '${firstEntry.displayText}'")
+                    confirmCurrentAccountViaProfile(firstEntry.displayText)?.let {
+                        discovered.add(0, it); postNormalizeActiveAcc = it
                     }
                 }
             } else {
-                log("WARN: FIX: Acc đầu invalid nhưng không tìm được acc hợp lệ để switch tạm — bỏ qua")
+                // TH2 — chỉ acc đầu cần chuẩn hoá, không switch, xác nhận trực tiếp.
+                log("FIX: Acc đang login '${firstEntry.displayText}' cần chuẩn hoá, không có acc " +
+                    "khác cần chuẩn hoá → xác nhận ID trực tiếp qua Hồ sơ (không switch)")
+                confirmCurrentAccountViaProfile(firstEntry.displayText)?.let {
+                    discovered.add(0, it); postNormalizeActiveAcc = it
+                }
             }
+
+            // Mở lại popup lần cuối để tiếp tục discover phần còn lại phía dưới.
+            host.openTikTokSettings(); delay(2_200)
+            if (!scrollUntilSwitchFound(maxScrolls = 8)) {
+                log("WARN: FIX: Không mở lại được popup sau chuẩn hoá acc đầu")
+                if (discovered.isNotEmpty()) {
+                    log("LIST: Discover ${discovered.size} acc từ switch popup")
+                    setStatus("✓ Tìm thấy ${discovered.size} tài khoản trong popup")
+                    autoSaveAccounts(discovered)
+                }
+                return Pair(true, discovered)
+            }
+            delay(800)
+            findSwitchBtnNode()?.let { b -> host.clickNode(b.node); delay(1_500) }
         }
 
+        val currentEntries = if (config.normalizeEnabled && firstEntry != null && firstEntry.isNeedsNormalize)
+            NodeTraverser.parseAccountListWithNodes(host.getRootNode(), screenW, screenH)
+        else entries
+
+        // TH3 (hoặc phần còn lại sau TH1/TH2): chuẩn hoá các entry invalid còn
+        // lại chưa xử lý — bỏ vị trí 0 vì đó luôn là acc đang login.
         val invalid = currentEntries.drop(1).filter { it.isNeedsNormalize }
-        val discovered = currentEntries.filter { !it.isNeedsNormalize }.map { it.displayText }.toMutableList()
 
         if (invalid.isNotEmpty() && config.normalizeEnabled) {
             log("FIX: Phát hiện ${invalid.size} entry không hợp lệ: " +
@@ -988,6 +1043,38 @@ class AutomationEngine(
         }
 
         return Pair(true, discovered)
+    }
+
+    /**
+     * v1.3.0 — TH2 của xử lý acc đầu tiên: acc đang login CHÍNH LÀ acc cần
+     * chuẩn hoá, và không có acc nào khác cần chuẩn hoá để switch tạm qua.
+     * Click vào chính entry đang active trong popup switch KHÔNG làm gì (TikTok
+     * chỉ đóng popup) — nên thay vì switch, về thẳng feed rồi vào Hồ sơ để đọc
+     * @username thật, coi như đã "chuẩn hoá" xong (không cần đổi acc nào cả).
+     *
+     * Giả định: popup switch đã được đóng (pressBack) trước khi gọi hàm này.
+     */
+    private suspend fun confirmCurrentAccountViaProfile(displayText: String): String? {
+        isNormalizing = true
+        resetWatchdog()
+        try {
+            if (!waitFeedLoad()) {
+                log("WARN: FIX: Feed chưa sẵn sàng trước khi xác nhận '$displayText' — thử recoverToFeed()")
+                recoverToFeed()
+            }
+            setStatus("FIX: Xác nhận ID acc đang login '$displayText'...")
+            val realUsername = detectCurrentAccount()
+            return if (realUsername != null && NodeTraverser.isValidTikTokUsername(realUsername)) {
+                log("FIX: ✓ '$displayText' (acc đang login) → '@$realUsername'")
+                realUsername
+            } else {
+                log("WARN: FIX: Không đọc được @username của acc đang login (kết quả: $realUsername)")
+                null
+            }
+        } finally {
+            isNormalizing = false
+            resetWatchdog()
+        }
     }
 
     /**
@@ -1241,21 +1328,44 @@ class AutomationEngine(
     /**
      * Click vào username trong switch popup.
      * Retry 3 lần × delay 1.5s nếu chưa thấy node (popup chưa render xong).
+     *
+     * v1.3.0 FIX: trước đây dùng findByText() thô trên TOÀN BỘ cây node — không
+     * loại trừ vị trí 0 (acc đang login). Nếu biến theo dõi currentAcc/postNormalize
+     * bị lệch (vd: race condition, hoặc TikTok tự đổi thứ tự popup) và target THỰC
+     * RA đang ở vị trí 0, findByText cũ vẫn tìm thấy & click nhầm — TikTok chỉ
+     * đóng popup (không switch gì) khiến bước sau tưởng đã đổi acc thành công dù
+     * chưa hề đổi. Giờ luôn parse có cấu trúc + drop(1), và mỗi lần thử lại còn
+     * tranh thủ dọn popup lạ (xử lý popup ưu tiên cao — có thể là lý do node
+     * chưa tìm thấy ở các lần thử đầu).
      */
     private suspend fun clickInPopup(target: String): Boolean {
-        val node = retry(times = 3, delayMs = 1_500, tag = "clickPopup($target)") {
-            NodeTraverser.findByText(host.getRootNode(), target, ignoreCase = true)
+        val entry = retry(times = 3, delayMs = 1_500, tag = "clickPopup($target)") { attempt ->
+            if (attempt > 0) popup.handleIfPresent()   // dọn popup lạ trước khi thử lại
+            NodeTraverser.parseAccountListWithNodes(host.getRootNode(), screenW, screenH)
+                .drop(1)   // vị trí 0 = acc đang login — KHÔNG BAO GIỜ click vào đây
+                .firstOrNull { it.displayText.trim().equals(target.trim(), ignoreCase = true) }
         }
-        return if (node != null) {
-            host.clickNode(node.node)
+
+        if (entry != null) {
+            host.clickNode(entry.node)
             delay((config.delayAfterSwitchClick * 1_000).toLong())
-            true
-        } else {
-            log("ERR: Không tìm thấy @$target trong switch popup")
-            host.pressBack()
-            delay(500)
-            false
+            return true
         }
+
+        // Không thấy trong danh sách (trừ vị trí 0) — kiểm tra riêng: có phải
+        // target THỰC RA đã đang là acc login (vị trí 0) không? Nếu đúng thì đây
+        // không phải lỗi — chỉ là tracking currentAcc bị lệch, không cần switch.
+        val freshFirst = NodeTraverser.parseAccountListWithNodes(host.getRootNode(), screenW, screenH).firstOrNull()
+        if (freshFirst != null && freshFirst.displayText.trim().equals(target.trim(), ignoreCase = true)) {
+            log("OK: @$target thực ra đã là acc đang login — không click, chỉ đóng popup")
+            host.pressBack(); delay(500)
+            return true
+        }
+
+        log("ERR: Không tìm thấy @$target trong switch popup")
+        host.pressBack()
+        delay(500)
+        return false
     }
 
     /**
@@ -2397,6 +2507,12 @@ class AutomationEngine(
         watchdogLastTick   = System.currentTimeMillis()
 
         watchdogJob = host.scope.launch {
+            // v1.3.0: đếm số lần PHÁT HIỆN LIÊN TIẾP mà cờ của lần trước vẫn CHƯA
+            // được farmOneAccount() tiêu thụ (reset) — dấu hiệu main loop đã treo
+            // hẳn (kẹt trong 1 lệnh suspend nào đó, không chạy tới bước [3b] kiểm
+            // tra cờ), KHÁC với "chỉ đơn giản chưa có video mới".
+            var consecutiveUnconsumed = 0
+
             while (isActive && isFarming) {
                 delay(30_000L)
                 // Bỏ qua khi đã dừng, đang pause, đang nghỉ giữa acc, đang normalize, hoặc
@@ -2404,7 +2520,35 @@ class AutomationEngine(
                 if (!isFarming || isPaused || isResting || isNormalizing || isActionLocked) continue
                 val stuckSecs = (System.currentTimeMillis() - watchdogLastTick) / 1_000
                 if (stuckSecs > config.watchdogTimeoutSecs) {
-                    log("WDG: Không có video mới trong ${stuckSecs}s — kích hoạt smart recovery")
+                    if (watchdogStuckFlag) {
+                        // Cờ lần trước CHƯA bị farmOneAccount() reset → nó không chạy tới
+                        // được bước kiểm tra → rất có thể đã treo hẳn, không chỉ "đứng hình".
+                        // Trước v1.3.0: watchdog chỉ set cờ rồi TỰ reset timer, lặp vô hạn mà
+                        // không leo thang gì thêm → đồng hồ đếm ngược trên overlay vẫn chạy
+                        // (tính theo wall-clock) trong khi automation đã đứng im thật sự.
+                        consecutiveUnconsumed++
+                        log("WDG: ⚠ Main loop chưa xử lý cảnh báo watchdog lần trước " +
+                            "(${consecutiveUnconsumed} lần liên tiếp) — nghi ngờ đã treo hẳn")
+                        if (consecutiveUnconsumed >= 2) {
+                            log("WDG: 🛑 Main loop không phản hồi ~${stuckSecs * 2}s — " +
+                                "watchdog tự can thiệp trực tiếp (kill + relaunch TikTok)")
+                            notifyDiscord("⚠️ **AT Pro** — Phát hiện nghi ngờ tool bị treo " +
+                                "(~${stuckSecs * 2}s không phản hồi), đang tự khôi phục...")
+                            try {
+                                host.killTikTok()
+                                delay(2_500)
+                                host.launchTikTok()
+                                log("WDG: ✓ Đã tự relaunch TikTok — nếu main loop vẫn không " +
+                                    "phản hồi sau việc này, cần dừng tool thủ công và báo lỗi")
+                            } catch (e: Exception) {
+                                log("WDG: Lỗi khi tự can thiệp: ${e.message}")
+                            }
+                            consecutiveUnconsumed = 0
+                        }
+                    } else {
+                        consecutiveUnconsumed = 0
+                        log("WDG: Không có video mới trong ${stuckSecs}s — kích hoạt smart recovery")
+                    }
                     watchdogStuckFlag = true
                     // Reset timer để không kích hoạt lại ngay lập tức
                     watchdogLastTick = System.currentTimeMillis()
@@ -2575,34 +2719,70 @@ class AutomationEngine(
 
     /** Click Profile tab → đọc @username → về feed. */
     private suspend fun detectCurrentAccount(): String? {
-        val profileTab = NodeTraverser.findProfileTab(host.getRootNode()) ?: run {
-            log("WARN: detectCurrentAccount: không tìm thấy profile tab")
+        // v1.3.0: Popup có thể đang che nút Profile tab khiến findProfileTab()
+        // không thấy gì — xử lý popup ưu tiên TRƯỚC khi kết luận thất bại thật sự.
+        var profileTab = NodeTraverser.findProfileTab(host.getRootNode())
+        if (profileTab == null) {
+            val cleared = popup.handleIfPresent()
+            if (cleared.handled) {
+                log("POPUP: Đã dọn popup (${cleared.type}) đang che Profile tab")
+                delay(700)
+                profileTab = NodeTraverser.findProfileTab(host.getRootNode())
+            }
+        }
+        if (profileTab == null) {
+            log("WARN: detectCurrentAccount: không tìm thấy profile tab (đã thử dọn popup)")
             return null
         }
         host.clickNode(profileTab.node)
         delay(2_000)
-        val id = NodeTraverser.getCurrentAccountId(host.getRootNode())
+
+        var id = NodeTraverser.getCurrentAccountId(host.getRootNode())
+        if (id == null) {
+            // v1.3.0: popup có thể xuất hiện NGAY sau khi vào Hồ sơ (vd thông báo,
+            // gợi ý) che mất @username — thử dọn rồi đọc lại 1 lần.
+            val cleared = popup.handleIfPresent()
+            if (cleared.handled) {
+                log("POPUP: Đã dọn popup (${cleared.type}) trong màn Hồ sơ")
+                delay(700)
+                id = NodeTraverser.getCurrentAccountId(host.getRootNode())
+            }
+        }
         navigateToFeedTab()
-        if (id == null) log("WARN: detectCurrentAccount: không đọc được @username")
+        if (id == null) {
+            log("WARN: detectCurrentAccount: không đọc được @username")
+        } else {
+            log("OK: Đã xác nhận tài khoản hiện tại là: @$id")
+        }
         return id
     }
 
     /** Sau switch: verify @username thực tế khớp với expected. */
     private suspend fun verifyCurrentAccount(expected: String) {
-        val profileTab = NodeTraverser.findProfileTab(host.getRootNode()) ?: run {
+        var profileTab = NodeTraverser.findProfileTab(host.getRootNode())
+        if (profileTab == null && popup.handleIfPresent().handled) {
+            delay(700)
+            profileTab = NodeTraverser.findProfileTab(host.getRootNode())
+        }
+        if (profileTab == null) {
+            log("WARN: verifyCurrentAccount: không tìm thấy profile tab — fallback save @$expected")
             autoSaveAccounts(listOf(expected)); return
         }
         host.clickNode(profileTab.node)
         delay(2_000)
 
-        val actual = NodeTraverser.getCurrentAccountId(host.getRootNode())
+        var actual = NodeTraverser.getCurrentAccountId(host.getRootNode())
+        if (actual == null && popup.handleIfPresent().handled) {
+            delay(700)
+            actual = NodeTraverser.getCurrentAccountId(host.getRootNode())
+        }
         when {
             actual == null ->
                 log("WARN: verifyCurrentAccount: không đọc được @username — fallback save @$expected")
             !actual.equals(expected, ignoreCase = true) ->
                 log("WARN: Account mismatch: expected=@$expected actual=@$actual")
             else ->
-                log("OK: Đã xác nhận: @$actual")
+                log("OK: Đã xác nhận tài khoản hiện tại là: @$actual")
         }
         autoSaveAccounts(listOf(actual ?: expected))
         navigateToFeedTab()
@@ -2668,6 +2848,19 @@ class AutomationEngine(
         isResting = false
         LanWebSocketServer.broadcast("farmStatus",
             mapOf("status" to "stopped", "reason" to reason))
+
+        // v1.3.0: thông báo Discord cho các trường hợp KHÔNG đi qua notifyFarmCompleted
+        // riêng ở trên (TikTok chính đã tự gửi message chi tiết hơn kèm thống kê).
+        when (reason) {
+            "user_stopped" -> notifyDiscord("⏹️ **AT Pro** — Người dùng đã dừng phiên nuôi acc")
+            "facebook_completed" -> notifyDiscord("✅ **AT Pro** — Hoàn thành phiên nuôi Facebook")
+            "x_completed"         -> notifyDiscord("✅ **AT Pro** — Hoàn thành phiên nuôi X")
+            "instagram_completed" -> notifyDiscord("✅ **AT Pro** — Hoàn thành phiên nuôi Instagram")
+            "threads_completed"   -> notifyDiscord("✅ **AT Pro** — Hoàn thành phiên nuôi Threads")
+            "snapchat_completed"  -> notifyDiscord("✅ **AT Pro** — Hoàn thành phiên nuôi Snapchat")
+            "task_completed"      -> notifyDiscord("✅ **AT Pro** — Hoàn thành phiên Task mode")
+            // "completed" (TikTok chính) đã có message riêng ở trên, không gửi trùng.
+        }
     }
 
     private fun log(msg: String) {
@@ -2675,6 +2868,23 @@ class AutomationEngine(
         LanWebSocketServer.broadcast("log", mapOf("message" to msg, "level" to "INFO"))
         host.scope.launch { repo.log(msg) }
         OverlayFarmMonitor.addLog(msg)   // [v1.1.0] hiển thị log lên overlay popup
+    }
+
+    /**
+     * v1.3.0 — Gửi thông báo trạng thái nuôi acc qua Discord Webhook (nếu đã cấu
+     * hình trong Cài đặt). Chạy fire-and-forget trên coroutine riêng — lỗi mạng/
+     * webhook sai KHÔNG BAO GIỜ được phép làm gián đoạn luồng farm chính.
+     */
+    private fun notifyDiscord(message: String) {
+        val url = config.discordWebhookUrl
+        if (url.isBlank()) return
+        host.scope.launch {
+            try {
+                DiscordNotifier.send(url, message)
+            } catch (e: Exception) {
+                Log.w(TAG, "notifyDiscord lỗi: ${e.message}")
+            }
+        }
     }
 
     fun onEvent(event: AccessibilityEvent) { /* reserved */ }
@@ -3122,11 +3332,26 @@ class AutomationEngine(
         var scrolled = 0
         var liked    = 0
 
-        log("FB: Lướt feed ${durationSecs}s (likeRate=${config.facebookLikeRate})")
+        log("FB: Lướt feed ${durationSecs}s (likeRate=${config.facebookLikeRate}, reelsRate=${config.facebookReelsViewRate})")
 
         while (secsLeftNow() > 0L && isFarming) {
             awaitResumed()
             val secsLeft = secsLeftNow()
+
+            // v1.3.0: fallback chống văng khỏi Facebook (crash app khác nổi lên, dialog
+            // hệ thống chiếm foreground, v.v.) — trước đây không có kiểm tra nào, cứ thế
+            // tìm nút Like/Comment trên sai màn hình → toàn bộ hành động thất bại âm thầm.
+            val curPkg = host.getRootNode()?.packageName
+            if (curPkg != null && curPkg != fbPkg) {
+                log("FB: ⚠ Không còn ở Facebook (đang ở '$curPkg') — thử khôi phục")
+                if (!dismissFacebookPopupFallback("khôi phục về Facebook")) host.pressBack()
+                delay(1_000)
+                if (host.getRootNode()?.packageName != fbPkg) {
+                    log("FB: Vẫn chưa về Facebook — mở lại app")
+                    host.launchApp(fbPkg)
+                    delay(2_000)
+                }
+            }
 
             OverlayFarmMonitor.update(
                 accountIndex    = 1, accountTotal = 1,
@@ -3139,52 +3364,71 @@ class AutomationEngine(
                 // v1.2.9: Khoảng "đọc bài" 8–25s (config.facebookReadTimeMin/MaxSecs)
                 // trước khi quyết định like/lướt tiếp — thay cho delay cố định cũ,
                 // mô phỏng hành vi đọc tự nhiên thay vì lướt liên tục không dừng.
-                val readMs = Random.nextLong(
-                    config.facebookReadTimeMinSecs * 1_000L,
-                    (config.facebookReadTimeMaxSecs + 1) * 1_000L,
+                val readSecs = Random.nextLong(
+                    config.facebookReadTimeMinSecs.toLong(),
+                    (config.facebookReadTimeMaxSecs + 1).toLong(),
                 )
-                delay(readMs)
+                // v1.3.0: log hiển thị số giây đọc thực tế (xs) để người dùng thấy
+                // tool đang "đọc" bao lâu, thay vì chỉ báo chung chung.
+                log("FB: Đang đọc bài viết... (${readSecs}s)")
+                delay(readSecs * 1_000L)
 
-                // v1.2.9: cải thiện tìm nút Like dựa trên phân tích manifest +
-                // tài liệu accessibility-comment-like-logic.md
-                // FbMainTabActivity dùng native view — Like button có text "Thích"/"Like"
-                // hoặc contentDescription tương ứng
-                if (Random.nextFloat() < config.facebookLikeRate) {
-                    val root = host.getRootNode()
-                    val likeBtn = NodeTraverser.findByText(root, "thích", ignoreCase = true)
-                        ?: NodeTraverser.findByText(root, "like", ignoreCase = true)
-                        ?: NodeTraverser.findByContentDesc(root, "thích", ignoreCase = true)
-                        ?: NodeTraverser.findByContentDesc(root, "like", ignoreCase = true)
+                // v1.3.0: cập nhật logic tìm nút Like theo accessibility-comment-like-logic.md
+                // Tier 1: content-desc khớp CHÍNH XÁC (findByContentDescExact) — tránh
+                // contains() bắt nhầm "Unlike"/"Bỏ thích" (đều chứa "thích"/"like" như substring).
+                // Tier 2: fallback text khớp chính xác.
+                val root = host.getRootNode()
+                var likeBtn = NodeTraverser.findByContentDescExact(root, "thích", "like")
+                    ?: NodeTraverser.findByText(root, "thích", exact = true)
+                    ?: NodeTraverser.findByText(root, "like", exact = true)
 
-                    if (likeBtn != null) {
-                        val label = (
-                            likeBtn.text?.toString()
-                                ?: likeBtn.node.contentDescription?.toString()
-                                ?: ""
-                        ).lowercase()
-                        // v1.2.9: check isChecked TRƯỚC (theo doc) — Facebook Like là toggle
-                        // button 2 trạng thái; isChecked = true nghĩa là ĐÃ like rồi, click
-                        // lại sẽ thành UNLIKE. Đây là bug phổ biến nhất khi auto-like Facebook.
-                        val alreadyLiked = likeBtn.node.isChecked ||
-                            "bỏ thích" in label || "unlike" in label || "đã thích" in label
-                        val isCommentBtn = "bình luận" in label || "comment" in label
-                        if (!alreadyLiked && !isCommentBtn) {
-                            log("FB: Bài viết hay đấy, để lại tim nào...")
-                            Human.microPause()
-                            host.clickNode(likeBtn.node)
-                            liked++
-                            log("FB: Tim bài đăng #$liked ❤")
-                            OverlayFarmMonitor.update(
-                                accountIndex = 1, accountTotal = 1,
-                                accountId = "Facebook",
-                                sessionSecsLeft = secsLeftNow(), totalSecsLeft = secsLeftNow(),
-                                action = "FB: Tim bài #$liked ❤",
-                            )
-                            Human.delay(800, 1_500)
-                        }
+                var didView = false
+                val wantsToLike = Random.nextFloat() < config.facebookLikeRate
+                if (wantsToLike && likeBtn == null) {
+                    // v1.3.0: không tìm thấy nút Like — thử dọn popup lạ (nếu có) rồi
+                    // tìm lại 1 lần, thay vì bỏ cuộc ngay (fallback chống popup che UI).
+                    if (dismissFacebookPopupFallback("tìm nút Like")) {
+                        val root2 = host.getRootNode()
+                        likeBtn = NodeTraverser.findByContentDescExact(root2, "thích", "like")
+                            ?: NodeTraverser.findByText(root2, "thích", exact = true)
+                            ?: NodeTraverser.findByText(root2, "like", exact = true)
+                    }
+                    if (likeBtn == null) log("FB: Không tìm thấy nút Like ở bài này — lướt tiếp")
+                }
+                if (wantsToLike && likeBtn != null) {
+                    val label = (
+                        likeBtn.text?.toString()
+                            ?: likeBtn.node.contentDescription?.toString()
+                            ?: ""
+                    ).lowercase()
+                    // isChecked TRƯỚC (theo doc) — Facebook Like là toggle button 2 trạng
+                    // thái; isChecked = true nghĩa là ĐÃ like rồi, click lại sẽ thành UNLIKE.
+                    val alreadyLiked = likeBtn.isChecked || likeBtn.isSelected ||
+                        "bỏ thích" in label || "unlike" in label || "đã thích" in label
+                    if (!alreadyLiked) {
+                        log("FB: Bài viết hay đấy, để lại tim nào...")
+                        Human.microPause()
+                        host.clickNode(likeBtn.node)
+                        liked++
+                        log("FB: Tim bài đăng #$liked ❤")
+                        OverlayFarmMonitor.update(
+                            accountIndex = 1, accountTotal = 1,
+                            accountId = "Facebook",
+                            sessionSecsLeft = secsLeftNow(), totalSecsLeft = secsLeftNow(),
+                            action = "FB: Tim bài #$liked ❤",
+                        )
+                        Human.delay(800, 1_500)
+                    } else {
+                        log("FB: Bài này thích rồi, lướt tiếp thôi...")
                     }
                 } else {
                     log("FB: Lướt tiếp xem có gì hay không...")
+                }
+
+                // v1.3.0: xem bình luận thụ động (không gõ) — tái sử dụng ý tưởng
+                // commentViewRate của TikTok, áp riêng cho Facebook.
+                if (Random.nextFloat() < config.facebookCommentViewRate) {
+                    didView = doFacebookViewComments()
                 }
 
                 OverlayFarmMonitor.update(
@@ -3195,15 +3439,22 @@ class AutomationEngine(
                 )
 
                 // Lướt feed lên
-                val x = screenW / 2 + Human.jitter(12)
-                host.swipeSuspend(
-                    x, (screenH * 0.78).toInt(),
-                    x, (screenH * 0.22).toInt(),
-                    Human.swipeDuration(480),
-                )
+                if (!didView) {
+                    val x = screenW / 2 + Human.jitter(12)
+                    host.swipeSuspend(
+                        x, (screenH * 0.78).toInt(),
+                        x, (screenH * 0.22).toInt(),
+                        Human.swipeDuration(480),
+                    )
+                }
                 scrolled++
                 Human.delay(1_500, 3_000)
                 Human.occasionalPause(config.occasionalPauseChance)
+
+                // v1.3.0: thỉnh thoảng ghé qua tab Reels giữa lúc lướt feed.
+                if (secsLeftNow() > 30L && Random.nextFloat() < config.facebookReelsViewRate) {
+                    doFacebookReels()
+                }
             }
             if (iterationOk == null) delay(1_000)
         }
@@ -3213,6 +3464,146 @@ class AutomationEngine(
         delay(500)
         host.killApp(fbPkg)
         setStatus("")
+    }
+
+    /**
+     * v1.3.0 — Facebook chưa có PopupHandler xây riêng nhiều đời như TikTok (TikTok
+     * có dữ liệu thực tế tích luỹ qua nhiều bản). Dùng bộ quét từ khoá GENERIC thay
+     * thế — bắt các dialog phổ biến (xin quyền, cập nhật, đánh giá app, thông báo...)
+     * đè lên Facebook khiến các bước tìm nút Like/Comment/Reels thất bại.
+     *
+     * CHỈ gọi khi 1 hành động quan trọng đã thất bại (không tìm thấy nút mong đợi) —
+     * KHÔNG gọi chủ động mỗi vòng lặp, vì quét từ khoá rộng trên caption bài đăng thật
+     * dễ false-positive (đúng bug đã gặp với TikTok — xem [FIX-WAITFEED-POPUP]).
+     */
+    private suspend fun dismissFacebookPopupFallback(context: String): Boolean {
+        val root = host.getRootNode() ?: return false
+        val dismissTexts = listOf(
+            "không cho phép", "don't allow", "để sau", "not now", "bỏ qua", "skip",
+            "hủy", "cancel", "đóng", "close", "không, cảm ơn", "no thanks",
+        )
+        for (kw in dismissTexts) {
+            val btn = NodeTraverser.findByText(root, kw, ignoreCase = true, exact = true)
+            if (btn != null && btn.isClickable) {
+                log("FB: Phát hiện popup lạ khi $context — bấm '$kw' để đóng")
+                host.clickNode(btn.node)
+                delay(700)
+                return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * v1.3.0 — Xem bình luận thụ động (không gõ) trên Facebook: mở panel bình luận,
+     * cuộn xem vài lượt rồi đóng lại, không gõ/gửi gì. Mô phỏng hành vi đọc tự nhiên.
+     */
+    private suspend fun doFacebookViewComments(): Boolean {
+        val root = host.getRootNode()
+        val commentBtn = NodeTraverser.findByContentDescExact(root, "bình luận", "comment")
+            ?: NodeTraverser.findByText(root, "bình luận", ignoreCase = true)
+            ?: NodeTraverser.findByText(root, "comment", ignoreCase = true)
+            ?: return false
+
+        log("FB: Ghé xem vài bình luận...")
+        host.clickNode(commentBtn.node)
+        Human.delay(1_200, 2_000)
+
+        val scrollTimes = Random.nextInt(1, 4)
+        repeat(scrollTimes) {
+            host.swipeSuspend(
+                screenW / 2, (screenH * 0.75).toInt(),
+                screenW / 2, (screenH * 0.40).toInt(),
+                Human.swipeDuration(400),
+            )
+            Human.delay(900, 1_600)
+        }
+        log("FB: Đã xem $scrollTimes lượt bình luận")
+
+        host.pressBack()
+        delay(600)
+        return true
+    }
+
+    /**
+     * v1.3.0 — Tính năng xem Reels Facebook: chuyển qua tab Reels, lướt trong
+     * khoảng [facebookReelsViewDurationMinSecs, facebookReelsViewDurationMaxSecs]
+     * giây, thỉnh thoảng đúp màn hình để thích video, rồi quay lại tab Trang chủ.
+     */
+    private suspend fun doFacebookReels() {
+        val rootBeforeNav = host.getRootNode()
+        var reelsTab = NodeTraverser.findByContentDescExact(rootBeforeNav, "reels", "thước phim")
+            ?: NodeTraverser.findByText(rootBeforeNav, "reels", ignoreCase = true)
+            ?: NodeTraverser.findByText(rootBeforeNav, "thước phim", ignoreCase = true)
+        if (reelsTab == null && dismissFacebookPopupFallback("tìm tab Reels")) {
+            val rootRetry = host.getRootNode()
+            reelsTab = NodeTraverser.findByContentDescExact(rootRetry, "reels", "thước phim")
+                ?: NodeTraverser.findByText(rootRetry, "reels", ignoreCase = true)
+                ?: NodeTraverser.findByText(rootRetry, "thước phim", ignoreCase = true)
+        }
+        if (reelsTab == null) {
+            log("FB REELS: Không tìm thấy tab Reels — bỏ qua lượt này")
+            return
+        }
+
+        log("FB REELS: Ghé qua xem Reels...")
+        host.clickNode(reelsTab.node)
+        Human.delay(1_500, 2_500)
+
+        val durationSecs = Random.nextLong(
+            config.facebookReelsViewDurationMinSecs.toLong(),
+            config.facebookReelsViewDurationMaxSecs.toLong() + 1,
+        )
+        log("FB REELS: Xem Reels trong ${durationSecs}s (likeRate=${config.facebookReelsLikeRate})")
+
+        val startWall = System.currentTimeMillis()
+        var reelsWatched = 0
+        var reelsLiked    = 0
+        while (isFarming && (System.currentTimeMillis() - startWall) < durationSecs * 1_000L) {
+            awaitResumed()
+            val watchMs = Random.nextLong(3_000L, 9_000L)
+            OverlayFarmMonitor.update(
+                accountIndex = 1, accountTotal = 1, accountId = "Facebook",
+                sessionSecsLeft = durationSecs, totalSecsLeft = durationSecs,
+                action = "FB REELS: Đang xem Reel #${reelsWatched + 1}...",
+            )
+            delay(watchMs)
+            reelsWatched++
+            log("FB REELS: Đã xem Reel #$reelsWatched (${watchMs / 1000}s)")
+
+            // v1.3.0: Reels không có nút Like rõ ràng khi lướt nhanh — dùng đúp
+            // (double-tap) vào giữa màn hình, giống hành vi người dùng thật.
+            if (Random.nextFloat() < config.facebookReelsLikeRate) {
+                log("FB REELS: Video này hay, đúp màn hình để thích...")
+                host.doubleTapSuspend(screenW / 2, screenH / 2)
+                reelsLiked++
+                log("FB REELS: Đã thích Reel #$reelsLiked ❤")
+                OverlayFarmMonitor.update(
+                    accountIndex = 1, accountTotal = 1, accountId = "Facebook",
+                    sessionSecsLeft = durationSecs, totalSecsLeft = durationSecs,
+                    action = "FB REELS: Thích Reel #$reelsLiked ❤",
+                )
+                Human.delay(500, 1_000)
+            }
+
+            val x = screenW / 2 + Human.jitter(10)
+            host.swipeSuspend(x, (screenH * 0.80).toInt(), x, (screenH * 0.20).toInt(), Human.swipeDuration(350))
+            Human.delay(300, 800)
+        }
+        log("FB REELS: Hoàn thành — xem $reelsWatched reels, thích $reelsLiked")
+
+        // Quay lại tab Trang chủ (không dùng pressBack vì Reels là tab, không phải
+        // màn hình con trong back-stack — pressBack có thể thoát hẳn app).
+        val rootAfter = host.getRootNode()
+        val homeTab = NodeTraverser.findByContentDescExact(rootAfter, "trang chủ", "home")
+            ?: NodeTraverser.findByText(rootAfter, "trang chủ", ignoreCase = true)
+            ?: NodeTraverser.findByText(rootAfter, "home", ignoreCase = true)
+        if (homeTab != null) {
+            host.clickNode(homeTab.node)
+        } else {
+            host.pressBack()
+        }
+        delay(800)
     }
 
     // ── v1.2.4: Demo session runners — X, Instagram, Threads, Snapchat ────────
@@ -3232,34 +3623,68 @@ class AutomationEngine(
         val startPMs  = currentPauseMs()
         fun secsLeft() = maxOf(0L, (totalMs - ((System.currentTimeMillis() - startWall) - (currentPauseMs() - startPMs))) / 1_000L)
 
-        var scrolled = 0; var liked = 0; var reposted = 0
-        log("X: Lướt timeline ${config.xNurtureDurationSecs}s (like=${config.xLikeRate}, repost=${config.xRetweetRate})")
+        var scrolled = 0; var liked = 0; var reposted = 0; var repliesViewed = 0
+        log("X: Lướt timeline ${config.xNurtureDurationSecs}s (like=${config.xLikeRate}, repost=${config.xRetweetRate}, replyView=${config.xReplyViewRate})")
 
         while (secsLeft() > 0L && isFarming) {
             awaitResumed()
-            OverlayFarmMonitor.update(1, 1, "X", secsLeft(), secsLeft(), "X: Lướt timeline (${secsLeft()}s)")
+            OverlayFarmMonitor.update(1, 1, "X", secsLeft(), secsLeft(), "X: Đang xem tweet...")
             safeStep("x_iter", 30_000L) {
-                if (Random.nextFloat() < config.xLikeRate) {
-                    val root = host.getRootNode()
-                    val btn = NodeTraverser.findByText(root, "thích", ignoreCase = true)
-                        ?: NodeTraverser.findByText(root, "like", ignoreCase = true)
-                    if (btn != null) {
-                        Human.microPause(); host.clickNode(btn.node); liked++
+                val root = host.getRootNode()
+                // v1.3.0: content-desc khớp CHÍNH XÁC trước — tránh contains() bắt
+                // nhầm "Liked"/"Unlike" (X dùng content-desc "Like"/"Liked" cho nút tim).
+                val likeBtn = NodeTraverser.findByContentDescExact(root, "like", "thích")
+                    ?: NodeTraverser.findByText(root, "thích", exact = true)
+                    ?: NodeTraverser.findByText(root, "like", exact = true)
+                if (Random.nextFloat() < config.xLikeRate && likeBtn != null) {
+                    val label = (likeBtn.text ?: likeBtn.node.contentDescription?.toString() ?: "").lowercase()
+                    val alreadyLiked = likeBtn.isChecked || likeBtn.isSelected ||
+                        "liked" in label || "unlike" in label || "đã thích" in label
+                    if (!alreadyLiked) {
+                        Human.microPause(); host.clickNode(likeBtn.node); liked++
                         log("X: Đã like tweet (#$liked)"); Human.delay(600, 1_200)
+                        OverlayFarmMonitor.update(1, 1, "X", secsLeft(), secsLeft(), "X: Like tweet #$liked ❤")
                     }
                 }
                 if (Random.nextFloat() < config.xRetweetRate) {
                     reposted++; log("X: Repost tweet (#$reposted) (demo)")
                 }
+                // v1.3.0: thỉnh thoảng mở xem reply thụ động (không gõ) rồi đóng lại.
+                if (Random.nextFloat() < config.xReplyViewRate) {
+                    if (doXViewReplies()) repliesViewed++
+                }
                 val x = screenW / 2 + Human.jitter(12)
                 host.swipeSuspend(x, (screenH * 0.75).toInt(), x, (screenH * 0.25).toInt(), Human.swipeDuration(420))
                 scrolled++
+                log("X: Lướt tiếp timeline (#$scrolled)")
                 Human.delay(1_000, 2_200)
                 Human.occasionalPause(config.occasionalPauseChance)
             }
         }
-        log("X: Hoàn thành — lướt $scrolled lần, like $liked, repost $reposted")
+        log("X: Hoàn thành — lướt $scrolled lần, like $liked, repost $reposted, xem reply $repliesViewed lần")
         setStatus("X: Đang đóng X..."); delay(500); host.killApp(pkg); setStatus("")
+    }
+
+    /** v1.3.0 — Xem reply thụ động (không gõ) dưới 1 tweet trên X, rồi đóng lại. */
+    private suspend fun doXViewReplies(): Boolean {
+        val root = host.getRootNode()
+        val replyBtn = NodeTraverser.findByContentDescExact(root, "reply", "trả lời")
+            ?: NodeTraverser.findByText(root, "trả lời", ignoreCase = true)
+            ?: NodeTraverser.findByText(root, "reply", ignoreCase = true)
+            ?: return false
+
+        log("X: Xem thử vài reply...")
+        host.clickNode(replyBtn.node)
+        Human.delay(1_200, 2_000)
+        val scrollTimes = Random.nextInt(1, 4)
+        repeat(scrollTimes) {
+            host.swipeSuspend(screenW / 2, (screenH * 0.75).toInt(), screenW / 2, (screenH * 0.40).toInt(), Human.swipeDuration(400))
+            Human.delay(900, 1_600)
+        }
+        log("X: Đã xem $scrollTimes lượt reply")
+        host.pressBack()
+        delay(600)
+        return true
     }
 
     /** Demo nuôi Instagram: mở Instagram → lướt Reels → like → follow → đóng. */
@@ -3277,34 +3702,68 @@ class AutomationEngine(
         val startPMs  = currentPauseMs()
         fun secsLeft() = maxOf(0L, (totalMs - ((System.currentTimeMillis() - startWall) - (currentPauseMs() - startPMs))) / 1_000L)
 
-        var scrolled = 0; var liked = 0; var followed = 0
-        log("IG: Lướt Reels ${config.instagramNurtureDurationSecs}s (like=${config.instagramLikeRate}, follow=${config.instagramFollowRate})")
+        var scrolled = 0; var liked = 0; var followed = 0; var commentsViewed = 0
+        log("IG: Lướt Reels ${config.instagramNurtureDurationSecs}s (like=${config.instagramLikeRate}, follow=${config.instagramFollowRate}, commentView=${config.instagramCommentViewRate})")
 
         while (secsLeft() > 0L && isFarming) {
             awaitResumed()
-            OverlayFarmMonitor.update(1, 1, "Instagram", secsLeft(), secsLeft(), "IG: Lướt Reels (${secsLeft()}s)")
+            OverlayFarmMonitor.update(1, 1, "Instagram", secsLeft(), secsLeft(), "IG: Đang xem Reel/bài...")
             safeStep("ig_iter", 30_000L) {
-                if (Random.nextFloat() < config.instagramLikeRate) {
-                    val root = host.getRootNode()
-                    val btn = NodeTraverser.findByText(root, "thích", ignoreCase = true)
-                        ?: NodeTraverser.findByText(root, "like", ignoreCase = true)
-                    if (btn != null) {
-                        Human.microPause(); host.clickNode(btn.node); liked++
+                val root = host.getRootNode()
+                // v1.3.0: content-desc khớp CHÍNH XÁC trước — Instagram dùng
+                // content-desc "Like"/"Unlike" cho nút tim, contains() sẽ nhầm lẫn.
+                val likeBtn = NodeTraverser.findByContentDescExact(root, "like", "thích")
+                    ?: NodeTraverser.findByText(root, "thích", exact = true)
+                    ?: NodeTraverser.findByText(root, "like", exact = true)
+                if (Random.nextFloat() < config.instagramLikeRate && likeBtn != null) {
+                    val label = (likeBtn.text ?: likeBtn.node.contentDescription?.toString() ?: "").lowercase()
+                    val alreadyLiked = likeBtn.isChecked || likeBtn.isSelected ||
+                        "unlike" in label || "đã thích" in label
+                    if (!alreadyLiked) {
+                        Human.microPause(); host.clickNode(likeBtn.node); liked++
                         log("IG: Đã like (#$liked)"); Human.delay(500, 1_000)
+                        OverlayFarmMonitor.update(1, 1, "Instagram", secsLeft(), secsLeft(), "IG: Like #$liked ❤")
                     }
                 }
                 if (Random.nextFloat() < config.instagramFollowRate) {
                     followed++; log("IG: Follow (demo) (#$followed)")
                 }
+                // v1.3.0: thỉnh thoảng xem bình luận thụ động rồi đóng lại.
+                if (Random.nextFloat() < config.instagramCommentViewRate) {
+                    if (doInstagramViewComments()) commentsViewed++
+                }
                 val x = screenW / 2 + Human.jitter(10)
                 host.swipeSuspend(x, (screenH * 0.80).toInt(), x, (screenH * 0.20).toInt(), Human.swipeDuration(400))
                 scrolled++
+                log("IG: Lướt tiếp (#$scrolled)")
                 Human.delay(2_000, 4_000)  // Reels xem lâu hơn
                 Human.occasionalPause(config.occasionalPauseChance)
             }
         }
-        log("IG: Hoàn thành — lướt $scrolled lần, like $liked, follow $followed")
+        log("IG: Hoàn thành — lướt $scrolled lần, like $liked, follow $followed, xem bình luận $commentsViewed lần")
         setStatus("IG: Đang đóng Instagram..."); delay(500); host.killApp(pkg); setStatus("")
+    }
+
+    /** v1.3.0 — Xem bình luận thụ động (không gõ) trên Instagram, rồi đóng lại. */
+    private suspend fun doInstagramViewComments(): Boolean {
+        val root = host.getRootNode()
+        val commentBtn = NodeTraverser.findByContentDescExact(root, "comment", "bình luận")
+            ?: NodeTraverser.findByText(root, "bình luận", ignoreCase = true)
+            ?: NodeTraverser.findByText(root, "comment", ignoreCase = true)
+            ?: return false
+
+        log("IG: Xem thử vài bình luận...")
+        host.clickNode(commentBtn.node)
+        Human.delay(1_200, 2_000)
+        val scrollTimes = Random.nextInt(1, 4)
+        repeat(scrollTimes) {
+            host.swipeSuspend(screenW / 2, (screenH * 0.75).toInt(), screenW / 2, (screenH * 0.40).toInt(), Human.swipeDuration(400))
+            Human.delay(900, 1_600)
+        }
+        log("IG: Đã xem $scrollTimes lượt bình luận")
+        host.pressBack()
+        delay(600)
+        return true
     }
 
     /** Demo nuôi Threads: mở Threads → lướt feed → like → đóng. */
@@ -3322,31 +3781,64 @@ class AutomationEngine(
         val startPMs  = currentPauseMs()
         fun secsLeft() = maxOf(0L, (totalMs - ((System.currentTimeMillis() - startWall) - (currentPauseMs() - startPMs))) / 1_000L)
 
-        var scrolled = 0; var liked = 0
-        log("Threads: Lướt feed ${config.threadsNurtureDurationSecs}s (like=${config.threadsLikeRate})")
+        var scrolled = 0; var liked = 0; var repliesViewed = 0
+        log("Threads: Lướt feed ${config.threadsNurtureDurationSecs}s (like=${config.threadsLikeRate}, replyView=${config.threadsReplyViewRate})")
 
         while (secsLeft() > 0L && isFarming) {
             awaitResumed()
-            OverlayFarmMonitor.update(1, 1, "Threads", secsLeft(), secsLeft(), "Threads: Lướt feed (${secsLeft()}s)")
+            OverlayFarmMonitor.update(1, 1, "Threads", secsLeft(), secsLeft(), "Threads: Đang xem bài viết...")
             safeStep("threads_iter", 30_000L) {
-                if (Random.nextFloat() < config.threadsLikeRate) {
-                    val root = host.getRootNode()
-                    val btn = NodeTraverser.findByText(root, "thích", ignoreCase = true)
-                        ?: NodeTraverser.findByText(root, "like", ignoreCase = true)
-                    if (btn != null) {
-                        Human.microPause(); host.clickNode(btn.node); liked++
+                val root = host.getRootNode()
+                // v1.3.0: content-desc khớp CHÍNH XÁC trước, tránh contains() bắt
+                // nhầm "Unlike" (Threads dùng chung engine content-desc với Instagram).
+                val likeBtn = NodeTraverser.findByContentDescExact(root, "like", "thích")
+                    ?: NodeTraverser.findByText(root, "thích", exact = true)
+                    ?: NodeTraverser.findByText(root, "like", exact = true)
+                if (Random.nextFloat() < config.threadsLikeRate && likeBtn != null) {
+                    val label = (likeBtn.text ?: likeBtn.node.contentDescription?.toString() ?: "").lowercase()
+                    val alreadyLiked = likeBtn.isChecked || likeBtn.isSelected || "unlike" in label
+                    if (!alreadyLiked) {
+                        Human.microPause(); host.clickNode(likeBtn.node); liked++
                         log("Threads: Đã like (#$liked)"); Human.delay(600, 1_100)
+                        OverlayFarmMonitor.update(1, 1, "Threads", secsLeft(), secsLeft(), "Threads: Like #$liked ❤")
                     }
+                }
+                // v1.3.0: thỉnh thoảng xem reply thụ động rồi đóng lại.
+                if (Random.nextFloat() < config.threadsReplyViewRate) {
+                    if (doThreadsViewReplies()) repliesViewed++
                 }
                 val x = screenW / 2 + Human.jitter(8)
                 host.swipeSuspend(x, (screenH * 0.76).toInt(), x, (screenH * 0.26).toInt(), Human.swipeDuration(430))
                 scrolled++
+                log("Threads: Lướt tiếp (#$scrolled)")
                 Human.delay(1_200, 2_600)
                 Human.occasionalPause(config.occasionalPauseChance)
             }
         }
-        log("Threads: Hoàn thành — lướt $scrolled lần, like $liked")
+        log("Threads: Hoàn thành — lướt $scrolled lần, like $liked, xem reply $repliesViewed lần")
         setStatus("Threads: Đang đóng..."); delay(500); host.killApp(pkg); setStatus("")
+    }
+
+    /** v1.3.0 — Xem reply thụ động (không gõ) dưới 1 bài trên Threads, rồi đóng lại. */
+    private suspend fun doThreadsViewReplies(): Boolean {
+        val root = host.getRootNode()
+        val replyBtn = NodeTraverser.findByContentDescExact(root, "reply", "trả lời")
+            ?: NodeTraverser.findByText(root, "trả lời", ignoreCase = true)
+            ?: NodeTraverser.findByText(root, "reply", ignoreCase = true)
+            ?: return false
+
+        log("Threads: Xem thử vài reply...")
+        host.clickNode(replyBtn.node)
+        Human.delay(1_200, 2_000)
+        val scrollTimes = Random.nextInt(1, 4)
+        repeat(scrollTimes) {
+            host.swipeSuspend(screenW / 2, (screenH * 0.75).toInt(), screenW / 2, (screenH * 0.40).toInt(), Human.swipeDuration(400))
+            Human.delay(900, 1_600)
+        }
+        log("Threads: Đã xem $scrollTimes lượt reply")
+        host.pressBack()
+        delay(600)
+        return true
     }
 
     /** Demo nuôi Snapchat: mở Snapchat → xem Spotlight / Stories → swipe → đóng. */
@@ -3364,24 +3856,45 @@ class AutomationEngine(
         val startPMs  = currentPauseMs()
         fun secsLeft() = maxOf(0L, (totalMs - ((System.currentTimeMillis() - startWall) - (currentPauseMs() - startPMs))) / 1_000L)
 
-        var storiesViewed = 0
+        var storiesViewed = 0; var liked = 0
         val viewMs = config.snapchatStoryViewSecs * 1_000L
-        log("Snapchat: Xem Spotlight ${config.snapchatNurtureDurationSecs}s (${config.snapchatStoryViewSecs}s/story)")
+        log("Snapchat: Xem Spotlight ${config.snapchatNurtureDurationSecs}s (${config.snapchatStoryViewSecs}s/story, like=${config.snapchatLikeRate})")
 
         while (secsLeft() > 0L && isFarming) {
             awaitResumed()
-            OverlayFarmMonitor.update(1, 1, "Snapchat", secsLeft(), secsLeft(), "Snapchat: Xem story #${storiesViewed + 1}")
+            OverlayFarmMonitor.update(1, 1, "Snapchat", secsLeft(), secsLeft(), "Snapchat: Đang xem story #${storiesViewed + 1}")
             safeStep("snap_iter", 40_000L) {
                 delay(viewMs)  // xem story N giây
                 storiesViewed++
-                log("Snapchat: Đã xem story #$storiesViewed")
+                log("Snapchat: Đã xem story #$storiesViewed (${config.snapchatStoryViewSecs}s)")
+
+                // v1.3.0: thêm hành động Like — trước đây Snapchat chỉ xem/swipe,
+                // chưa có tương tác nào. Content-desc khớp CHÍNH XÁC, tránh contains()
+                // bắt nhầm nút đã ở trạng thái "Unlike"/"Liked".
+                if (Random.nextFloat() < config.snapchatLikeRate) {
+                    val root = host.getRootNode()
+                    val likeBtn = NodeTraverser.findByContentDescExact(root, "like", "thích")
+                        ?: NodeTraverser.findByText(root, "thích", exact = true)
+                        ?: NodeTraverser.findByText(root, "like", exact = true)
+                    if (likeBtn != null) {
+                        val label = (likeBtn.text ?: likeBtn.node.contentDescription?.toString() ?: "").lowercase()
+                        val alreadyLiked = likeBtn.isChecked || likeBtn.isSelected || "unlike" in label
+                        if (!alreadyLiked) {
+                            Human.microPause(); host.clickNode(likeBtn.node); liked++
+                            log("Snapchat: Đã thích story #$liked ❤"); Human.delay(500, 1_000)
+                            OverlayFarmMonitor.update(1, 1, "Snapchat", secsLeft(), secsLeft(), "Snapchat: Thích #$liked ❤")
+                        }
+                    }
+                }
+
                 // Swipe sang story tiếp theo (trái sang phải = next story)
                 val y = screenH / 2
                 host.swipeSuspend((screenW * 0.85).toInt(), y, (screenW * 0.15).toInt(), y, 250)
+                log("Snapchat: Chuyển sang story tiếp theo...")
                 Human.delay(800, 1_500)
             }
         }
-        log("Snapchat: Hoàn thành — đã xem $storiesViewed stories")
+        log("Snapchat: Hoàn thành — đã xem $storiesViewed stories, thích $liked")
         setStatus("Snapchat: Đang đóng..."); delay(500); host.killApp(pkg); setStatus("")
     }
 }
