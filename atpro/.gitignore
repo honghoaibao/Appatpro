@@ -1,0 +1,43 @@
+# ═══════════════════════════════════════════════════════════════
+#  .gitignore — AT PRO Android  (Native Compose, v1.0.4+)
+#  Flutter đã xóa (ADR-0004) — bỏ toàn bộ rule Flutter cũ.
+# ═══════════════════════════════════════════════════════════════
+
+# ── SECRETS — KHÔNG BAO GIỜ COMMIT ───────────────────────────
+android/key.properties
+android/keystore/
+*.jks
+*.keystore
+*.p12
+
+# ── Build output ──────────────────────────────────────────────
+build/
+dist/
+android/.gradle/
+android/captures/
+android/local.properties
+android/app/debug/
+android/app/profile/
+android/app/release/
+android/.cxx/
+
+# ── Gradle wrapper ────────────────────────────────────────────
+# gradlew + gradlew.bat  → ĐÃ COMMIT (ADR-0005) — không ignore.
+# gradle-wrapper.jar     → chưa commit (TD-CI-001) — vẫn ignore.
+android/gradle/wrapper/gradle-wrapper.jar
+
+# ── Scripts — được phép commit ────────────────────────────────
+# generate_keystore.sh, build_release.sh, commit_gradle_wrapper.sh
+# Không có rule nào match → được track bình thường.
+
+# ── IDE ───────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.DS_Store
+Thumbs.db
+
+# ── Logs ──────────────────────────────────────────────────────
+*.log
