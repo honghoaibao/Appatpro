@@ -1,0 +1,119 @@
+package com.atpro.automation
+
+import android.content.Context
+import android.view.accessibility.AccessibilityNodeInfo
+import kotlinx.coroutines.CoroutineScope
+
+/**
+ * IFarmHost — abstraction giữa AutomationEngine và Android framework.
+ *
+ * Tách biệt:
+ *   - Gesture/input dispatch (clickNode, swipe, pressBack, typeText)
+ *   - Screen dimensions
+ *   - Coroutine scope
+ *   - Context-dependent operations (launchTikTok, killTikTok, overlay)
+ *
+ * Production: TikTokAccessibilityService implements IFarmHost
+ * Unit tests:  FakeFarmHost hoặc MockK mock
+ *
+ * Mục đích: cho phép test AutomationEngine mà không cần Android runtime.
+ */
+interface IFarmHost {
+    /** Scope để launch farm coroutines. Trong tests: TestScope. */
+    val scope: CoroutineScope
+    val screenWidth: Int
+    val screenHeight: Int
+
+    /**
+     * v1.3.1 — ĐỔI thành suspend fun (trước là fun đồng bộ).
+     *
+     * Lý do: đây là call IPC đồng bộ (rootInActiveWindow) tới hệ thống
+     * Accessibility — nếu app đích (TikTok/Facebook...) đứng hình/tải nặng,
+     * call này có thể treo vô thời hạn. Vì nó KHÔNG phải 1 suspend point
+     * thực sự (chỉ là 1 lệnh chặn luồng gọi), safeStep()/withTimeoutOrNull()
+     * bọc quanh nó KHÔNG thể huỷ/thoát ra được — coroutine bị kẹt cứng, dẫn
+     * tới hiện tượng log "đứng hình" ở đúng giây đang xem (vd "Xem video (4s)")
+     * hoặc kẹt ở màn hình Home mà không có log/thời gian nuôi nào chạy tiếp
+     * (chỉ tổng thời gian ở overlay vẫn chạy vì overlay tự đếm bằng Handler
+     * riêng, độc lập với coroutine farm loop).
+     *
+     * Implementation (TikTokAccessibilityService) dispatch call thật sang
+     * Dispatchers.IO — nhờ đó nó trở thành 1 suspension point CÓ THỂ huỷ:
+     * nếu timeout hết hạn, coroutine gọi (vd trong safeStep) sẽ được trả
+     * quyền điều khiển lại NGAY, dù luồng IO bên dưới vẫn đang treo (nó tự
+     * kết thúc/bị bỏ rơi trong nền, không chặn farm loop nữa).
+     */
+    suspend fun getRootNode(): AccessibilityNodeInfo?
+    suspend fun clickNode(node: AccessibilityNodeInfo): Boolean
+    suspend fun clickSuspend(x: Int, y: Int): Boolean
+    suspend fun swipeSuspend(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Long = 400): Boolean
+    /**
+     * v1.3.0 — Đúp (double-tap) vào toạ độ (x, y), dùng cho hành vi "thích" trên
+     * các màn hình dạng short-form video (Reels Facebook...) không có nút Like
+     * rõ ràng — app chỉ nhận diện 2 lần chạm liên tiếp trong khoảng thời gian ngắn.
+     * Trả false nếu 1 trong 2 lần chạm bị gesture reject (vd toạ độ âm).
+     */
+    suspend fun doubleTapSuspend(x: Int, y: Int): Boolean
+    fun pressBack(): Boolean
+    fun typeText(node: AccessibilityNodeInfo, text: String): Boolean
+
+    /** Mở TikTok về màn hình chính. Trả false nếu không cài hoặc launch fail. */
+    fun launchTikTok(): Boolean
+    /** Mở TikTok Settings cho account-switch flow. */
+    fun openTikTokSettings(): Boolean
+    /**
+     * v1.2.1 Mở deeplink/URL bất kỳ (TikTok video link, profile link, v.v.).
+     * Dùng trong task mode để mở link nhiệm vụ từ Golike.
+     */
+    fun openDeepLink(url: String): Boolean
+    /**
+     * Force-stop TikTok process.
+     *
+     * Thứ tự: HOME → delay 600ms → killBackgroundProcesses().
+     * Phải là suspend để có thể delay() trước khi kill.
+     * KILL_BACKGROUND_PROCESSES chỉ hoạt động với background process — HOME trước.
+     */
+    suspend fun killTikTok()
+    /** Hiện floating overlay. OverlayFarmMonitor tự xử lý thread.
+     *  `\[serviceLabel\]` hiển thị đối diện với "AT PRO" trên header popup, vd "NUÔI TKT", "NV TIKTOK". */
+    fun showFarmOverlay(serviceLabel: String = "")
+    /** Ẩn floating overlay. */
+    fun hideFarmOverlay()
+
+    /**
+     * v1.2.3 — Mở app bất kỳ theo package name (vd Facebook, Zalo...).
+     * Dùng cho các demo "nuôi acc" ngoài TikTok.
+     * Trả false nếu không cài hoặc launch fail.
+     */
+    fun launchApp(packageName: String): Boolean
+
+    /**
+     * v1.2.3 — Force-stop app bất kỳ theo package name.
+     * Cùng cơ chế với killTikTok(): HOME → delay → killBackgroundProcesses().
+     */
+    suspend fun killApp(packageName: String)
+
+    /**
+     * v1.3.3 (bổ sung) — Trả Context thật để khởi chạy Activity từ coroutine nền
+     * (AccessibilityService không có startActivityForResult, cần Context thô
+     * để tự gọi context.startActivity() + FLAG_ACTIVITY_NEW_TASK).
+     * Dùng cho GolikeJobBridge — mở/đưa GolikeJobWebActivity lên foreground
+     * để giả lập nhận job Golike như người thật (xem GolikeJobBridge.kt).
+     * Implementation (TikTokAccessibilityService): trả `this` (Service là Context).
+     */
+    fun getContext(): Context
+
+    /**
+     * v1.3.3 (bổ sung 6) — Kéo qua NHIỀU điểm liên tiếp trong 1 cử chỉ DUY
+     * NHẤT (không nhấc tay giữa chừng) — khác `swipeSuspend()` (chỉ 2 điểm
+     * thẳng). Dùng cho captcha kéo-thả kiểu "kéo khối vuông xuyên qua vòng
+     * nét đứt rồi thả vào vòng đích" (Golike — xem
+     * `AutomationEngine.solveDragCaptchaIfPresent()`).
+     *
+     * `\[points\]` tối thiểu 2 điểm (toạ độ MÀN HÌNH THẬT, px, không phải CSS px
+     * trong WebView — bên gọi chịu trách nhiệm quy đổi). Trả false nếu
+     * `\[points\]` có ít hơn 2 phần tử hoặc gesture bị hệ thống từ chối (vd toạ
+     * độ âm/ngoài màn hình).
+     */
+    suspend fun dragPath(points: List<Pair<Int, Int>>, durationMs: Long = 900): Boolean
+}
