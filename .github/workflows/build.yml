@@ -4,6 +4,9 @@ on:
   push:
     branches: [ main, dev, release/* ]
     tags:     [ 'v*' ]
+    paths-ignore:
+      - '.github/workflows/build.yml'
+      - '.github/workflows/apply-atpro-archive-once.yml'
   pull_request:
     branches: [ main, dev ]
   workflow_dispatch:
