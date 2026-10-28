@@ -23,7 +23,8 @@ import org.junit.Assert.*
  *   - hasNavBar: detected via text, detected via resourceId, not detected
  *   - detectCheckpoint: positive, negative
  *   - parseAccountList: extracts @usernames
- *   - detectPopup: VERIFY_1234 (4 EditText), ACCOUNT_SWITCH (≥2 @usernames), NONE
+ *   - detectPopup: VERIFY_1234 (4 EditText), ACCOUNT_SWITCH (≥2 @usernames),
+ *     ACCOUNT_UPDATE_PROMPT (v1.3.1 — ưu tiên trước ACCOUNT_SWITCH), NONE
  *   - detectLive: via resourceId, not detected
  */
 class NodeTraverserTest {
@@ -45,6 +46,7 @@ class NodeTraverserTest {
         cls:       String                        = "android.widget.TextView",
         clickable: Boolean                       = false,
         children:  List<AccessibilityNodeInfo>   = emptyList(),
+        bounds:    Rect?                          = null,
     ): AccessibilityNodeInfo = mockk(relaxed = true) {
         every { this@mockk.text }                returns text?.toCharSequence()
         every { contentDescription }             returns desc?.toCharSequence()
@@ -56,7 +58,13 @@ class NodeTraverserTest {
         children.forEachIndexed { i, child ->
             every { getChild(i) } returns child
         }
-        every { getBoundsInScreen(any()) }       just Runs
+        if (bounds != null) {
+            every { getBoundsInScreen(any()) } answers {
+                firstArg<Rect>().set(bounds)
+            }
+        } else {
+            every { getBoundsInScreen(any()) } just Runs
+        }
     }
 
     private fun String.toCharSequence(): CharSequence = this
@@ -295,6 +303,37 @@ class NodeTraverserTest {
     }
 
     @Test
+    fun `detectPopup returns ACCOUNT_UPDATE_PROMPT when update dialog overlays the switch list`() {
+        // Hình 1 (v1.3.1): dialog "Tài khoản của bạn cần được cập nhật" đè lên NGAY
+        // TRÊN danh sách switch-account — cây node vẫn còn đủ @username + label
+        // "Chuyển đổi tài khoản" (danh sách nằm phía sau dialog), nên PHẢI ưu tiên
+        // ACCOUNT_UPDATE_PROMPT trước, không được rơi vào nhánh ACCOUNT_SWITCH.
+        val u1      = node(text = "@alice_farm")
+        val u2      = node(text = "@bob_farm")
+        val listLbl = node(text = "Chuyển đổi tài khoản")
+        val prompt  = node(text = "Tài khoản của bạn cần được cập nhật")
+        val laterBtn = node(text = "Để sau", clickable = true)
+        val root    = node(children = listOf(u1, u2, listLbl, prompt, laterBtn))
+
+        val info = NodeTraverser.detectPopup(root)
+
+        assertTrue(info.detected)
+        assertEquals(NodeTraverser.PopupType.ACCOUNT_UPDATE_PROMPT, info.type)
+        assertNotEquals(NodeTraverser.PopupType.ACCOUNT_SWITCH, info.type)
+    }
+
+    @Test
+    fun `detectPopup returns ACCOUNT_UPDATE_PROMPT via phone-link text without switch list`() {
+        val linkText = node(text = "Liên kết số điện thoại hoặc email")
+        val root     = node(children = listOf(linkText))
+
+        val info = NodeTraverser.detectPopup(root)
+
+        assertTrue(info.detected)
+        assertEquals(NodeTraverser.PopupType.ACCOUNT_UPDATE_PROMPT, info.type)
+    }
+
+    @Test
     fun `detectPopup returns NONE for normal feed screen`() {
         val video = node(text = "Watch this cool video")
         val like  = node(text = "Like", clickable = true)
@@ -406,5 +445,83 @@ class NodeTraverserTest {
 
         // "Quay lại ngay bây giờ" là wellbeing button — không khớp daily limit
         assertNull(NodeTraverser.findReturnToTikTokButton(root))
+    }
+
+    // ── findProfileTab (v1.3.2 — giới hạn quét vào dải Y đáy màn hình) ──
+
+    @Test
+    fun `findProfileTab ignores recommend tab resource-id false match via me substring`() {
+        // resource-id "tab_recommend" (tab "Đề xuất") chứa substring "me" —
+        // trước v1.3.2, PROFILE_IDS chứa "me" khiến node này bị nhận nhầm là
+        // nút Profile. Tab "Đề xuất" nằm Ở TRÊN màn hình (y=100/2000), KHÔNG
+        // phải nav bar đáy màn hình → phải bị loại khỏi ứng viên.
+        val recommendTab = node(
+            id = "tab_recommend", clickable = true,
+            bounds = Rect(0, 80, 200, 120),
+        )
+        // Nút Profile thật nằm trong nav bar ở đáy màn hình (y ~ 1900/2000),
+        // chỉ có text (không có resource-id) — mô phỏng biến thể TikTok chỉ
+        // expose text thuần cho tab này.
+        val profileBtn = node(
+            text = "Hồ sơ", clickable = true,
+            bounds = Rect(800, 1880, 1000, 1960),
+        )
+        val root = node(children = listOf(recommendTab, profileBtn))
+
+        val result = NodeTraverser.findProfileTab(root, screenHeight = 2000)
+
+        assertNotNull(result)
+        assertEquals("Hồ sơ", result!!.text)
+    }
+
+    @Test
+    fun `findProfileTab ignores comment button resource-id false match mid-feed`() {
+        // resource-id "btn_comment" (nút bình luận trên video) cũng chứa
+        // substring "me" — nằm giữa màn hình trong thanh action rail của
+        // video (y=900/2000), không phải nav bar → không được bấm nhầm thay
+        // vì Hồ sơ thật ở đáy màn hình (khớp qua text "Hồ sơ").
+        val commentBtn = node(
+            id = "btn_comment", clickable = true,
+            bounds = Rect(900, 880, 980, 940),
+        )
+        val profileBtn = node(
+            text = "Hồ sơ", clickable = true,
+            bounds = Rect(800, 1880, 1000, 1960),
+        )
+        val root = node(children = listOf(commentBtn, profileBtn))
+
+        val result = NodeTraverser.findProfileTab(root, screenHeight = 2000)
+
+        assertNotNull(result)
+        assertEquals("Hồ sơ", result!!.text)
+    }
+
+    @Test
+    fun `findProfileTab falls back to full-tree scan when screenHeight not provided`() {
+        // Không truyền screenHeight (giá trị mặc định) → giữ hành vi cũ, không regress
+        // các call site chưa cập nhật để truyền screen height.
+        val profileBtn = node(id = "tab_profile", clickable = true)
+        val root = node(children = listOf(profileBtn))
+
+        val result = NodeTraverser.findProfileTab(root)
+
+        assertNotNull(result)
+        assertEquals("tab_profile", result!!.resourceId)
+    }
+
+    @Test
+    fun `findProfileTab falls back to full-tree scan when nothing found in nav bar band`() {
+        // Nút Profile nằm ngoài dải ước tính (vd thiết bị có nav bar cao hơn) —
+        // vẫn phải tìm được qua fallback quét toàn cây, không được trả về null.
+        val profileBtn = node(
+            id = "tab_profile", clickable = true,
+            bounds = Rect(800, 1500, 1000, 1580),   // y=1540, ngoài dải 0.82*2000=1640
+        )
+        val root = node(children = listOf(profileBtn))
+
+        val result = NodeTraverser.findProfileTab(root, screenHeight = 2000)
+
+        assertNotNull(result)
+        assertEquals("tab_profile", result!!.resourceId)
     }
 }

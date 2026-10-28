@@ -1,6 +1,7 @@
 package com.atpro.ui.config
 
 import androidx.compose.animation.*
+import com.atpro.ui.theme.AtColors
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.BorderStroke
@@ -17,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
@@ -47,22 +49,22 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 
 // ── Palette ────────────────────────────────────────────────────────────────
-private val BgDark     = Color(0xFF0D0D14)
-private val BgDeeper   = Color(0xFF08080F)
-private val BgCard     = Color(0xFF141420)
-private val BgCardAlt  = Color(0xFF181826)
-private val BorderDark = Color(0xFF252538)
-private val BorderHi   = Color(0xFF323250)
-private val Purple     = Color(0xFF7C6FE0)
-private val PurpleHi   = Color(0xFF9D92F5)
-private val Pink       = Color(0xFFEC4899)
-private val Green      = Color(0xFF10B981)
-private val Amber      = Color(0xFFF59E0B)
-private val Cyan       = Color(0xFF22D3EE)
-private val Red        = Color(0xFFEF4444)
-private val TextPrim   = Color(0xFFEEEEF5)
-private val TextSec    = Color(0xFF9CA3AF)
-private val TextMuted  = Color(0xFF5C5C78)
+private val BgDark     = AtColors.Bg
+private val BgDeeper   = AtColors.Bg
+private val BgCard     = AtColors.Surface
+private val BgCardAlt  = AtColors.SurfaceHigh
+private val BorderDark = AtColors.Hairline
+private val BorderHi   = AtColors.HairlineHi
+private val Purple     = AtColors.Accent
+private val PurpleHi   = AtColors.AccentHi
+private val Pink       = AtColors.Rose
+private val Green      = AtColors.Success
+private val Amber      = AtColors.Warning
+private val Cyan       = AtColors.Info
+private val Red        = AtColors.Danger
+private val TextPrim   = AtColors.TextPrim
+private val TextSec    = AtColors.TextSec
+private val TextMuted  = AtColors.TextMuted
 
 // ── Section definitions ────────────────────────────────────────────────────
 
@@ -73,7 +75,7 @@ private enum class Section(val label: String, val icon: ImageVector, val accent:
     LOGS         ("Nhật ký",    Icons.Rounded.EventNote,            Color(0xFF8B5CF6)),
     TIMING       ("Thời gian",  Icons.Rounded.Timer,                Purple),
     ACTIONS      ("Hành động",  Icons.Rounded.TouchApp,             Pink),
-    TASK_GOLIKE  ("Nhiệm vụ",   Icons.Rounded.MonetizationOn,       Color(0xFF6C63FF)),
+    TASK_EARN    ("Nhiệm vụ",   Icons.Rounded.MonetizationOn,       Color(0xFF6C63FF)),
     // v1.2.9: Facebook lên chính thức — tách Timing/Actions giống TikTok,
     // không còn chung nhóm "Demo nuôi acc".
     FACEBOOK_TIMING ("Thời gian", Icons.Rounded.Timer,     Color(0xFF1877F2)),
@@ -120,11 +122,11 @@ private val SETTINGS_GROUPS: List<SettingsGroup> by lazy {
             icon = Icons.Rounded.ThumbUp, accent = Color(0xFF1877F2),
             sections = listOf(Section.FACEBOOK_TIMING, Section.FACEBOOK_ACTIONS),
         ))
-        if (com.atpro.security.AppConstants.GOLIKE_ENABLED) {
+        if (com.atpro.security.AppConstants.TASKS_ENABLED) {
             add(SettingsGroup(
-                id = "golike", label = "Golike TikTok",
+                id = "tasks", label = "Nhiệm vụ kiếm tiền",
                 icon = Icons.Rounded.MonetizationOn, accent = Color(0xFF6C63FF),
-                sections = listOf(Section.TASK_GOLIKE),
+                sections = listOf(Section.TASK_EARN),
             ))
         }
         add(SettingsGroup(
@@ -409,7 +411,7 @@ private fun SettingsLayout(
                 Section.ACTIONS        -> ActionsSection(state, onSet)
                 Section.NOTIFICATIONS  -> NotificationsSection(state, onSet)
                 Section.PERMISSIONS    -> PermissionsSection(state, onOpenAccessibility, onOpenOverlay, onOpenNotification)
-                Section.TASK_GOLIKE    -> TaskGolikeSection(state, onSet)
+                Section.TASK_EARN      -> TaskEarnSection(state, onSet)
                 Section.LOGS           -> if (logsVm != null) {
                     com.atpro.ui.logs.LogsScreen(vm = logsVm, onNavigateUp = null)
                 } else {
@@ -1260,7 +1262,7 @@ private fun PermissionCard(
         Box(
             modifier = Modifier
                 .size(42.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(13.dp))
                 .background(iconColor.copy(alpha = 0.12f)),
             contentAlignment = Alignment.Center,
         ) {
@@ -1381,17 +1383,17 @@ private fun QuickAction(icon: ImageVector, label: String, scheme: String, color:
 
 @Composable
 private fun SectionTitle(text: String, icon: ImageVector, accent: Color) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
         Box(
             modifier = Modifier
-                .size(30.dp)
-                .clip(RoundedCornerShape(9.dp))
-                .background(accent.copy(alpha = 0.15f)),
+                .size(32.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(accent.copy(alpha = 0.12f)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, null, tint = accent, modifier = Modifier.size(15.dp))
+            Icon(icon, null, tint = accent, modifier = Modifier.size(16.dp))
         }
-        Text(text, color = TextPrim, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Text(text, color = TextPrim, fontSize = 15.5.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -1400,10 +1402,11 @@ private fun SettingCard(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            // v1.4.0: thẻ phẳng — nền đặc + viền mảnh (bỏ bóng và gradient)
+            .clip(RoundedCornerShape(16.dp))
             .background(BgCard)
-            .border(1.dp, BorderDark, RoundedCornerShape(14.dp))
-            .padding(horizontal = 14.dp, vertical = 14.dp),
+            .border(1.dp, BorderDark, RoundedCornerShape(16.dp))
+            .padding(horizontal = 15.dp, vertical = 15.dp),
         content = content,
     )
 }
@@ -1471,10 +1474,10 @@ private fun InfoBanner(text: String, color: Color) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(14.dp))
             .background(color.copy(alpha = 0.07f))
-            .border(1.dp, color.copy(alpha = 0.18f), RoundedCornerShape(12.dp))
-            .padding(12.dp),
+            .border(1.dp, color.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
+            .padding(13.dp),
         verticalAlignment = Alignment.Top,
     ) {
         Icon(Icons.Rounded.Info, null, tint = color.copy(alpha = 0.7f), modifier = Modifier.size(14.dp).padding(top = 1.dp))
@@ -1487,9 +1490,10 @@ private fun InfoBanner(text: String, color: Color) {
 private fun StatusBadge(text: String, color: Color) {
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(color.copy(alpha = 0.12f))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .clip(RoundedCornerShape(20.dp))
+            .background(color.copy(alpha = 0.15f))
+            .border(1.dp, color.copy(alpha = 0.3f), RoundedCornerShape(20.dp))
+            .padding(horizontal = 9.dp, vertical = 4.dp),
     ) {
         Text(text, color = color, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
     }
@@ -1537,9 +1541,7 @@ private fun RangePreview(min: Float, max: Float, total: Float, color: Color) {
                     .width(totalPx * (endFrac - startFrac))
                     .height(5.dp)
                     .clip(RoundedCornerShape(3.dp))
-                    .background(
-                        Brush.horizontalGradient(listOf(color.copy(0.6f), color))
-                    ),
+                    .background(color),
             )
         }
     }
@@ -1782,11 +1784,11 @@ private fun CfgMultilineTextField(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Cài đặt nhiệm vụ Golike TikTok  [v1.2.9]
+//  Cài đặt nhiệm vụ kiếm tiền TikTok  [v1.2.9 → v1.4.0: bỏ Golike]
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun TaskGolikeSection(
+private fun TaskEarnSection(
     state: ConfigUiState,
     onSet: (ConfigUiState.() -> ConfigUiState) -> Unit,
 ) {
@@ -1801,8 +1803,8 @@ private fun TaskGolikeSection(
     ) {
 
     InfoBanner(
-        "Cấu hình cách tool thực hiện nhiệm vụ TikTok trên Golike. " +
-        "Cần đăng nhập Golike (nhập token ở tab Dịch vụ) và thiết lập Quyền trợ năng trước.",
+        "Cấu hình cách tool thực hiện nhiệm vụ TikTok kiếm tiền. " +
+        "Cần thiết lập Quyền trợ năng trước và kết nối nơi làm nhiệm vụ.",
         AccentTask,
     )
 
@@ -1813,7 +1815,7 @@ private fun TaskGolikeSection(
             note = "Chọn loại nhiệm vụ tool sẽ thực hiện:\n\n" +
                    "• Tim video ❤️: tool mở link TikTok và nhấn tim.\n" +
                    "• Follow 👤: tool mở trang profile và nhấn theo dõi.\n" +
-                   "• Cả hai: tool làm cả tim lẫn follow tuỳ job Golike giao.")
+                   "• Cả hai: tool làm cả tim lẫn follow tuỳ job nơi làm nhiệm vụ giao.")
         Spacer(Modifier.height(10.dp))
         val jobTypes = listOf("LIKE" to "Tim video ❤️", "FOLLOW" to "Follow 👤", "BOTH" to "Cả hai")
         Row(
@@ -1880,6 +1882,42 @@ private fun TaskGolikeSection(
         Spacer(Modifier.height(8.dp))
         SettingSliderInt("Lỗi liên tiếp tối đa", state.taskMaxConsecFailures, 1, 10, 1) {
             onSet { copy(taskMaxConsecFailures = it) }
+        }
+    }
+
+    ThinDivider()
+    SectionTitle("Nuôi acc giữa các job", Icons.Rounded.Spa, AccentTask)
+
+    SettingCard {
+        CardLabelWithNote("Nuôi ngắn sau mỗi job", Icons.Rounded.Videocam, AccentTask,
+            note = "Ngay SAU KHI báo cáo 1 job thành công, tool lướt feed bình thường trong " +
+                   "một khoảng thời gian ngẫu nhiên trước khi lấy job tiếp theo — tránh báo cáo " +
+                   "xong rồi nhận job mới ngay lập tức trông như bot. Khuyến nghị: 5–20 giây.")
+        Spacer(Modifier.height(10.dp))
+        RangeSliderPair(
+            label    = "Khoảng nuôi ngắn (giây)",
+            minValue = state.taskFarmAfterJobMinSecs,
+            maxValue = state.taskFarmAfterJobMaxSecs,
+            range    = 3..60,
+            accent   = AccentTask,
+            summaryPrefix = "Mỗi job: ",
+            onMinChanged = { onSet { copy(taskFarmAfterJobMinSecs = it) } },
+            onMaxChanged = { onSet { copy(taskFarmAfterJobMaxSecs = it) } },
+        )
+    }
+
+    SettingCard {
+        CardLabelWithNote("Nuôi lâu định kỳ", Icons.Rounded.SelfImprovement, AccentTask,
+            note = "Cứ hoàn thành đủ số job này, tool sẽ nuôi acc LÂU HƠN HẲN (thay vì nuôi " +
+                   "ngắn) trước khi lấy job tiếp theo — mô phỏng người dùng thật thỉnh thoảng " +
+                   "lướt TikTok lâu giữa các lần làm nhiệm vụ. Đặt '0' để tắt hẳn nuôi lâu.")
+        Spacer(Modifier.height(8.dp))
+        SettingSliderInt("Mỗi bao nhiêu job", state.taskLongFarmEveryNJobs, 0, 10, 1) {
+            onSet { copy(taskLongFarmEveryNJobs = it) }
+        }
+        Spacer(Modifier.height(4.dp))
+        SettingSliderInt("Thời lượng nuôi lâu (giây)", state.taskLongFarmDurationSecs, 60, 900, 30) {
+            onSet { copy(taskLongFarmDurationSecs = it) }
         }
     }
 

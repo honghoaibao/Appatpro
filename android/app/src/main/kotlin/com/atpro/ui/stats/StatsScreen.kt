@@ -1,6 +1,8 @@
 package com.atpro.ui.stats
 
 import androidx.compose.animation.*
+import com.atpro.ui.theme.AtColors
+import com.atpro.ui.theme.AtType
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -13,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -25,16 +28,16 @@ import com.atpro.db.dao.TotalsRow
 import com.atpro.db.entity.DailyStatRow
 
 // ── Design tokens ─────────────────────────────────────────────
-private val BgDark    = Color(0xFF0D0D14)
-private val CardDark  = Color(0xFF1A1A2E)
-private val BorderDark= Color(0xFF374151)
-private val Purple    = Color(0xFF6C63FF)
-private val Pink      = Color(0xFFEC4899)
-private val Green     = Color(0xFF10B981)
+private val BgDark    = AtColors.Bg
+private val CardDark  = AtColors.Surface
+private val BorderDark= AtColors.Hairline
+private val Purple    = AtColors.Accent
+private val Pink      = AtColors.Rose
+private val Green     = AtColors.Success
 private val Blue      = Color(0xFF60A5FA)
 private val Gold      = Color(0xFFF5A623)
-private val TextSec   = Color(0xFF9CA3AF)
-private val TextMuted = Color(0xFF6B7280)
+private val TextSec   = AtColors.TextSec
+private val TextMuted = AtColors.TextMuted
 
 // ── Các nền tảng thống kê ─────────────────────────────────────
 private enum class StatPlatform(val label: String, val color: Color) {
@@ -73,7 +76,7 @@ fun StatsScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text("Thống kê", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text("Thống kê", style = AtType.Title.copy(fontSize = 22.sp), color = AtColors.TextPrim)
                 Text("Tổng hợp hoạt động theo nền tảng", color = TextMuted, fontSize = 11.sp)
             }
         }
@@ -89,14 +92,14 @@ fun StatsScreen(
                     onClick  = { platform = p },
                     label    = { Text(p.label, fontSize = 12.sp) },
                     colors   = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = p.color.copy(alpha = 0.15f),
-                        selectedLabelColor     = p.color,
+                        selectedContainerColor = AtColors.SurfaceHigh,
+                        selectedLabelColor     = AtColors.TextPrim,
                         containerColor         = CardDark,
                         labelColor             = TextSec,
                     ),
                     border = FilterChipDefaults.filterChipBorder(
                         borderColor = BorderDark,
-                        selectedBorderColor = p.color.copy(alpha = 0.5f),
+                        selectedBorderColor = AtColors.TextSec,
                         enabled = true, selected = platform == p,
                     ),
                 )
@@ -134,14 +137,14 @@ private fun TikTokStatsBody(
                 onClick  = { vm.setRange(r) },
                 label    = { Text(r.label, fontSize = 12.sp) },
                 colors   = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = Purple.copy(alpha = 0.15f),
-                    selectedLabelColor     = Purple,
+                    selectedContainerColor = AtColors.SurfaceHigh,
+                    selectedLabelColor     = AtColors.TextPrim,
                     containerColor         = CardDark,
                     labelColor             = TextSec,
                 ),
                 border = FilterChipDefaults.filterChipBorder(
                     borderColor = BorderDark,
-                    selectedBorderColor = Purple.copy(alpha = 0.5f),
+                    selectedBorderColor = AtColors.TextSec,
                     enabled = true, selected = range == r,
                 ),
             )
@@ -244,10 +247,8 @@ private fun SummaryCard(totals: TotalsRow) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(
-                Brush.linearGradient(listOf(Purple.copy(alpha = 0.2f), Pink.copy(alpha = 0.1f)))
-            )
-            .border(1.dp, Purple.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
+            .background(CardDark)
+            .border(1.dp, BorderDark, RoundedCornerShape(16.dp))
             .padding(20.dp),
     ) {
         Text(
@@ -331,8 +332,8 @@ private fun RateBar(label: String, percent: Float, color: Color, icon: ImageVect
             progress   = { clamped },
             modifier   = Modifier
                 .fillMaxWidth()
-                .height(6.dp)
-                .clip(RoundedCornerShape(3.dp)),
+                .height(7.dp)
+                .clip(RoundedCornerShape(50)),
             color      = color,
             trackColor = color.copy(alpha = 0.12f),
         )
@@ -355,8 +356,9 @@ private fun DayGroup(date: String, rows: List<DailyStatRow>) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(16.dp))
             .background(CardDark)
+            .border(1.dp, BorderDark, RoundedCornerShape(16.dp))
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -375,9 +377,10 @@ private fun DayGroup(date: String, rows: List<DailyStatRow>) {
             // v1.2.3: tỷ lệ % like trong ngày — chip nhỏ cạnh ngày.
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Pink.copy(alpha = 0.12f))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Pink.copy(alpha = 0.14f))
+                    .border(1.dp, Pink.copy(alpha = 0.25f), RoundedCornerShape(20.dp))
+                    .padding(horizontal = 7.dp, vertical = 2.dp),
             ) {
                 Text("${formatRate(dayLikeRate)}% thích", color = Pink, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
             }
@@ -441,12 +444,20 @@ private fun EmptyStatsView() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Icon(
-            Icons.Rounded.BarChart,
-            contentDescription = null,
-            tint     = TextMuted.copy(alpha = 0.4f),
-            modifier = Modifier.size(56.dp),
-        )
+        Box(
+            modifier = Modifier
+                .size(88.dp)
+                .clip(RoundedCornerShape(50))
+                .background(CardDark),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Rounded.BarChart,
+                contentDescription = null,
+                tint     = TextMuted.copy(alpha = 0.5f),
+                modifier = Modifier.size(40.dp),
+            )
+        }
         Spacer(Modifier.height(16.dp))
         Text(
             "Chưa có dữ liệu",

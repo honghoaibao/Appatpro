@@ -2,16 +2,18 @@ package com.atpro.automation
 
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import com.atpro.accessibility.NodeTraverser
 import com.atpro.automation.popup.PopupHandler
 import com.atpro.data.FarmConfig
 import com.atpro.data.IFarmRepository
 import com.atpro.data.OverlayFarmMonitor
 import com.atpro.data.TaskJobType
-import com.atpro.golike.GolikeRepository
-import com.atpro.golike.TikTokAccountDto
-import com.atpro.golike.TikTokJobDto
-import com.atpro.golike.GolikeResult
+import com.atpro.tasks.TaskAccount
+import com.atpro.tasks.TaskJob
+import com.atpro.tasks.TaskJobKind
+import com.atpro.tasks.TaskProvider
+import com.atpro.tasks.TaskResult
 import com.atpro.network.LanWebSocketServer
 import com.atpro.network.DiscordNotifier
 import com.atpro.notification.AtProNotificationManager
@@ -29,7 +31,7 @@ import kotlin.random.Random
 
 enum class FarmMode { ALL_LOCAL, SELECTED_LIST }
 
-/** v1.2.1 — Chế độ dịch vụ: nuôi tài khoản hoặc làm nhiệm vụ Golike. */
+/** v1.2.1 — Chế độ dịch vụ: nuôi tài khoản hoặc làm nhiệm vụ kiếm tiền (v1.4.0: qua TaskProvider). */
 /** v1.2.3: thêm FACEBOOK_NURTURE — demo nuôi acc Facebook (mở app → lướt feed → like → đóng). */
 /** v1.2.4: thêm X_NURTURE, INSTAGRAM_NURTURE, THREADS_NURTURE, SNAPCHAT_NURTURE — demo nuôi acc. */
 enum class ServiceMode { FARM, TASK, FACEBOOK_NURTURE, X_NURTURE, INSTAGRAM_NURTURE, THREADS_NURTURE, SNAPCHAT_NURTURE }
@@ -182,6 +184,43 @@ private object Human {
     suspend fun likeAnimDelay() = kotlinx.coroutines.delay(Random.nextLong(350, 900))
 }
 
+/**
+ * v1.3.3 — Tính thời gian (giây) nuôi acc SAU KHI hoàn thành 1 job trong task mode.
+ *
+ * Pure function (không phụ thuộc Android/coroutine/host) — cố ý tách khỏi
+ * taskOneAccount() để test trực tiếp bằng JUnit, không cần mock IFarmHost/
+ * AccessibilityNodeInfo (theo skill `mat/tdd.md` — pure logic tách riêng khỏi
+ * phần cần Android framework). Xem `TaskNurtureTest.kt`.
+ *
+ * Logic:
+ *   - `jobsDone` là bội số dương của `everyNJobs` (và `everyNJobs > 0`) →
+ *     nuôi LÂU — trả về đúng `longDurationSecs` (cố định, không random —
+ *     phiên nuôi dài đã đủ đa dạng nhờ nội dung xem, không cần dao động thời lượng).
+ *   - Ngược lại → nuôi NGẮN — random đều trong [shortMinSecs, shortMaxSecs].
+ *
+ * `everyNJobs <= 0` → tắt hẳn nuôi lâu định kỳ, luôn dùng nuôi ngắn.
+ * `shortMaxSecs < shortMinSecs` (config lỗi/chưa đồng bộ) → coerce về shortMinSecs
+ * cho cả hai đầu, tránh IllegalArgumentException từ Random.nextInt().
+ *
+ * `randomInt`: nguồn sinh số ngẫu nhiên trong [min, max] (đóng cả 2 đầu) — tham
+ * số hoá để test kiểm soát được, không phụ thuộc kotlin.random.Random thật.
+ */
+internal fun taskPostJobNurtureSecs(
+    jobsDone:         Int,
+    everyNJobs:       Int,
+    longDurationSecs: Int,
+    shortMinSecs:     Int,
+    shortMaxSecs:     Int,
+    randomInt:        (IntRange) -> Int = { it.random() },
+): Int {
+    val isLongCycle = everyNJobs > 0 && jobsDone > 0 && jobsDone % everyNJobs == 0
+    if (isLongCycle) return longDurationSecs
+
+    val safeMin = shortMinSecs
+    val safeMax = maxOf(shortMinSecs, shortMaxSecs)
+    return randomInt(safeMin..safeMax)
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // retry — helper chạy lại với exponential backoff
@@ -253,6 +292,51 @@ private suspend fun <T> safeStep(
     null
 }
 
+/**
+ * v1.3.1 — Đọc root node + đánh giá (vd isOnFeedTab/detectLive...) dưới 1 timeout
+ * THỰC SỰ có tác dụng huỷ được.
+ *
+ * `host.getRootNode()` tự nó đã dispatch sang Dispatchers.IO (xem IFarmHost),
+ * nhưng bước DUYỆT CÂY sau đó (NodeTraverser.*) chạy trên root đã lấy được —
+ * nếu duyệt cây cũng bị treo (app đích đứng hình khi đang truy vấn từng node
+ * con qua IPC), nó cần nằm CÙNG 1 khối IO/timeout với bước fetch, không phải
+ * chạy tiếp trên dispatcher gốc. Gộp cả hai vào 1 khối withContext(IO) để nếu
+ * bất kỳ bước nào bên trong bị treo, timeoutMs vẫn trả quyền điều khiển lại
+ * cho vòng lặp farm thay vì kẹt cứng.
+ *
+ * Dùng ở các điểm nóng hay bị "đứng hình" theo phản hồi thực tế: drift-check
+ * trong lúc xem video, isLostWithRetry(), recoverFromStuck()/recoverToFeed().
+ *
+ * v1.3.1 (bổ sung): log khi timeout THỰC SỰ xảy ra (không phải block() trả về
+ * null hợp lệ — với các cách dùng hiện tại T luôn là Boolean non-null nên null
+ * ở đây đồng nghĩa timeout) — để verify được ngoài thực tế fix này có đang
+ * "cứu" được các lần treo hay không, thay vì chỉ tin suông vào lý thuyết.
+ * `logFn` optional: truyền `::log` từ nơi gọi để tin nhắn hiện lên CẢ overlay
+ * popup (tag "WDG:" đã có sẵn màu/icon riêng), không chỉ logcat.
+ */
+private suspend fun <T> safeScreenRead(
+    host:      IFarmHost,
+    timeoutMs: Long = 4_000L,
+    tag:       String = "",
+    logFn:     ((String) -> Unit)? = null,
+    block:     (AccessibilityNodeInfo?) -> T,
+): T? = try {
+    val result = withTimeoutOrNull(timeoutMs) {
+        withContext(Dispatchers.IO) { block(host.getRootNode()) }
+    }
+    if (result == null) {
+        val ctx = if (tag.isNotEmpty()) " [$tag]" else ""
+        Log.w(AutomationEngine.TAG, "IPC-TIMEOUT: getRootNode()/duyệt cây treo >${timeoutMs}ms$ctx — đã tự thoát")
+        logFn?.invoke("WDG: IPC treo >${timeoutMs}ms$ctx — đã tự thoát, không kẹt cứng")
+    }
+    result
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Exception) {
+    Log.e(AutomationEngine.TAG, "safeScreenRead: ${e.javaClass.simpleName} — ${e.message}")
+    null
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AutomationEngine — v2.0
 // ─────────────────────────────────────────────────────────────────────────────
@@ -287,7 +371,7 @@ private suspend fun <T> safeStep(
 class AutomationEngine(
     private val host:       IFarmHost,
     private val repo:       IFarmRepository,
-    private val golikeRepo: GolikeRepository? = null,
+    private val taskProvider: TaskProvider? = null,
 ) {
     companion object {
         const val TAG = "AutomationEngine"
@@ -436,22 +520,20 @@ class AutomationEngine(
     }
 
     /**
-     * v1.2.1 Bắt đầu chế độ làm nhiệm vụ Golike TikTok.
+     * v1.2.1 Bắt đầu chế độ làm nhiệm vụ TikTok (v1.4.0: qua [TaskProvider]).
      *
      * Flow:
-     *   1. Mở TikTok → scan acc đang đăng nhập trên thiết bị.
-     *   2. Lấy danh sách TikTok acc từ Golike server.
-     *   3. Match: acc thiết bị ∩ acc Golike → danh sách cần làm việc.
+     *   1. Lấy danh sách TikTok acc đã liên kết từ nhà cung cấp.
+     *   2. Mở TikTok → scan acc đang đăng nhập trên thiết bị.
+     *   3. Match: acc thiết bị ∩ acc nhà cung cấp → danh sách cần làm việc.
      *   4. Với mỗi acc: nuôi → lấy job → làm → nuôi → ... → chuyển acc.
      *
      * `mode`: cách build danh sách (ALL_LOCAL hoặc SELECTED_LIST).
      * `inputList`: danh sách acc cụ thể (dùng khi mode = SELECTED_LIST).
-     * `golikeAccounts`: danh sách TikTok acc từ Golike (đã fetch sẵn ở ViewModel).
      */
     fun startTask(
-        mode:           FarmMode,
-        inputList:      List<String>         = emptyList(),
-        golikeAccounts: List<TikTokAccountDto> = emptyList(),
+        mode:      FarmMode,
+        inputList: List<String> = emptyList(),
     ) {
         if (isFarming) return
         isFarming = true
@@ -464,7 +546,7 @@ class AutomationEngine(
             host.showFarmOverlay("NV TIKTOK")
 
             try {
-                runTaskStateMachine(mode, inputList, golikeAccounts)
+                runTaskStateMachine(mode, inputList)
             } catch (e: CancellationException) {
                 log("Task bị hủy bởi người dùng")
                 throw e
@@ -1156,6 +1238,7 @@ class AutomationEngine(
                     log("FIX: '$displayText' ở vị trí 0 → switch tạm sang '${tempTarget.displayText}'")
                     host.clickNode(tempTarget.node)
                     delay((config.delayAfterSwitchClick * 1_000).toLong().coerceAtLeast(1_800L))
+                    popup.handleIfPresent()  // [v1.3.1] dọn "cần cập nhật" nếu có, trước khi kill/relaunch
                     host.killTikTok(); delay(2_500); host.launchTikTok()
                     waitFeedLoad()
                     // Mở lại popup → target giờ không còn ở vị trí 0
@@ -1199,6 +1282,9 @@ class AutomationEngine(
                 host.clickNode(target.node)
                 // v1.2.7: TikTok tự về feed sau khi switch thành công — chỉ cần delay + waitFeedLoad
                 delay((config.delayAfterSwitchClick * 1_000).toLong().coerceAtLeast(2_000L))
+                // [v1.3.1] Popup "cần cập nhật" có thể chặn ngay đây — dọn trước khi chờ feed,
+                // tránh tốn hết 18s waitFeedLoad() rồi mới fallback kill+relaunch không cần thiết.
+                popup.handleIfPresent()
 
                 if (!isFarming) return@forEachIndexed
 
@@ -1257,7 +1343,7 @@ class AutomationEngine(
     }
 
     /** Tìm node nút "chuyển đổi tài khoản" — fresh read từ getRootNode(). */
-    private fun findSwitchBtnNode(): NodeTraverser.NodeResult? {
+    private suspend fun findSwitchBtnNode(): NodeTraverser.NodeResult? {
         val root = host.getRootNode()
         return NodeTraverser.findByText(root, "chuyển đổi tài khoản", ignoreCase = true)
             ?: NodeTraverser.findByText(root, "switch account",          ignoreCase = true)
@@ -1349,6 +1435,10 @@ class AutomationEngine(
         if (entry != null) {
             host.clickNode(entry.node)
             delay((config.delayAfterSwitchClick * 1_000).toLong())
+            // [v1.3.1] Popup "Tài khoản cần cập nhật" có thể đè lên NGAY sau click
+            // switch — nếu không dọn ở đây, code coi như switch xong (return true)
+            // trong khi thực ra dialog vẫn đang chặn, dẫn tới verify sai vòng sau.
+            popup.handleIfPresent()
             return true
         }
 
@@ -1445,6 +1535,13 @@ class AutomationEngine(
         // Nếu >= MAX_CONSECUTIVE_SKIPS: có thể TikTok đang không phản hồi swipe
         // → dùng forceSwipeNext() + delay dài hơn để thoát khỏi stuck state.
         var consecutiveSkipCount = 0
+
+        // v1.4.0 — Bộ điều tiết tỉ lệ hành động (xem FarmBehavior.kt): tỉ lệ THỰC TẾ
+        // bám sát cấu hình, phương sai thấp, không có chuỗi hành động liên tiếp quá dài.
+        // Mỗi acc/phiên một bộ riêng, mỗi loại hành động một gate.
+        val likeGate        = RateGate()
+        val followGate      = RateGate()
+        val commentViewGate = RateGate()
 
         // [FIX-1] Pre-loop update — đẩy thông tin acc/session/time lên overlay + Dashboard
         // NGAY TRƯỚC khi vào while loop, tránh hiển thị "--" khi bước [1]-[4] dùng continue/break.
@@ -1646,7 +1743,15 @@ class AutomationEngine(
             // ── [7] Watch video ───────────────────────────────────────────
             // [v1.1.9] swipeStartFactor() random 68–82% xử lý image post carousel tự nhiên:
             // vị trí bắt đầu thay đổi mỗi lần → tránh nhất quán chạm vào thanh dot ••••.
-            val watchMs   = randomWatchTimeMs()
+            // v1.4.0: kế hoạch xem có nhịp theo tiến độ phiên + mức quan tâm (interest)
+            // dùng để gắn quyết định like/follow với thời gian xem (xem video lâu → dễ thích hơn).
+            val sessionProgress = 1.0 - sessionSecsLeftNow().toDouble() /
+                (sessionTotalMs / 1_000.0).coerceAtLeast(1.0)
+            val watchPlan = FarmBehavior.watchPlan(
+                config.videoWatchTimeMin, config.videoWatchTimeMax, sessionProgress,
+            )
+            val interestW = FarmBehavior.interestWeight(watchPlan.interest)
+            val watchMs   = watchPlan.ms
             val watchSecs = (watchMs / 1_000L).coerceAtLeast(1L)
 
             // [v1.2.1] Drift detection — kiểm tra isOnFeedTab() mỗi FEED_CHECK_INTERVAL giây
@@ -1678,7 +1783,15 @@ class AutomationEngine(
 
                     // Kiểm tra drift mỗi 5 giây (không phải mỗi giây — tránh IPC quá nhiều)
                     if (w % FEED_CHECK_INTERVAL_SECS == 0L) {
-                        if (!NodeTraverser.isOnFeedTab(host.getRootNode())) {
+                        // v1.3.1: dùng safeScreenRead (fetch + duyệt cây trong 1 khối
+                        // IO có timeout riêng 4s) thay vì gọi thẳng — nếu bị treo ở
+                        // đúng bước này, ta chủ động coi là "rời feed" và thoát sớm
+                        // thay vì để cả vòng safeStep(watch_video) bên ngoài kẹt cứng
+                        // (đây chính là nguyên nhân log đứng ở "Xem video (Ns)").
+                        val onFeed = safeScreenRead(host, timeoutMs = 4_000L, tag = "watch_drift", logFn = ::log) { r ->
+                            NodeTraverser.isOnFeedTab(r)
+                        }
+                        if (onFeed != true) {
                             log("WATCH: Rời feed khi xem (${w}s còn lại) — dừng sớm, chờ recovery")
                             drifted = true
                             break
@@ -1726,8 +1839,14 @@ class AutomationEngine(
                     }
             }
 
-            // contentMatch → bypass likeRate; không match → dùng likeRate bình thường
-            val passRateGate = contentMatch || Random.nextFloat() < config.likeRate
+            // contentMatch → bypass likeRate; không match → dùng likeRate bình thường.
+            // v1.4.0: dùng RateGate (có hiệu chỉnh tỉ lệ thực tế + trọng số interest) và CHỈ
+            // tiêu thụ 1 lượt quyết định khi video thực sự có thể like (không phải live/quảng
+            // cáo bị chặn) → tỉ lệ thực tế không bị méo bởi các video bị loại.
+            val likeable = !isLiveContent && (!isAdContent || config.likeAdsEnabled)
+            val passRateGate = contentMatch ||
+                if (likeable) likeGate.decide(config.likeRate, interestW)
+                else Random.nextFloat() < config.likeRate
             if (passRateGate) {
                 val shouldLike = when {
                     isLiveContent -> false
@@ -1768,7 +1887,9 @@ class AutomationEngine(
             // ── [9] Follow ────────────────────────────────────────────────
             // [v1.2.1] Cơ chế mới: swipe phải sang trái → vào hồ sơ → follow → back về feed.
             // Không dùng freshRoot nữa (freshRoot là feed root, profile cần fetch riêng).
-            if (!isLiveContent && !isAdContent && Random.nextFloat() < config.followRate) {
+            var followedThisVideo = false
+            if (!isLiveContent && !isAdContent && followGate.decide(config.followRate, interestW)) {
+                followedThisVideo = true
                 OverlayFarmMonitor.update(idx + 1, total, account,
                     sessionSecsRemain, totalSecsRemain, "FOLLOW: Theo dõi")
                 // v1.2.3 [FIX]: timeout 30s — nếu treo giữa lúc swipe vào profile /
@@ -1786,7 +1907,8 @@ class AutomationEngine(
             // v1.2.9: bỏ qua live/ad (giống Like/Follow) + giới hạn số lần/giờ
             // theo khuyến nghị tài liệu accessibility-comment-like-logic.md —
             // comment liên tục là tín hiệu bot rõ nhất, dễ bị flag "spam behavior".
-            if (!isLiveContent && !isAdContent
+            // v1.4.0: không vừa follow vừa comment trên cùng 1 video (2 hành động "nặng").
+            if (!isLiveContent && !isAdContent && !followedThisVideo
                 && config.commentRate > 0f
                 && config.commentTexts.isNotEmpty()
                 && Random.nextFloat() < config.commentRate
@@ -1817,7 +1939,7 @@ class AutomationEngine(
             // Khác Comment ở trên: KHÔNG gõ/gửi gì — chỉ mở panel, cuộn xem vài
             // bình luận rồi đóng lại. Độc lập với commentRate — có thể xảy ra
             // dù không post comment nào trong lượt này.
-            if (!isLiveContent && !isAdContent && Random.nextFloat() < config.commentViewRate) {
+            if (!isLiveContent && !isAdContent && commentViewGate.decide(config.commentViewRate)) {
                 OverlayFarmMonitor.update(idx + 1, total, account,
                     sessionSecsRemain, totalSecsRemain, "CMT: Xem bình luận")
                 val viewOk = safeStep("comment_view_action", timeoutMs = 20_000L) {
@@ -2535,11 +2657,16 @@ class AutomationEngine(
                             notifyDiscord("⚠️ **AT Pro** — Phát hiện nghi ngờ tool bị treo " +
                                 "(~${stuckSecs * 2}s không phản hồi), đang tự khôi phục...")
                             try {
-                                host.killTikTok()
-                                delay(2_500)
-                                host.launchTikTok()
-                                log("WDG: ✓ Đã tự relaunch TikTok — nếu main loop vẫn không " +
-                                    "phản hồi sau việc này, cần dừng tool thủ công và báo lỗi")
+                                // v1.3.1: dùng chung relaunchTikTokWithRetry() (có retry+backoff,
+                                // tự bắn Discord khi relaunch xong/thất bại) thay vì kill+launch
+                                // 1 lần duy nhất như trước — nếu launch fail đúng lần đó thì trước
+                                // đây tool vẫn kẹt tới tận vòng watchdog kế tiếp (~30s sau).
+                                val recovered = relaunchTikTokWithRetry("WDG")
+                                log(
+                                    if (recovered) "WDG: ✓ Đã tự relaunch TikTok và về được feed"
+                                    else "WDG: ⚠ Đã relaunch nhưng chưa xác nhận về feed — nếu main " +
+                                        "loop vẫn không phản hồi sau việc này, cần dừng tool thủ công và báo lỗi"
+                                )
                             } catch (e: Exception) {
                                 log("WDG: Lỗi khi tự can thiệp: ${e.message}")
                             }
@@ -2595,12 +2722,38 @@ class AutomationEngine(
     private suspend fun isLostWithRetry(): Boolean {
         // v1.2.6: Không coi là "lạc" khi đang normalize hoặc thực hiện action
         if (isNormalizing || isActionLocked) return false
-        if (NodeTraverser.isOnFeedTab(host.getRootNode())) return false
+        // v1.3.1: safeScreenRead — nếu getRootNode()/duyệt cây bị treo, timeout
+        // trả về null (`!= true`) → coi như "không ở feed", để logic recovery
+        // xử lý tiếp thay vì cả hàm này bị kẹt cứng luôn.
+        if (checkOnFeed()) return false
         delay(1_500)
-        if (NodeTraverser.isOnFeedTab(host.getRootNode())) return false
+        if (checkOnFeed()) return false
         delay(1_500)
-        return !NodeTraverser.isOnFeedTab(host.getRootNode())
+        return !checkOnFeed()
     }
+
+    /** v1.3.1: helper dùng chung — isOnFeedTab() với timeout thực sự huỷ được. */
+    private suspend fun checkOnFeed(): Boolean =
+        safeScreenRead(host, timeoutMs = 4_000L, tag = "checkOnFeed", logFn = ::log) { NodeTraverser.isOnFeedTab(it) } == true
+
+    /**
+     * v1.3.1 — TikTok còn ở foreground không?
+     *
+     * killTikTok() luôn bấm HOME trước khi kill (bắt buộc — HOME_ACTION rồi mới
+     * killBackgroundProcesses() mới có tác dụng), nên MỌI lần recovery đều có
+     * thể tạm thời đi qua màn hình Home. Nếu ta đã thực sự rời khỏi TikTok
+     * (Home, hoặc bị văng sang app khác), pressBack/Home-tab (Tier 1/2 trong
+     * recoverToFeed/recoverFromStuck) hoàn toàn vô nghĩa — chỉ tốn thời gian
+     * (mỗi lần pressBack chờ >=1s) trước khi tới được Tier 3 relaunch, khiến
+     * tool trông như treo lâu ở màn hình Home dù cuối cùng vẫn tự hồi phục.
+     * Trả false khi không xác định được (timeout/null) → coi như "không chắc
+     * đang ở TikTok", ưu tiên nhảy thẳng Tier 3 cho an toàn.
+     */
+    private suspend fun isForegroundTikTok(): Boolean =
+        safeScreenRead(host, timeoutMs = 3_000L, tag = "isForegroundTikTok", logFn = ::log) { root ->
+            val pkg = root?.packageName?.toString()
+            pkg != null && AppConstants.tiktokPackages.any { it == pkg }
+        } == true
 
     /**
      * Smart recovery khi watchdog phát hiện không có video mới quá lâu.
@@ -2612,11 +2765,18 @@ class AutomationEngine(
      *   4. Kill + relaunch TikTok nếu vẫn chưa về feed
      */
     private suspend fun recoverFromStuck(): Boolean {
+        // v1.3.1: nếu đã văng khỏi TikTok hẳn (Home/app khác) thì pressBack vô nghĩa
+        // — nhảy thẳng Tier 3 (relaunch) thay vì tốn ~maxBackAttempts giây vô ích.
+        if (!isForegroundTikTok()) {
+            log("WDG-RECOVER: Không còn ở TikTok (Home/app khác) — relaunch ngay, bỏ qua back")
+            return relaunchTikTokWithRetry("WDG-RECOVER")
+        }
+
         log("WDG-RECOVER: Back ×${config.maxBackAttempts} để thoát màn hình chặn")
         repeat(config.maxBackAttempts) { i ->
             host.pressBack()
             delay(1_000)
-            if (NodeTraverser.isOnFeedTab(host.getRootNode())) {
+            if (checkOnFeed()) {
                 log("WDG-RECOVER: Về feed sau ${i + 1} lần back ✓")
                 return true
             }
@@ -2627,7 +2787,7 @@ class AutomationEngine(
         if (popupResult.handled) {
             log("WDG-RECOVER: Đã xử lý popup chặn")
             delay(1_000)
-            if (NodeTraverser.isOnFeedTab(host.getRootNode())) {
+            if (checkOnFeed()) {
                 log("WDG-RECOVER: Về feed sau xử lý popup ✓")
                 return true
             }
@@ -2635,10 +2795,37 @@ class AutomationEngine(
 
         // Vẫn chưa về feed → reset hoàn toàn
         log("WDG-RECOVER: Vẫn chưa về feed — kill + relaunch TikTok")
+        return relaunchTikTokWithRetry("WDG-RECOVER")
+    }
+
+    /**
+     * v1.3.1 — Kill + relaunch TikTok với retry có backoff (tái dùng retry()
+     * helper sẵn có ở phaseLaunch()). Trước đây các điểm relaunch trong
+     * recovery chỉ gọi launchTikTok() đúng 1 lần, không retry — nếu launch
+     * fail/chậm ngay lần đó, tool kẹt ở Home tới tận watchdog vòng sau.
+     *
+     * Bổ sung: bắn Discord khi phải relaunch (và khi relaunch thất bại hẳn) —
+     * dùng chung cho MỌI điểm gọi Tier 3 (recoverFromStuck, recoverToFeed,
+     * watchdog) để theo dõi từ xa xem tool có đang phải tự cứu liên tục hay
+     * không, không cần cầm máy lên xem log.
+     */
+    private suspend fun relaunchTikTokWithRetry(tag: String): Boolean {
+        notifyDiscord("🔄 **AT Pro** — [$tag] Đang kill + relaunch TikTok để tự khôi phục...")
         host.killTikTok()
         delay(2_000)
-        host.launchTikTok()
-        return waitFeedLoad()
+        val launched = retry(times = 3, delayMs = 2_000) {
+            if (host.launchTikTok()) true else null
+        }
+        if (launched == null) {
+            log("$tag: launchTikTok() thất bại sau 3 lần thử")
+            notifyDiscord("🛑 **AT Pro** — [$tag] launchTikTok() thất bại sau 3 lần thử — cần kiểm tra thủ công")
+            return false
+        }
+        val ok = waitFeedLoad()
+        if (!ok) {
+            notifyDiscord("⚠️ **AT Pro** — [$tag] Relaunch xong nhưng chưa xác nhận về được feed")
+        }
+        return ok
     }
 
     /**
@@ -2651,13 +2838,22 @@ class AutomationEngine(
      *   Tier 3: Kill + relaunch TikTok (nuclear option)
      */
     private suspend fun recoverToFeed(): Boolean {
+        // v1.3.1: Tier 0c — đã văng khỏi TikTok hẳn (Home/app khác) thì các Tier
+        // 0a/0b/1/2 bên dưới (đều thao tác TRONG TikTok) vô nghĩa — nhảy thẳng
+        // Tier 3. Đây chính là ca "kẹt ở màn hình Home, không log/không chạy
+        // thời gian nuôi" — trước đây phải đi hết 4 tier vô ích mới tới relaunch.
+        if (!isForegroundTikTok()) {
+            log("RECOVER: Không còn ở TikTok (Home/app khác) — relaunch ngay")
+            return relaunchTikTokWithRetry("RECOVER")
+        }
+
         // Tier 0a: [v1.1.8] Daily screen time limit — nhập passcode + click "Quay lại TikTok"
         // pressBack không hoạt động; phải nhập passcode và click button.
         if (NodeTraverser.detectDailyLimitScreen(host.getRootNode())) {
             log("RECOVER: Daily limit screen — nhập mật mã và tiếp tục")
             popup.handleIfPresent()
             delay(2_000)
-            if (NodeTraverser.isOnFeedTab(host.getRootNode())) return true
+            if (checkOnFeed()) return true
         }
 
         // Tier 0b: [v1.1.4+] Wellbeing / Swipe-to-return screen
@@ -2670,14 +2866,14 @@ class AutomationEngine(
             log("RECOVER: Wellbeing/swipe screen — click '$btnText'")
             host.clickNode(wellbeingBtn.node)
             delay(2_000)
-            if (NodeTraverser.isOnFeedTab(host.getRootNode())) return true
+            if (checkOnFeed()) return true
         }
 
         // Tier 1: pressBack
         repeat(config.maxBackAttempts) {
             host.pressBack()
             delay(1_200)
-            if (NodeTraverser.isOnFeedTab(host.getRootNode())) return true
+            if (checkOnFeed()) return true
         }
 
         // Tier 2: Home tab
@@ -2685,15 +2881,12 @@ class AutomationEngine(
         if (homeTab != null) {
             host.clickNode(homeTab.node)
             delay(2_000)
-            if (NodeTraverser.isOnFeedTab(host.getRootNode())) return true
+            if (checkOnFeed()) return true
         }
 
         // Tier 3: Kill + relaunch
         log("WARN: recoverToFeed: tier 3 — kill + relaunch TikTok")
-        host.killTikTok()
-        delay(2_000)
-        host.launchTikTok()
-        return waitFeedLoad()
+        return relaunchTikTokWithRetry("RECOVER")
     }
 
     /** Điều hướng về Home/Feed tab. Fallback relaunch nếu pressBack thoát TikTok. */
@@ -2721,13 +2914,13 @@ class AutomationEngine(
     private suspend fun detectCurrentAccount(): String? {
         // v1.3.0: Popup có thể đang che nút Profile tab khiến findProfileTab()
         // không thấy gì — xử lý popup ưu tiên TRƯỚC khi kết luận thất bại thật sự.
-        var profileTab = NodeTraverser.findProfileTab(host.getRootNode())
+        var profileTab = NodeTraverser.findProfileTab(host.getRootNode(), screenH)
         if (profileTab == null) {
             val cleared = popup.handleIfPresent()
             if (cleared.handled) {
                 log("POPUP: Đã dọn popup (${cleared.type}) đang che Profile tab")
                 delay(700)
-                profileTab = NodeTraverser.findProfileTab(host.getRootNode())
+                profileTab = NodeTraverser.findProfileTab(host.getRootNode(), screenH)
             }
         }
         if (profileTab == null) {
@@ -2759,10 +2952,10 @@ class AutomationEngine(
 
     /** Sau switch: verify @username thực tế khớp với expected. */
     private suspend fun verifyCurrentAccount(expected: String) {
-        var profileTab = NodeTraverser.findProfileTab(host.getRootNode())
+        var profileTab = NodeTraverser.findProfileTab(host.getRootNode(), screenH)
         if (profileTab == null && popup.handleIfPresent().handled) {
             delay(700)
-            profileTab = NodeTraverser.findProfileTab(host.getRootNode())
+            profileTab = NodeTraverser.findProfileTab(host.getRootNode(), screenH)
         }
         if (profileTab == null) {
             log("WARN: verifyCurrentAccount: không tìm thấy profile tab — fallback save @$expected")
@@ -2890,21 +3083,42 @@ class AutomationEngine(
     fun onEvent(event: AccessibilityEvent) { /* reserved */ }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Task mode — v1.2.1
+    // Task mode — v1.2.1 (v1.4.0: tách khỏi Golike, đi qua TaskProvider)
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
      * State machine cho task mode.
      *
+     * Phase 0: Lấy acc đã liên kết từ TaskProvider
      * Phase 1: Launch TikTok (dùng lại phaseLaunch)
-     * Phase 2: Discover & match acc thiết bị với Golike
+     * Phase 2: Discover & match acc thiết bị với acc của nhà cung cấp
      * Phase 3: Task loop — farm → job → farm → ...
      */
     private suspend fun runTaskStateMachine(
-        mode:           FarmMode,
-        inputList:      List<String>,
-        golikeAccounts: List<TikTokAccountDto>,
+        mode:      FarmMode,
+        inputList: List<String>,
     ) {
+        // Phase 0: nhà cung cấp + danh sách acc đã liên kết
+        val provider = taskProvider ?: run {
+            log("WARN: Task — chưa cấu hình nơi làm nhiệm vụ (TaskProvider = null)")
+            setStatus("Chưa cấu hình nơi làm nhiệm vụ")
+            return
+        }
+        setStatus("TASK: Lấy danh sách acc từ ${provider.displayName}...")
+        val linkedAccounts: List<TaskAccount> = when (val r = provider.listAccounts()) {
+            is TaskResult.Success -> r.data
+            is TaskResult.Error   -> {
+                log("ERR: Task — không lấy được acc từ ${provider.displayName}: ${r.message}")
+                setStatus("Lỗi lấy acc nhiệm vụ")
+                return
+            }
+        }
+        if (linkedAccounts.isEmpty()) {
+            log("WARN: Task — ${provider.displayName} chưa có acc TikTok nào được liên kết")
+            setStatus("Chưa có acc liên kết")
+            return
+        }
+
         // Phase 1: Launch
         setStatus(">> Đang mở TikTok...")
         val launchPhase = phaseLaunch()
@@ -2930,33 +3144,15 @@ class AutomationEngine(
             return
         }
 
-        // v1.2.6 FIX — Matching thiết bị ↔ Golike theo đúng spec golike.py:
-        //   1. unique_username là key chính (trường unique trên Golike).
-        //   2. nickname chỉ dùng làm fallback nếu không tìm thấy trùng unique_username
-        //      VÀ nickname đó không bị trùng với unique_username của acc khác (tránh nhầm).
-        //
-        // Trước đây chỉ map theo unique_username → bỏ sót các acc có unique_username
-        // lạ nhưng nickname khớp với @username TikTok thực tế trên thiết bị.
-        val uniqueMap  = golikeAccounts.associateBy { it.uniqueUsername.lowercase().removePrefix("@") }
-        val nicknameMap = golikeAccounts
-            .filter { acc ->
-                // Chỉ cho phép nickname làm key nếu nickname KHÔNG trùng với
-                // unique_username của bất kỳ acc nào khác (tránh ambiguity).
-                val nick = acc.nickname.lowercase().removePrefix("@")
-                nick.isNotEmpty() && !uniqueMap.containsKey(nick)
-            }
-            .associateBy { it.nickname.lowercase().removePrefix("@") }
-
-        val matchedList: List<Pair<String, TikTokAccountDto>> = farmList.mapNotNull { username ->
-            val clean = username.lowercase().removePrefix("@")
-            // Ưu tiên match unique_username → fallback nickname
-            val golikeAcc = uniqueMap[clean] ?: nicknameMap[clean]
-            golikeAcc?.let { username to it }
+        // Khớp theo @username (không phân biệt hoa/thường, bỏ tiền tố @).
+        val linkedByUsername = linkedAccounts.associateBy { it.username.lowercase().removePrefix("@") }
+        val matchedList: List<Pair<String, TaskAccount>> = farmList.mapNotNull { username ->
+            linkedByUsername[username.lowercase().removePrefix("@")]?.let { username to it }
         }
 
         if (matchedList.isEmpty()) {
-            log("WARN: Task — Không có acc nào trùng với hệ thống Golike")
-            setStatus("Không có acc Golike trên thiết bị này")
+            log("WARN: Task — Không có acc nào trùng với ${provider.displayName}")
+            setStatus("Không có acc liên kết trên thiết bị này")
             host.pressBack(); delay(500)
             host.pressBack(); delay(500)
             return
@@ -2975,11 +3171,11 @@ class AutomationEngine(
 
         // Phase 3: Task loop
         val farmedSet = mutableSetOf<String>()
-        matchedList.forEachIndexed { idx, (username, golikeAcc) ->
+        matchedList.forEachIndexed { idx, (username, linked) ->
             if (!isFarming) return@forEachIndexed
             awaitResumed()
 
-            log("TASK: [${idx + 1}/${matchedList.size}] @$username (Golike: ${golikeAcc.uniqueUsername})")
+            log("TASK: [${idx + 1}/${matchedList.size}] @$username")
 
             if (idx > 0) {
                 val switched = switchToAccount(username, farmedSet)
@@ -2990,7 +3186,7 @@ class AutomationEngine(
             }
             farmedSet.add(username.lowercase())
 
-            taskOneAccount(username, golikeAcc)
+            taskOneAccount(provider, username, linked)
         }
 
         log("TASK: Hoàn thành tất cả ${matchedList.size} tài khoản — đóng TikTok")
@@ -3001,18 +3197,17 @@ class AutomationEngine(
     /**
      * Làm nhiệm vụ cho 1 acc.
      *
-     * Loop: [farm đệm] → [lấy job] → [làm job] → lặp lại
+     * Loop: [farm đệm] → [lấy job] → [làm job] → [báo cáo] → [nuôi sau job] → lặp lại
      * Thoát khi: đạt đủ taskJobsPerAccount hoặc thất bại liên tiếp >= taskMaxConsecFailures.
      */
     private suspend fun taskOneAccount(
-        username:   String,
-        golikeAcc:  TikTokAccountDto,
+        provider: TaskProvider,
+        username: String,
+        account:  TaskAccount,
     ) {
-        val gRepo = golikeRepo ?: run {
-            log("WARN: Task: GolikeRepository null — bỏ qua @$username")
-            return
-        }
-
+        // taskPostJobNurtureSecs() tách riêng ở top-level (cuối class) — pure
+        // function, không phụ thuộc host/coroutine — để có thể unit test trực
+        // tiếp bằng JUnit (xem TaskNurtureTest.kt).
         val sessionId   = repo.startSession(username)
         var jobsDone    = 0
         var consecFail  = 0
@@ -3033,23 +3228,28 @@ class AutomationEngine(
             totalVideos += farmVideos
             if (!isFarming) break
 
-            // ── [B] Lấy job từ Golike ─────────────────────────────
-            setStatus("TASK: Lấy nhiệm vụ từ server...")
-            val jobsResult = gRepo.getTikTokJobs(golikeAcc.id)
-            val (job, lock) = when (jobsResult) {
-                is GolikeResult.Success -> Pair(jobsResult.data.data, jobsResult.data.lock)
-                is GolikeResult.Error -> {
-                    log("TASK: Lấy job thất bại: ${jobsResult.message}")
-                    if (jobsResult.isAuthError) {
-                        log("TASK: Token Golike hết hạn/không hợp lệ — dừng task, cần đăng nhập lại")
+            // ── [B] Lấy job ───────────────────────────────────────
+            // v1.3.3: delay ngẫu nhiên trước khi gọi API — mô phỏng người dùng
+            // thật "quyết định" mở tab nhiệm vụ thay vì nhận job ngay tức khắc
+            // sau khi vừa lướt xong.
+            setStatus("TASK: Chuẩn bị nhận nhiệm vụ...")
+            Human.delay(1_200, 3_000)
+
+            setStatus("TASK: Lấy nhiệm vụ từ ${provider.displayName}...")
+            val job: TaskJob? = when (val r = provider.nextJob(account)) {
+                is TaskResult.Success -> r.data
+                is TaskResult.Error -> {
+                    log("TASK: Lấy job thất bại: ${r.message}")
+                    if (r.isAuthError) {
+                        log("TASK: Thông tin xác thực ${provider.displayName} không hợp lệ — dừng task")
                         break
                     }
-                    if (jobsResult.cooldown > 0) {
-                        log("TASK: Server yêu cầu chờ ${jobsResult.cooldown}s")
-                        delay(jobsResult.cooldown * 1_000L)
+                    if (r.cooldownSecs > 0) {
+                        log("TASK: Server yêu cầu chờ ${r.cooldownSecs}s")
+                        delay(r.cooldownSecs * 1_000L)
                     }
                     consecFail++
-                    Pair(null, null)
+                    continue
                 }
             }
 
@@ -3058,24 +3258,20 @@ class AutomationEngine(
                 break
             }
 
-            // object_id: ưu tiên lock (golike.py: lock.get("object_id") or job.get("object_id", ""))
-            val objectId = lock?.objectId?.takeIf { it.isNotBlank() } ?: job.objectId
-
-            // Lọc theo loại job được cấu hình — server tự chọn job, không phải client.
-            // Nếu không khớp config: skip job này để giải phóng lock, lấy job khác ở vòng sau.
+            // Lọc theo loại job được cấu hình. Không khớp → skip để giải phóng job.
             val typeMatches = when (config.taskJobType) {
-                TaskJobType.LIKE   -> job.type == "like"
-                TaskJobType.FOLLOW -> job.type == "follow"
-                TaskJobType.BOTH   -> job.type == "like" || job.type == "follow"
+                TaskJobType.LIKE   -> job.kind == TaskJobKind.LIKE
+                TaskJobType.FOLLOW -> job.kind == TaskJobKind.FOLLOW
+                TaskJobType.BOTH   -> true
             }
             if (!typeMatches) {
-                log("TASK: Job #${job.jobId} type=${job.type} không khớp cấu hình — skip")
-                gRepo.skipTikTokJob(golikeAcc.id, job.jobId, objectId)
+                log("TASK: Job #${job.id} loại ${job.kind} không khớp cấu hình — skip")
+                provider.skip(account, job)
                 consecFail++
                 continue
             }
 
-            log("TASK: Job #${job.jobId} type=${job.type} link=${job.link.take(60)}")
+            log("TASK: Job #${job.id} ${job.kind} link=${job.link.take(60)}")
 
             // ── [C] Mở link nhiệm vụ ─────────────────────────────
             setStatus("TASK: Mở link nhiệm vụ...")
@@ -3090,13 +3286,9 @@ class AutomationEngine(
             }
 
             // ── [D] Thực hiện nhiệm vụ ───────────────────────────
-            val success = when (job.type) {
-                "like"   -> doLikeTask()
-                "follow" -> doFollowTask()
-                else     -> {
-                    log("TASK: Loại job không hỗ trợ: ${job.type}")
-                    false
-                }
+            val success = when (job.kind) {
+                TaskJobKind.LIKE   -> doLikeTask()
+                TaskJobKind.FOLLOW -> doFollowTask()
             }
 
             // ── [E] Back về feed ──────────────────────────────────
@@ -3109,55 +3301,60 @@ class AutomationEngine(
             }
             if (!NodeTraverser.isOnFeedTab(host.getRootNode())) recoverToFeed()
 
-            // ── [F] Báo cáo kết quả lên Golike ───────────────────
-            // v1.2.5 — Theo golike.py: complete-jobs CHỈ dùng khi đã làm xong
-            // (không có cờ success). Nếu không làm được trên máy → skip-jobs riêng.
+            // ── [F] Báo cáo kết quả ──────────────────────────────
             if (!success) {
                 setStatus("TASK: Không thực hiện được — báo skip...")
-                log("TASK: Job #${job.jobId} không thực hiện được trên máy — gọi skip")
-                when (val skipResult = gRepo.skipTikTokJob(golikeAcc.id, job.jobId, objectId)) {
-                    is GolikeResult.Success -> log("TASK: Đã skip job #${job.jobId}")
-                    is GolikeResult.Error   -> log("TASK: Lỗi skip job #${job.jobId}: ${skipResult.message}")
+                log("TASK: Job #${job.id} không thực hiện được trên máy — gọi skip")
+                when (val skipResult = provider.skip(account, job)) {
+                    is TaskResult.Success -> log("TASK: Đã skip job #${job.id}")
+                    is TaskResult.Error   -> log("TASK: Lỗi skip job #${job.id}: ${skipResult.message}")
                 }
                 consecFail++
                 continue
             }
 
             setStatus("TASK: Báo cáo kết quả...")
-            val completeResult = gRepo.completeTikTokJob(
-                accountId = golikeAcc.id,
-                adsId     = job.jobId,
-                objectId  = objectId,
-                type      = job.type,
-                link      = job.link,
-            )
+            when (val completeResult = provider.complete(account, job)) {
+                is TaskResult.Success -> {
+                    log("TASK: Job #${job.id} hoàn thành ✓ (+${completeResult.data})")
+                    jobsDone++
+                    consecFail = 0
+                    if (job.kind == TaskJobKind.LIKE) totalLikes++ else totalFollows++
 
-            when (completeResult) {
-                is GolikeResult.Success -> {
-                    if (completeResult.data.success) {
-                        val earned = completeResult.data.data?.prices ?: job.fixCoin
-                        log("TASK: Job #${job.jobId} hoàn thành ✓ (+$earned coin)")
-                        jobsDone++
-                        consecFail = 0
-                        if (job.type == "like") totalLikes++ else totalFollows++
-                    } else {
-                        log("TASK: Server từ chối job #${job.jobId}: ${completeResult.data.message}")
-                        if (completeResult.data.cooldown > 0) {
-                            log("TASK: Chờ cooldown ${completeResult.data.cooldown}s")
-                            delay(completeResult.data.cooldown * 1_000L)
-                        }
-                        consecFail++
+                    // ── [G] Nuôi acc SAU KHI hoàn thành job — v1.3.3 ──
+                    // Nuôi ngắn mỗi job; định kỳ mỗi taskLongFarmEveryNJobs job thì
+                    // nuôi LÂU (xem taskPostJobNurtureSecs() — pure function, có test).
+                    if (isFarming) {
+                        awaitResumed()
+                        val nurtureSecs = taskPostJobNurtureSecs(
+                            jobsDone         = jobsDone,
+                            everyNJobs       = config.taskLongFarmEveryNJobs,
+                            longDurationSecs = config.taskLongFarmDurationSecs,
+                            shortMinSecs     = config.taskFarmAfterJobMinSecs,
+                            shortMaxSecs     = config.taskFarmAfterJobMaxSecs,
+                        )
+                        val isLongCycle = config.taskLongFarmEveryNJobs > 0 &&
+                            jobsDone % config.taskLongFarmEveryNJobs == 0
+                        setStatus(
+                            if (isLongCycle) "TASK: [@$username] Nuôi acc lâu (${nurtureSecs}s)..."
+                            else              "TASK: [@$username] Nuôi acc (${nurtureSecs}s)..."
+                        )
+                        log(
+                            if (isLongCycle) "TASK: Mốc $jobsDone job — nuôi acc LÂU ${nurtureSecs}s"
+                            else              "TASK: Nuôi acc ${nurtureSecs}s sau job #${job.id}"
+                        )
+                        totalVideos += doSimpleFarm(nurtureSecs)
                     }
                 }
-                is GolikeResult.Error -> {
-                    log("TASK: Lỗi báo cáo job #${job.jobId}: ${completeResult.message}")
+                is TaskResult.Error -> {
+                    log("TASK: Lỗi báo cáo job #${job.id}: ${completeResult.message}")
                     if (completeResult.isAuthError) {
-                        log("TASK: Token Golike hết hạn/không hợp lệ — dừng task")
+                        log("TASK: Thông tin xác thực ${provider.displayName} không hợp lệ — dừng task")
                         break
                     }
-                    if (completeResult.cooldown > 0) {
-                        log("TASK: Chờ cooldown ${completeResult.cooldown}s")
-                        delay(completeResult.cooldown * 1_000L)
+                    if (completeResult.cooldownSecs > 0) {
+                        log("TASK: Chờ cooldown ${completeResult.cooldownSecs}s")
+                        delay(completeResult.cooldownSecs * 1_000L)
                     }
                     consecFail++
                 }
@@ -3187,6 +3384,8 @@ class AutomationEngine(
         }
 
         var videos = 0
+        // v1.4.0: cùng bộ điều tiết tỉ lệ như farmOneAccount (xem FarmBehavior.kt).
+        val likeGate = RateGate()
 
         while (secsLeftNow() > 0L && isFarming) {
             awaitResumed()
@@ -3215,7 +3414,9 @@ class AutomationEngine(
                 if (isLostWithRetry()) { recoverToFeed(); return@safeStep }
 
                 // Xem video
-                val watchMs   = randomWatchTimeMs()
+                val progress  = 1.0 - secsLeftNow().toDouble() / (totalMs / 1_000.0).coerceAtLeast(1.0)
+                val watchPlan = FarmBehavior.watchPlan(config.videoWatchTimeMin, config.videoWatchTimeMax, progress)
+                val watchMs   = watchPlan.ms
                 val secsLeft  = maxOf(1L, secsLeftNow())
                 val watchSecs = minOf(watchMs / 1_000L, secsLeft).coerceAtLeast(1L)
                 for (w in watchSecs downTo 1L) {
@@ -3230,7 +3431,8 @@ class AutomationEngine(
                 val freshRoot     = host.getRootNode()
                 val isLiveContent = NodeTraverser.detectLive(freshRoot)
                 val isAdContent   = !isLiveContent && NodeTraverser.detectAd(freshRoot)
-                if (!isLiveContent && !isAdContent && Random.nextFloat() < config.likeRate) {
+                if (!isLiveContent && !isAdContent &&
+                    likeGate.decide(config.likeRate, FarmBehavior.interestWeight(watchPlan.interest))) {
                     Human.delay(450, 1_200)
                     safeStep("simple_farm_like", timeoutMs = 15_000L) { doLike() }
                 }
@@ -3248,6 +3450,22 @@ class AutomationEngine(
     /**
      * v1.2.1: Thực hiện like trong task mode — double-tap vào vùng video.
      * Trả true khi double-tap thành công.
+     *
+     * v1.3.3: nhà cung cấp nhiệm vụ xác minh server-side là số like thực sự tăng (job có thể
+     * bị báo lỗi "chưa tăng like" nếu double-tap không được TikTok ghi nhận —
+     * ví dụ rơi đúng lúc UI đang animate/scroll). Vì task mode cần độ tin cậy
+     * cao hơn nuôi acc thường (job KHÔNG được thử lại tự do — mỗi lần fail
+     * tính vào taskMaxConsecFailures), thêm 1 lượt double-tap dự phòng thứ 2
+     * ở toạ độ jitter khác sau khi đã chờ xem animation tim lần 1.
+     *
+     * Giả định (CHƯA xác minh trên thiết bị thật — cần QA):
+     * double-tap-để-tim của TikTok là "chỉ tim" (idempotent), KHÔNG toggle
+     * unlike như tap đơn vào icon trái tim trên action rail. Nếu double-tap
+     * lần 1 đã ăn, double-tap lần 2 chỉ trigger lại animation vô hại, không
+     * bỏ tim. Nếu giả định này sai trên 1 biến thể TikTok nào đó, cần bỏ lượt
+     * dự phòng và thay bằng xác minh qua node cây (tìm nút tim action rail +
+     * so trạng thái trước/sau) — hiện chưa làm vì rủi ro lặp lại đúng lỗi
+     * false-positive substring đã gặp ở NodeTraverser (xem v1.3.2).
      */
     private suspend fun doLikeTask(): Boolean {
         val cx = screenW / 2 + Human.jitter(25)
@@ -3257,8 +3475,20 @@ class AutomationEngine(
         Human.doubleTapGap()
         host.clickSuspend(cx + Human.jitter(8), cy + Human.jitter(8))
         Human.likeAnimDelay()
+
+        // v1.3.3: double-tap dự phòng lần 2 — toạ độ jitter mới, gap tự nhiên
+        // hơn giữa 2 lượt (không phải double-tap gap ~60-150ms, mà một
+        // khoảng dừng "xem lại" như đang ngắm video).
+        Human.delay(500, 1_100)
+        val cx2 = screenW / 2 + Human.jitter(25)
+        val cy2 = (screenH * 0.55).toInt() + Human.jitter(20)
+        host.clickSuspend(cx2, cy2)
+        Human.doubleTapGap()
+        host.clickSuspend(cx2 + Human.jitter(8), cy2 + Human.jitter(8))
+        Human.likeAnimDelay()
+
         delay((config.delayAfterLike * 1_000).toLong())
-        log("TASK-LIKE: Double-tap ✓")
+        log("TASK-LIKE: Double-tap x2 (dự phòng) ✓")
         return true
     }
 
@@ -3352,6 +3582,12 @@ class AutomationEngine(
                     delay(2_000)
                 }
             }
+
+            // [v1.3.1] Kiểm tra chủ động menu/bottom sheet ngoài ý muốn (xem doc ở
+            // dismissFacebookBottomSheetIfPresent) — trước đây chỉ phát hiện khi 1
+            // hành động cụ thể (Like/Comment) fail, nên nếu vòng đó "may mắn" không
+            // cần Like, menu cứ nằm ì che feed mà không ai back ra.
+            dismissFacebookBottomSheetIfPresent("đầu vòng lặp")
 
             OverlayFarmMonitor.update(
                 accountIndex    = 1, accountTotal = 1,
@@ -3476,6 +3712,36 @@ class AutomationEngine(
      * KHÔNG gọi chủ động mỗi vòng lặp, vì quét từ khoá rộng trên caption bài đăng thật
      * dễ false-positive (đúng bug đã gặp với TikTok — xem [FIX-WAITFEED-POPUP]).
      */
+    /**
+     * v1.3.1 — Phát hiện bottom sheet/context-menu Facebook xuất hiện ngoài ý
+     * muốn (đôi khi do double-tap/long-press trúng nhầm nút "..." trên bài
+     * đăng hoặc Reels) — vd "Lưu bài viết/Báo cáo ảnh/Lựa chọn khác" (menu bài
+     * đăng) hoặc "Tốc độ phát lại/Cài đặt chất lượng" (menu Reels). Các menu
+     * này che nút Like/Comment, khiến vòng lặp cứ tìm nút hụt mãi mà KHÔNG
+     * back ra — nhìn như treo dù tool vẫn "đang chạy" bình thường.
+     *
+     * Khác với dismissFacebookPopupFallback(): hàm đó dùng từ khoá chung
+     * chung ("hủy", "đóng", "để sau"...) nên CHỈ được gọi phản ứng khi 1 hành
+     * động cụ thể fail (tránh false-positive với caption bài đăng thật). Hàm
+     * này chỉ quét vài cụm từ ĐẶC TRƯNG riêng của các menu trên — an toàn để
+     * gọi CHỦ ĐỘNG mỗi vòng lặp.
+     */
+    private suspend fun dismissFacebookBottomSheetIfPresent(context: String): Boolean {
+        val root = host.getRootNode() ?: return false
+        val menuSignals = listOf(
+            "lưu bài viết", "báo cáo ảnh", "báo cáo bài viết", "lựa chọn khác",
+            "tốc độ phát lại", "cài đặt chất lượng", "playback speed",
+            "ẩn thước phim này", "hide reel", "gỡ theo dõi",
+        )
+        val hit = menuSignals.any { NodeTraverser.findByText(root, it, ignoreCase = true) != null }
+        if (!hit) return false
+
+        log("FB: Menu/bottom sheet ngoài ý muốn khi $context — back ra")
+        host.pressBack()
+        delay(700)
+        return true
+    }
+
     private suspend fun dismissFacebookPopupFallback(context: String): Boolean {
         val root = host.getRootNode() ?: return false
         val dismissTexts = listOf(
@@ -3561,6 +3827,10 @@ class AutomationEngine(
         var reelsLiked    = 0
         while (isFarming && (System.currentTimeMillis() - startWall) < durationSecs * 1_000L) {
             awaitResumed()
+            // [v1.3.1] Menu "..." của Reels (Tốc độ phát lại/Cài đặt chất lượng...) đôi
+            // khi tự nổi lên — nếu không dọn, double-tap/swipe bên dưới đều "hụt" vào
+            // menu thay vì video, và vòng lặp cứ lặp lại mà không back ra được.
+            dismissFacebookBottomSheetIfPresent("Reels")
             val watchMs = Random.nextLong(3_000L, 9_000L)
             OverlayFarmMonitor.update(
                 accountIndex = 1, accountTotal = 1, accountId = "Facebook",

@@ -23,7 +23,26 @@ interface IFarmHost {
     val screenWidth: Int
     val screenHeight: Int
 
-    fun getRootNode(): AccessibilityNodeInfo?
+    /**
+     * v1.3.1 — ĐỔI thành suspend fun (trước là fun đồng bộ).
+     *
+     * Lý do: đây là call IPC đồng bộ (rootInActiveWindow) tới hệ thống
+     * Accessibility — nếu app đích (TikTok/Facebook...) đứng hình/tải nặng,
+     * call này có thể treo vô thời hạn. Vì nó KHÔNG phải 1 suspend point
+     * thực sự (chỉ là 1 lệnh chặn luồng gọi), safeStep()/withTimeoutOrNull()
+     * bọc quanh nó KHÔNG thể huỷ/thoát ra được — coroutine bị kẹt cứng, dẫn
+     * tới hiện tượng log "đứng hình" ở đúng giây đang xem (vd "Xem video (4s)")
+     * hoặc kẹt ở màn hình Home mà không có log/thời gian nuôi nào chạy tiếp
+     * (chỉ tổng thời gian ở overlay vẫn chạy vì overlay tự đếm bằng Handler
+     * riêng, độc lập với coroutine farm loop).
+     *
+     * Implementation (TikTokAccessibilityService) dispatch call thật sang
+     * Dispatchers.IO — nhờ đó nó trở thành 1 suspension point CÓ THỂ huỷ:
+     * nếu timeout hết hạn, coroutine gọi (vd trong safeStep) sẽ được trả
+     * quyền điều khiển lại NGAY, dù luồng IO bên dưới vẫn đang treo (nó tự
+     * kết thúc/bị bỏ rơi trong nền, không chặn farm loop nữa).
+     */
+    suspend fun getRootNode(): AccessibilityNodeInfo?
     suspend fun clickNode(node: AccessibilityNodeInfo): Boolean
     suspend fun clickSuspend(x: Int, y: Int): Boolean
     suspend fun swipeSuspend(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Long = 400): Boolean
@@ -43,7 +62,7 @@ interface IFarmHost {
     fun openTikTokSettings(): Boolean
     /**
      * v1.2.1 Mở deeplink/URL bất kỳ (TikTok video link, profile link, v.v.).
-     * Dùng trong task mode để mở link nhiệm vụ từ Golike.
+     * Dùng trong task mode để mở link nhiệm vụ từ nhà cung cấp (TaskProvider).
      */
     fun openDeepLink(url: String): Boolean
     /**

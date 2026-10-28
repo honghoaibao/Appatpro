@@ -1,3 +1,5 @@
+> ⚠️ **LƯU TRỮ (v1.4.0):** Golike đã bị gỡ hoàn toàn khỏi app (package `golike/`, `GolikeLoginWebActivity`, token, số dư). File này giữ lại chỉ để tham khảo lịch sử; KHÔNG còn khớp với mã nguồn.
+
 # 📘 Golike API – Tài liệu tích hợp chi tiết
 
 > **Nguồn:** Reverse-engineered từ `GoLikeLoginActivity.smali` + htool smali package    

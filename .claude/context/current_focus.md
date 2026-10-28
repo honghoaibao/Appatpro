@@ -1,5 +1,52 @@
 # Current Focus
 
+_Last updated: 2026-10-26 — v1.5.0 (versionCode 37)_
+
+## Trạng thái: v1.4.0 — chờ tài liệu Follow4Follow + CI + QA thiết bị
+
+Golike/WebView đã gỡ hoàn toàn. Task mode đi qua `TaskProvider` nhưng chưa có provider nào
+(`TASKS_ENABLED = false`). Sandbox không có Android SDK nên toàn dự án chưa được biên dịch;
+chỉ các module thuần (`FarmBehavior`, `PopupLoopGuard`, `taskPostJobNurtureSecs`) đã được biên
+dịch + chạy test. **CI là nguồn xác nhận cuối cùng.**
+
+## Phiên bản gần đây
+
+| Bản | Nội dung | Ghi chú chi tiết |
+|-----|----------|------------------|
+| v1.5.0 (37) | Thiết kế lại giao diện (`ui/theme/AtTheme.kt`); Services/Dashboard/hộp thoại/thanh điều hướng viết lại | `revision/v1.5.0.md` |
+| v1.4.0 (36) | Gỡ Golike+WebView; `TaskProvider`; `RateGate`/`WatchPlan`; `PopupLoopGuard`; thẻ nhiệm vụ mới | `revision/v1.4.0.md` |
+| v1.3.3 (35) | Bật Golike; nuôi acc ngắn/lâu giữa các job; delay trước khi lấy job; `doLikeTask()` double-tap dự phòng; CI dùng `setup-gradle@v6` | `revision/v1.3.3.md` |
+| v1.3.2 (34) | Fix `findProfileTab()` bấm nhầm tab; popup cho Golike | `revision/v1.3.2.md` |
+| v1.3.1 (33) | `getRootNode()` → `suspend`, `safeScreenRead()`; `ACCOUNT_UPDATE_PROMPT`; Facebook thoát bottom sheet | `revision/v1.3.1.md` |
+| v1.3.0 (32) | Bỏ khóa cài đặt nuôi acc; Like/Comment đa nền tảng; xem Reels Facebook | `revision/v1.3.0.md` |
+
+## Next actions
+
+0. **QA giao diện trên máy thật:** chưa ai xem giao diện v1.5.0 hiển thị; gửi ảnh chụp để chỉnh bố cục các màn còn lại.
+1. **Follow4Follow:** tài liệu đã nhận nhưng là API SMM panel (mua đơn tương tác), KHÔNG có endpoint làm job kiếm tiền → chưa khớp `TaskProvider`; chờ quyết định hướng (xem lịch sử hội thoại) (xác thực, endpoint, định dạng phản hồi, cooldown) → viết `Follow4FollowProvider`, trả ở `TaskProviders.current()`, đặt `TASKS_ENABLED = true`, lưu khoá API qua `StringEncryptor`.
+2. **CI lần đầu v1.4.0:** biên dịch toàn dự án (phần UI/engine chưa được compile trong sandbox).
+3. **QA thiết bị:** hiệu quả `RateGate` thực tế (tỉ lệ like/follow trong log), `PopupLoopGuard` khi popup cứng đầu, 6 cụm từ quyền Android 13.
+4. Giữ các mục QA v1.3.3 còn hiệu lực khi có provider: double-tap idempotent, lock job, `findHomeTab()`/`findInboxTab()`.
+
+## Màn hình native
+
+| Screen    | Activity           | Trạng thái |
+|-----------|--------------------|------------|
+| Dashboard | DashboardActivity  | ✅ Active  |
+| Accounts  | AccountsActivity   | ✅ Active  |
+| Logs      | LogsActivity       | ✅ Active  |
+| Stats     | StatsActivity      | ✅ Active  |
+| Config    | ConfigActivity     | ✅ Active  |
+| Schedule  | ScheduleActivity   | ✅ Active  |
+| Services  | ServicesScreen (tab trong MainScreen) | ✅ Active |
+| Nhiệm vụ kiếm tiền | Thẻ trong ServicesScreen | ⏳ "Sắp có" (gate bởi `TASKS_ENABLED`) |
+
+Flutter: đã gỡ hoàn toàn ✅
+
+---
+
+# Lưu trữ — trạng thái tại session 14 (2026-05-25), giữ nguyên để tra cứu
+
 _Last updated: 2026-05-25 (session 14 — fix farm button / deeplink / service regression)_
 
 ## Status: 4 bugs fixed ✅ (session 14)

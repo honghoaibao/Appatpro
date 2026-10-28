@@ -1,6 +1,7 @@
 package com.atpro.ui.schedule
 
 import androidx.compose.foundation.*
+import com.atpro.ui.theme.AtColors
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.CircleShape
@@ -13,6 +14,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -21,15 +24,15 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.atpro.scheduler.ScheduledFarmManager.FarmSchedule
 
 // ── Palette ───────────────────────────────────────────────────
-private val BgDark    = Color(0xFF0D0D14)
-private val CardDark  = Color(0xFF1A1A2E)
-private val BorderDark= Color(0xFF374151)
-private val Purple    = Color(0xFF6C63FF)
-private val Green     = Color(0xFF10B981)
-private val RedBad    = Color(0xFFEF4444)
-private val Amber     = Color(0xFFF59E0B)
-private val TextSec   = Color(0xFF9CA3AF)
-private val TextMuted = Color(0xFF6B7280)
+private val BgDark    = AtColors.Bg
+private val CardDark  = AtColors.Surface
+private val BorderDark= AtColors.Hairline
+private val Purple    = AtColors.Accent
+private val Green     = AtColors.Success
+private val RedBad    = AtColors.Danger
+private val Amber     = AtColors.Warning
+private val TextSec   = AtColors.TextSec
+private val TextMuted = AtColors.TextMuted
 
 private val DAY_LABELS = listOf("CN", "T2", "T3", "T4", "T5", "T6", "T7")
 
@@ -92,7 +95,7 @@ fun ScheduleScreen(vm: ScheduleViewModel, onNavigateUp: () -> Unit = {}) {
                     top    = padding.calculateTopPadding() + 8.dp,
                     bottom = padding.calculateBottomPadding() + 80.dp,
                 ),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 items(schedules, key = { it.id }) { schedule ->
                     SwipeToDeleteScheduleRow(
@@ -154,7 +157,7 @@ private fun SwipeToDeleteScheduleRow(
         backgroundContent = {
             Box(
                 Modifier.fillMaxSize()
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(RoundedCornerShape(16.dp))
                     .background(RedBad.copy(alpha = 0.15f))
                     .padding(end = 20.dp),
                 contentAlignment = Alignment.CenterEnd,
@@ -180,8 +183,9 @@ private fun ScheduleRow(schedule: FarmSchedule, onToggle: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(16.dp))
             .background(CardDark)
+            .border(1.dp, if (schedule.enabled) AtColors.HairlineHi else BorderDark, RoundedCornerShape(16.dp))
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -190,9 +194,10 @@ private fun ScheduleRow(schedule: FarmSchedule, onToggle: () -> Unit) {
                 Text(schedule.label, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(Purple.copy(alpha = 0.15f))
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Purple.copy(alpha = 0.16f))
+                        .border(1.dp, Purple.copy(alpha = 0.3f), RoundedCornerShape(20.dp))
+                        .padding(horizontal = 7.dp, vertical = 2.dp),
                 ) {
                     Text(serviceLabel, color = Purple, fontSize = 9.sp, fontWeight = FontWeight.Medium)
                 }
@@ -210,11 +215,16 @@ private fun ScheduleRow(schedule: FarmSchedule, onToggle: () -> Unit) {
                     val active = day in schedule.daysOfWeek
                     Box(
                         modifier = Modifier
-                            .size(26.dp)
+                            .size(27.dp)
                             .clip(CircleShape)
                             .background(
-                                if (active && schedule.enabled) Purple.copy(alpha = 0.2f)
-                                else BorderDark.copy(alpha = 0.4f)
+                                if (active && schedule.enabled) Purple.copy(alpha = 0.22f)
+                                else BorderDark.copy(alpha = 0.35f)
+                            )
+                            .then(
+                                if (active && schedule.enabled)
+                                    Modifier.border(1.dp, Purple.copy(alpha = 0.45f), CircleShape)
+                                else Modifier
                             ),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -297,15 +307,15 @@ private fun AddScheduleDialog(
                             val sel = svc.key == serviceMode
                             Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (sel) svc.accent.copy(0.2f) else Color(0xFF1E1E2E))
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(if (sel) AtColors.SurfaceHigh else CardDark)
                                     .border(
                                         1.dp,
-                                        if (sel) svc.accent.copy(0.7f) else Color(0xFF2A2A40),
-                                        RoundedCornerShape(8.dp),
+                                        if (sel) AtColors.TextSec else BorderDark,
+                                        RoundedCornerShape(20.dp),
                                     )
                                     .clickable { serviceMode = svc.key }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    .padding(horizontal = 12.dp, vertical = 7.dp),
                             ) {
                                 Text(
                                     svc.label,
@@ -414,7 +424,15 @@ private fun EmptyScheduleView(modifier: Modifier = Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Icon(Icons.Rounded.Schedule, contentDescription = null, tint = Color.White, modifier = Modifier.size(48.dp))
+        Box(
+            modifier = Modifier
+                .size(88.dp)
+                .clip(RoundedCornerShape(50))
+                .background(CardDark),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Rounded.Schedule, contentDescription = null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(38.dp))
+        }
         Spacer(Modifier.height(16.dp))
         Text("Chưa có lịch nào", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))

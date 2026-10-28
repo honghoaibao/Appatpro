@@ -49,7 +49,9 @@ class TikTokAccessibilityService : AccessibilityService(), IFarmHost {
     override val scope: CoroutineScope      get() = serviceScope
     override val screenWidth:  Int          get() = resources.displayMetrics.widthPixels
     override val screenHeight: Int          get() = resources.displayMetrics.heightPixels
-    override fun getRootNode(): AccessibilityNodeInfo? = rootInActiveWindow
+    // v1.3.1: dispatch sang Dispatchers.IO — xem giải thích chi tiết ở IFarmHost.getRootNode().
+    override suspend fun getRootNode(): AccessibilityNodeInfo? =
+        withContext(Dispatchers.IO) { rootInActiveWindow }
 
     override suspend fun clickNode(node: AccessibilityNodeInfo): Boolean {
         if (node.isClickable) return node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
@@ -210,7 +212,8 @@ class TikTokAccessibilityService : AccessibilityService(), IFarmHost {
         engine   = AutomationEngine(
             this,
             LocalRepository.getInstance(this),
-            com.atpro.golike.GolikeRepository.getInstance(LocalRepository.getInstance(this)),
+            // v1.4.0: nơi làm nhiệm vụ đi qua TaskProvider (null = chưa tích hợp Follow4Follow)
+            com.atpro.tasks.TaskProviders.current(this),
         )
         Log.i(TAG, "OK: Accessibility Service connected")
         LanWebSocketServer.broadcast("serviceStatus", mapOf("status" to "connected"))

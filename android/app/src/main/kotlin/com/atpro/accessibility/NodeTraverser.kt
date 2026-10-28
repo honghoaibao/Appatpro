@@ -372,6 +372,22 @@ object NodeTraverser {
     fun detectPopup(root: AccessibilityNodeInfo?): PopupInfo {
         root ?: return PopupInfo(false, PopupType.NONE, null)
 
+        // [v1.3.1] "Tài khoản của bạn cần được cập nhật" — dialog TikTok yêu cầu
+        // liên kết SĐT/email TRƯỚC KHI chuyển acc, đè lên ngay trên danh sách
+        // switch-account. Phải check TRƯỚC nhánh ACCOUNT_SWITCH bên dưới: cây
+        // node lúc này vẫn còn đủ >=2 "@username" + "chuyển đổi tài khoản" (vì
+        // danh sách switch vẫn nằm phía sau dialog), nên nếu không ưu tiên check
+        // ở đây trước, nó bị nhận nhầm thành ACCOUNT_SWITCH bình thường (handled
+        // = true, không làm gì) → không bấm "Để sau" → tool tưởng đã chuyển acc
+        // xong nhưng dialog vẫn còn chặn, dẫn tới verify sai / dừng tool.
+        val hasUpdatePrompt =
+            findByText(root, "cần được cập nhật", ignoreCase = true) != null
+                || findByText(root, "liên kết số điện thoại", ignoreCase = true) != null
+                || findByText(root, "account needs to be updated", ignoreCase = true) != null
+        if (hasUpdatePrompt) {
+            return PopupInfo(true, PopupType.ACCOUNT_UPDATE_PROMPT, null)
+        }
+
         // Account switch popup: có @username nodes
         // [FIX v1.0.9] Thêm context check — phân biệt switch popup thật vs feed có @username.
         // Feed (video description, duet tag...) cũng có >= 2 "@username" → false positive.
@@ -447,8 +463,22 @@ object NodeTraverser {
      *
      * Hỗ trợ TikTok Trill (com.ss.android.ugc.trill) render tab bằng resource-id
      * và contentDescription thay vì text thuần.
+     *
+     * v1.3.2: BUG: `PROFILE_IDS`/`PROFILE_TEXTS` chứa các chuỗi ngắn dùng
+     * `contains()` (vd "me") — dễ trúng nhầm node KHÔNG nằm trong nav bar, vì
+     * substring "me" cũng nằm trong "ho**me**"/"trang chủ (**home**)" hay
+     * resource-id "tab_**home**". Khi node đó (Trang chủ/Đề xuất/"Xem thêm"
+     * caption...) xuất hiện SỚM HƠN nút Profile thật trong thứ tự duyệt cây,
+     * tool bấm nhầm nó thay vì mở Hồ sơ → không đọc được @username.
+     *
+     * Fix: nếu biết `screenHeight`, giới hạn ứng viên vào dải Y ở khoảng
+     * dưới cùng màn hình (nơi nav bar luôn nằm) TRƯỚC khi so khớp id/text —
+     * loại các node cùng khớp chuỗi nhưng nằm sai vị trí (giữa/trên màn hình).
+     * Nếu không tìm thấy trong dải này (hoặc không truyền screenHeight), rơi
+     * về hành vi cũ — quét toàn cây — để không phá các case đang hoạt động
+     * đúng trên thiết bị có nav bar cao hơn ước tính.
      */
-    fun findProfileTab(root: AccessibilityNodeInfo?): NodeResult? {
+    fun findProfileTab(root: AccessibilityNodeInfo?, screenHeight: Int = Int.MAX_VALUE): NodeResult? {
         root ?: return null
 
         val PROFILE_IDS = listOf(
@@ -460,21 +490,34 @@ object NodeTraverser {
         val PROFILE_TEXTS = listOf("hồ sơ", "profile", "me")
         val PROFILE_CD_KEYWORDS = listOf("profile tab", "hồ sơ, tab", "me tab")
 
-        // 1. Tìm theo resource-id
-        PROFILE_IDS.forEach { id ->
-            findByResourceId(root, id)?.let { return it }
+        fun matchWithin(candidates: List<NodeResult>): NodeResult? {
+            PROFILE_IDS.forEach { id ->
+                candidates.firstOrNull {
+                    it.resourceId?.lowercase()?.contains(id) == true
+                }?.let { return it }
+            }
+            PROFILE_TEXTS.forEach { text ->
+                candidates.firstOrNull {
+                    it.displayText?.lowercase()?.contains(text) == true
+                }?.let { return it }
+            }
+            return candidates.firstOrNull { nr ->
+                val cd = nr.node.contentDescription?.toString()?.lowercase() ?: return@firstOrNull false
+                PROFILE_CD_KEYWORDS.any { cd.contains(it) }
+            }
         }
 
-        // 2. Tìm theo text
-        PROFILE_TEXTS.forEach { text ->
-            findByText(root, text, exact = false)?.let { return it }
+        // 1. Ưu tiên quét trong dải Y ở đáy màn hình (vùng nav bar).
+        if (screenHeight != Int.MAX_VALUE) {
+            val yMin = (screenHeight * 0.82).toInt()
+            val navBarCandidates = traverseAll(root).map { it.toResult() }
+                .filter { it.bounds.centerY() in yMin..screenHeight }
+            matchWithin(navBarCandidates)?.let { return it }
         }
 
-        // 3. Fallback: tìm theo contentDescription (Trill)
-        return traverseAll(root).firstOrNull { node ->
-            val cd = node.contentDescription?.toString()?.lowercase() ?: return@firstOrNull false
-            PROFILE_CD_KEYWORDS.any { cd.contains(it) }
-        }?.toResult()
+        // 2. Fallback: quét toàn cây (hành vi cũ — giữ để không regress khi
+        //    không có screenHeight hoặc nav bar nằm ngoài dải ước tính).
+        return matchWithin(traverseAll(root).map { it.toResult() })
     }
 
     /**
@@ -1372,7 +1415,7 @@ object NodeTraverser {
      * v1.2.1: Kiểm tra nút Follow đã thành công chưa sau khi click.
      *
      * Trả true nếu nút đã chuyển sang "Following" / "Đang theo dõi".
-     * Dùng để xác nhận follow thành công trước khi báo cáo lên Golike.
+     * Dùng để xác nhận follow thành công trước khi báo cáo nhiệm vụ lên nhà cung cấp.
      */
     fun isFollowConfirmed(root: AccessibilityNodeInfo?): Boolean {
         root ?: return false
@@ -1435,7 +1478,7 @@ object NodeTraverser {
 
     // ── Data types ────────────────────────────────────────────────
 
-    enum class PopupType { NONE, ACCOUNT_SWITCH, VERIFY_1234, DAILY_LIMIT, FOLLOW_FRIENDS, FOLLOW_SUGGEST, GENERIC, SAVE_LOGIN, PERMISSION_REQUEST }
+    enum class PopupType { NONE, ACCOUNT_SWITCH, ACCOUNT_UPDATE_PROMPT, VERIFY_1234, DAILY_LIMIT, FOLLOW_FRIENDS, FOLLOW_SUGGEST, GENERIC, SAVE_LOGIN, PERMISSION_REQUEST }
 
     data class PopupInfo(
         val detected: Boolean,

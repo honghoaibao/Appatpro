@@ -81,6 +81,11 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
                 taskJobDelaySecs          = repo.getConfigInt   ("task_job_delay_secs",         4),
                 taskJobsPerAccount        = repo.getConfigInt   ("task_jobs_per_account",       5),
                 taskMaxConsecFailures     = repo.getConfigInt   ("task_max_consec_failures",    3),
+                // [v1.3.3] Nuôi acc ngắn sau job + nuôi acc lâu định kỳ
+                taskFarmAfterJobMinSecs   = repo.getConfigInt   ("task_farm_after_job_min_secs", 5),
+                taskFarmAfterJobMaxSecs   = repo.getConfigInt   ("task_farm_after_job_max_secs", 20),
+                taskLongFarmEveryNJobs    = repo.getConfigInt   ("task_long_farm_every_n_jobs",  3),
+                taskLongFarmDurationSecs  = repo.getConfigInt   ("task_long_farm_duration_secs", 180),
                 // [v1.2.4] Demo nuôi acc
                 facebookNurtureDurationSecs = repo.getConfigInt   ("fb_nurture_duration_secs",  600),
                 facebookLikeRate            = repo.getConfigDouble("fb_like_rate",              0.10).toFloat(),
@@ -178,6 +183,11 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
             repo.setConfig("task_job_delay_secs",      "${s.taskJobDelaySecs}")
             repo.setConfig("task_jobs_per_account",    "${s.taskJobsPerAccount}")
             repo.setConfig("task_max_consec_failures", "${s.taskMaxConsecFailures}")
+            // [v1.3.3] Nuôi acc ngắn sau job + nuôi acc lâu định kỳ
+            repo.setConfig("task_farm_after_job_min_secs", "${s.taskFarmAfterJobMinSecs}")
+            repo.setConfig("task_farm_after_job_max_secs", "${s.taskFarmAfterJobMaxSecs}")
+            repo.setConfig("task_long_farm_every_n_jobs",  "${s.taskLongFarmEveryNJobs}")
+            repo.setConfig("task_long_farm_duration_secs", "${s.taskLongFarmDurationSecs}")
             // [v1.2.4] Demo nuôi acc
             repo.setConfig("fb_nurture_duration_secs",       "${s.facebookNurtureDurationSecs}")
             repo.setConfig("fb_like_rate",                   "${s.facebookLikeRate}")
@@ -298,12 +308,17 @@ data class ConfigUiState(
     val searchKeywords:           String  = "",
     val searchVideosPerSession:   Int     = 3,
     val searchRate:               Float   = 0.05f,
-    // [v1.2.1] Task mode — làm nhiệm vụ Golike
+    // [v1.2.1] Task mode — làm nhiệm vụ kiếm tiền
     val taskJobType:              String  = "BOTH",   // "LIKE" | "FOLLOW" | "BOTH"
     val taskFarmBeforeJobSecs:    Int     = 60,
     val taskJobDelaySecs:         Int     = 4,
     val taskJobsPerAccount:       Int     = 5,
     val taskMaxConsecFailures:    Int     = 3,
+    // [v1.3.3] Nuôi acc ngắn sau job + nuôi acc lâu định kỳ
+    val taskFarmAfterJobMinSecs:  Int     = 5,
+    val taskFarmAfterJobMaxSecs:  Int     = 20,
+    val taskLongFarmEveryNJobs:   Int     = 3,
+    val taskLongFarmDurationSecs: Int     = 180,
     // [v1.2.4] Demo nuôi tài khoản các nền tảng khác
     val facebookNurtureDurationSecs: Int   = 180,
     val facebookLikeRate:            Float = 0.10f,

@@ -1,6 +1,6 @@
 package com.atpro.data
 
-/** v1.2.1 — Loại nhiệm vụ Golike được thực hiện trong task mode. */
+/** v1.2.1 — Loại nhiệm vụ được thực hiện trong task mode. */
 enum class TaskJobType { LIKE, FOLLOW, BOTH }
 
 /**
@@ -232,6 +232,27 @@ data class FarmConfig(
      * Reset về 0 mỗi khi có job thành công.
      */
     val taskMaxConsecFailures: Int = 3,
+
+    /**
+     * `v1.3.3` Nuôi acc NGẮN — số giây tối thiểu tool lướt feed bình thường
+     * ngay SAU KHI hoàn thành 1 job (trước khi lấy job tiếp theo). Random đều
+     * trong [taskFarmAfterJobMinSecs, taskFarmAfterJobMaxSecs] mỗi lần, giúp
+     * hành vi trông tự nhiên hơn là báo cáo job xong rồi lấy job mới ngay lập tức.
+     */
+    val taskFarmAfterJobMinSecs: Int = 5,
+
+    /** `v1.3.3` Nuôi acc NGẮN sau job — số giây tối đa. */
+    val taskFarmAfterJobMaxSecs: Int = 20,
+
+    /**
+     * `v1.3.3` Nuôi acc LÂU định kỳ — cứ hoàn thành đủ số job này thì thay vì
+     * nuôi ngắn (5-20s), tool nuôi acc lâu hơn hẳn (taskLongFarmDurationSecs)
+     * trước khi lấy job tiếp theo. `<= 0` = tắt hẳn nuôi lâu, luôn dùng nuôi ngắn.
+     */
+    val taskLongFarmEveryNJobs: Int = 3,
+
+    /** `v1.3.3` Thời lượng (giây) của phiên nuôi acc LÂU định kỳ ở trên. */
+    val taskLongFarmDurationSecs: Int = 180,
 
     // ── Demo nuôi Facebook [v1.2.3] ─────────────────────────────────────────
 

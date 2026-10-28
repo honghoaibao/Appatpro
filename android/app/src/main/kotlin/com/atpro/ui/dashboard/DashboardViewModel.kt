@@ -14,14 +14,12 @@ import com.atpro.accessibility.TikTokAccessibilityService
 import com.atpro.automation.FarmMode
 import com.atpro.automation.LiveFarmStats
 import com.atpro.automation.ServiceMode
+import com.atpro.security.AppConstants
 import com.atpro.data.FarmForegroundService
 import com.atpro.data.LocalRepository
 import com.atpro.db.AtProDatabase
 import com.atpro.db.dao.AccountDao
 import com.atpro.db.entity.AccountEntity
-import com.atpro.golike.GolikeRepository
-import com.atpro.golike.GolikeResult
-import com.atpro.golike.TikTokAccountDto
 import com.atpro.network.UpdateChecker
 import com.atpro.network.UpdateInfo
 import kotlinx.coroutines.Dispatchers
@@ -37,7 +35,6 @@ import java.net.URL
 class DashboardViewModel(
     private val accountDao:  AccountDao,
     private val appContext:  Context,
-    private val golikeRepo:  GolikeRepository? = null,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(DashboardUiState())
@@ -46,7 +43,6 @@ class DashboardViewModel(
     init {
         observeAccounts()
         pollEngineState()
-        pollGolikeLoginState()
     }
 
     // ── Data sources ──────────────────────────────────────────────────────────
@@ -58,36 +54,6 @@ class DashboardViewModel(
                 _uiState.update {
                     it.copy(allAccounts = all, activeAccounts = active)
                 }
-            }
-        }
-    }
-
-    /** v1.2.2: Poll trạng thái đăng nhập Golike mỗi 5s để cập nhật canStart.
-     *  v1.2.9: Cũng fetch số dư (từ getMe) và tiền chờ duyệt (từ getStatistics). */
-    private fun pollGolikeLoginState() {
-        val repo = golikeRepo ?: return
-        viewModelScope.launch {
-            while (true) {
-                val loggedIn = repo.getSavedToken() != null
-                _uiState.update { it.copy(isGolikeLoggedIn = loggedIn) }
-
-                if (loggedIn) {
-                    // Số dư hiện tại — dùng getMe() vì luôn có GolikeUserData.coin
-                    val meResult = repo.getMe()
-                    if (meResult is com.atpro.golike.GolikeResult.Success) {
-                        _uiState.update { it.copy(golikeCoin = meResult.data.coin) }
-                    }
-
-                    // Tiền chờ duyệt — từ statistics/report
-                    val statsResult = repo.getStatistics()
-                    if (statsResult is com.atpro.golike.GolikeResult.Success) {
-                        val holdCoin = (statsResult.data.tiktok?.holdCoin   ?: 0.0) +
-                                       (statsResult.data.facebook?.holdCoin  ?: 0.0) +
-                                       (statsResult.data.instagram?.holdCoin ?: 0.0)
-                        _uiState.update { it.copy(golikeHoldCoin = holdCoin) }
-                    }
-                }
-                delay(30_000)
             }
         }
     }
@@ -154,18 +120,6 @@ class DashboardViewModel(
         _uiState.update { it.copy(serviceMode = mode) }
     }
 
-    /** v1.2.9: Lưu Golike JWT token nhập thủ công (ô athu trong Dịch vụ). */
-    fun saveGolikeToken(token: String) {
-        val repo = golikeRepo ?: return
-        viewModelScope.launch { repo.saveManualToken(token) }
-    }
-
-    /** v1.2.9: Xóa token Golike (đăng xuất). */
-    fun clearGolikeToken() {
-        val repo = golikeRepo ?: return
-        viewModelScope.launch { repo.clearToken(); _uiState.update { it.copy(isGolikeLoggedIn = false, golikeCoin = 0.0, golikeHoldCoin = 0.0) } }
-    }
-
     fun setCustomAccounts(text: String) {
         _uiState.update { it.copy(customAccounts = text) }
     }
@@ -198,7 +152,7 @@ class DashboardViewModel(
     }
 
     /**
-     * v1.2.1: Khởi động task mode — lấy danh sách acc Golike rồi gọi engine.startTask().
+     * v1.2.1: Khởi động task mode. v1.4.0: engine tự lấy danh sách acc từ TaskProvider.
      */
     fun startTask() {
         val engine = TikTokAccessibilityService.instance?.engine ?: return
@@ -220,19 +174,7 @@ class DashboardViewModel(
             Log.w("DashboardVM", "startForegroundService (task) failed: ${e.message}")
         }
 
-        viewModelScope.launch {
-            val golikeAccounts: List<TikTokAccountDto> = if (golikeRepo != null) {
-                when (val r = golikeRepo.getTikTokAccounts()) {
-                    is GolikeResult.Success -> r.data
-                    is GolikeResult.Error   -> {
-                        Log.w("DashboardVM", "Không lấy được acc Golike: ${r.message}")
-                        emptyList()
-                    }
-                }
-            } else emptyList()
-
-            engine.startTask(state.farmMode, inputList, golikeAccounts)
-        }
+        engine.startTask(state.farmMode, inputList)
     }
 
     fun stop() {
@@ -430,9 +372,7 @@ class DashboardViewModel(
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             val db    = AtProDatabase.getInstance(context.applicationContext)
-            val local = LocalRepository.getInstance(context.applicationContext)
-            val golike = GolikeRepository.getInstance(local)
-            return DashboardViewModel(db.accountDao(), context.applicationContext, golike) as T
+            return DashboardViewModel(db.accountDao(), context.applicationContext) as T
         }
     }
 }
@@ -451,11 +391,6 @@ data class DashboardUiState(
     val serviceMode:       ServiceMode         = ServiceMode.FARM,
     val customAccounts:    String              = "",
     val startupStatus:     String              = "",
-    /** v1.2.2: Trạng thái đăng nhập Golike — block start task khi chưa đăng nhập. */
-    val isGolikeLoggedIn:  Boolean             = false,
-    /** v1.2.9: Số dư và tiền chờ duyệt Golike (hiển thị khi đăng nhập + chọn TASK mode). */
-    val golikeCoin:        Double              = 0.0,
-    val golikeHoldCoin:    Double              = 0.0,
     // [v1.0.5] Thông tin phiên bản mới từ GitHub — non-null = hiển thị dialog cập nhật
     val updateInfo:        UpdateInfo?         = null,
     // [v1.0.9] Tiến độ tải APK: -1=idle, 0–99=đang tải, -2=lỗi
@@ -474,7 +409,7 @@ data class DashboardUiState(
                 .size
     }
 
-    // v1.2.3: FACEBOOK_NURTURE không cần farmMode/Golike — chỉ cần service connected.
+    // v1.2.3: FACEBOOK_NURTURE không cần farmMode — chỉ cần service connected.
     // v1.2.4: Tương tự cho X_NURTURE, INSTAGRAM_NURTURE, THREADS_NURTURE, SNAPCHAT_NURTURE.
     val isDemoMode: Boolean get() = serviceMode in listOf(
         ServiceMode.FACEBOOK_NURTURE, ServiceMode.X_NURTURE,
@@ -482,7 +417,7 @@ data class DashboardUiState(
     )
 
     val canStart: Boolean get() = serviceConnected && !isFarming &&
-        (serviceMode != ServiceMode.TASK || isGolikeLoggedIn) &&
+        (serviceMode != ServiceMode.TASK || AppConstants.TASKS_ENABLED) &&
         (isDemoMode || when (farmMode) {
             FarmMode.ALL_LOCAL     -> true
             FarmMode.SELECTED_LIST -> customAccounts.isNotBlank()
@@ -491,8 +426,8 @@ data class DashboardUiState(
     val startHint: String? get() = when {
         !serviceConnected ->
             "Bật Accessibility Service trước"
-        serviceMode == ServiceMode.TASK && !isGolikeLoggedIn ->
-            "Đăng nhập Golike trong tab Dịch vụ trước"
+        serviceMode == ServiceMode.TASK && !AppConstants.TASKS_ENABLED ->
+            "Nhiệm vụ kiếm tiền chưa sẵn sàng (đang chờ tích hợp Follow4Follow)"
         !isDemoMode && farmMode == FarmMode.SELECTED_LIST && customAccounts.isBlank() ->
             "Nhập danh sách tài khoản cần nuôi"
         else -> null

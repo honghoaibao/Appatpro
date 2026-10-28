@@ -37,8 +37,14 @@ object AppConstants {
     )
 
     /** v1.2.3 — Package Facebook chính thức (Facebook app). Dùng cho demo nuôi acc Facebook. */
-    /** v1.2.9: Tạm ẩn toàn bộ giao diện Golike — đặt true để bật lại. */
-    const val GOLIKE_ENABLED = false
+    /**
+     * v1.4.0: Bật/tắt giao diện + luồng "nhiệm vụ kiếm tiền" (task mode).
+     *
+     * Golike đã bị gỡ hoàn toàn ở v1.4.0. Task mode giờ đi qua `com.atpro.tasks.TaskProvider`;
+     * nhà cung cấp dự kiến là Follow4Follow nhưng CHƯA tích hợp (chưa có tài liệu API) nên
+     * cờ này để `false` — đặt `true` sau khi `TaskProviders.current()` trả về provider thật.
+     */
+    const val TASKS_ENABLED = false
 
     const val FACEBOOK_PKG = "com.facebook.katana"   // Facebook chính
     // v1.2.7: Danh sách gói Facebook theo thứ tự ưu tiên (không gồm Lite)

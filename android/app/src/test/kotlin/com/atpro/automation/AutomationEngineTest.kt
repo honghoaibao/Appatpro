@@ -28,6 +28,13 @@ import org.junit.Assert.*
  * NOT tested here (cần Robolectric / instrumentation):
  *   ❌ Full farmOneAccount() loop (requires AccessibilityNodeInfo)
  *   ❌ Account switch flow (requires TikTok UI tree)
+ *   ❌ v1.3.1: isForegroundTikTok() / dismissFacebookBottomSheetIfPresent() /
+ *      relaunchTikTokWithRetry() — cùng nhóm private suspend fun phụ thuộc
+ *      host.getRootNode() + cây node thật, chưa có hạ tầng test cho loại
+ *      này (không thêm kotlin-reflect vì chưa verify build được trong sandbox
+ *      hiện tại). Logic ưu tiên ACCOUNT_UPDATE_PROMPT trước ACCOUNT_SWITCH —
+ *      phần dễ sai và giá trị test cao nhất — ĐÃ được cover ở
+ *      NodeTraverserTest (pure function, không cần mock host).
  *   → See TASK-008 in backlog for integration test expansion
  */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -60,7 +67,7 @@ class AutomationEngineTest {
             every  { scope }       returns testScope
             every  { screenWidth } returns 1080
             every  { screenHeight } returns 2400
-            every  { getRootNode() } returns null
+            coEvery { getRootNode() } returns null  // v1.3.1: getRootNode() giờ là suspend fun
             every  { pressBack()   } returns true
             every  { launchTikTok()         } returns false  // fail fast → farmOneAccount exits early
             every  { openTikTokSettings()   } returns false

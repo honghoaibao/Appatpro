@@ -28,6 +28,9 @@ class PopupHandler(private val service: IFarmHost) {
 
     companion object { const val TAG = "PopupHandler" }
 
+    /** v1.4.0 — chống kẹt vòng lặp khi 1 popup không đóng được (xem PopupLoopGuard). */
+    private val loopGuard = PopupLoopGuard()
+
     // ── Entry point ───────────────────────────────────────────
 
     suspend fun handleIfPresent(): PopupResult {
@@ -37,6 +40,21 @@ class PopupHandler(private val service: IFarmHost) {
         // Nhanh hơn Tier 2 vì không cần quét toàn bộ text.
         val detected = NodeTraverser.detectPopup(root)
         if (detected.detected) {
+            // v1.4.0: ACCOUNT_SWITCH không phải popup cần đóng (là màn hình chọn acc) → không đưa vào guard.
+            if (detected.type != NodeTraverser.PopupType.ACCOUNT_SWITCH) {
+                when (loopGuard.record("t1:${detected.type}", System.currentTimeMillis())) {
+                    PopupLoopGuard.Verdict.TRY_BACK -> {
+                        log("WARN: Popup ${detected.type} lặp lại nhiều lần — đổi sang bấm Back")
+                        service.pressBack(); delay(700)
+                        return PopupResult(true, "loop_guard_back")
+                    }
+                    PopupLoopGuard.Verdict.GIVE_UP -> {
+                        log("WARN: Popup ${detected.type} không đóng được — bỏ qua, chờ recovery")
+                        return PopupResult.NONE
+                    }
+                    PopupLoopGuard.Verdict.PROCEED -> Unit
+                }
+            }
             val result = handleKnownPopup(detected, root)
             if (result.handled) return result
         }
@@ -45,6 +63,18 @@ class PopupHandler(private val service: IFarmHost) {
         // Chạy chậm hơn, nhưng bắt được popup TikTok version mới.
         val tier2 = scanKeywords(root)
         if (tier2 != null) {
+            when (loopGuard.record("t2:${tier2.description}", System.currentTimeMillis())) {
+                PopupLoopGuard.Verdict.TRY_BACK -> {
+                    log("WARN: Popup '${tier2.description}' lặp lại nhiều lần — đổi sang bấm Back")
+                    service.pressBack(); delay(700)
+                    return PopupResult(true, "loop_guard_back")
+                }
+                PopupLoopGuard.Verdict.GIVE_UP -> {
+                    log("WARN: Popup '${tier2.description}' không đóng được — bỏ qua, chờ recovery")
+                    return PopupResult.NONE
+                }
+                PopupLoopGuard.Verdict.PROCEED -> Unit
+            }
             log("SCAN: Tier 2: ${tier2.description}")
             return handleByKeyword(tier2, root)
         }
@@ -104,6 +134,24 @@ class PopupHandler(private val service: IFarmHost) {
             popup.dismissButton?.let { service.clickNode(it.node) } ?: service.pressBack()
             delay(700)
             PopupResult(true, "generic")
+        }
+
+        // [v1.3.1] "Tài khoản của bạn cần được cập nhật" — đè lên danh sách
+        // switch-account, chặn không cho chuyển acc cho tới khi bấm "Để sau"
+        // hoặc "Liên kết SĐT/email". Luôn chọn "Để sau" để bỏ qua và tiếp tục
+        // flow chuyển acc bình thường — không liên kết SĐT/email thay người dùng.
+        NodeTraverser.PopupType.ACCOUNT_UPDATE_PROMPT -> {
+            log("ACCS: Popup 'Tài khoản cần cập nhật' đè lên danh sách chuyển acc — bấm 'Để sau'")
+            val laterBtn = NodeTraverser.findByText(root, "để sau", ignoreCase = true)
+                ?: NodeTraverser.findByText(root, "later", ignoreCase = true)
+            if (laterBtn != null) {
+                service.clickNode(laterBtn.node)
+            } else {
+                // Không tìm thấy nút "Để sau" (đổi text/ngôn ngữ) → back để không kẹt.
+                service.pressBack()
+            }
+            delay(1_000)
+            PopupResult(true, "account_update_prompt")
         }
 
         // Popup "Chuyển đổi tài khoản": không phải popup cần đóng —
@@ -266,6 +314,30 @@ class PopupHandler(private val service: IFarmHost) {
             "truy cập micro"          to "deny_permission",
             // Quyền camera TikTok hỏi ngay cả khi không quay → từ chối
             "allow tiktok to access your camera" to "deny_permission",
+
+            // [v1.4.0] Hộp thoại quyền runtime chuẩn của Android 13+ (Permission Controller).
+            // Dùng cụm đầy đủ "allow tiktok to ..." để tránh khớp nhầm text caption.
+            // CHƯA kiểm chứng trên thiết bị thật — cần QA (xem .claude/tasks/backlog.md).
+            "allow tiktok to send you notifications"       to "deny_permission",
+            "cho phép tiktok gửi thông báo"                to "deny_permission",
+            "allow tiktok to take pictures and record video" to "deny_permission",
+            "cho phép tiktok chụp ảnh và quay video"       to "deny_permission",
+            "allow tiktok to record audio"                 to "deny_permission",
+            "cho phép tiktok ghi âm"                       to "deny_permission",
+
+            // [v1.3.2] Popup "Cho phép vị trí chính xác" — TikTok/Android hỏi
+            // LẠI quyền vị trí CHÍNH XÁC (precise location) sau khi trước đó
+            // đã tắt. Khác các popup permission phía trên: dialog này CHỈ có
+            // 2 nút "Mở cài đặt" / "Cho phép" — KHÔNG có nút Từ chối/Deny nào.
+            // Dialog đè lên toàn màn hình (kể cả lúc đang chuyển acc) khiến
+            // click dự định vào UI bên dưới trúng nhầm dialog này → chuyển
+            // acc fail. Vẫn map về "deny_permission" để tái dùng cơ chế sẵn
+            // có: dismissTexts của action này không khớp "cho phép"/"mở cài
+            // đặt" nên tự động rơi xuống pressBack() — đóng dialog mà KHÔNG
+            // cấp quyền, giữ đúng chủ trương từ chối permission không cần
+            // thiết của các pattern permission khác trong list này.
+            "vị trí chính xác"        to "deny_permission",
+            "precise location"        to "deny_permission",
 
             // ── Lưu thông tin đăng nhập ──────────────────────────────────────
             // [v1.1.3] TikTok/Android hỏi có muốn lưu password không.
