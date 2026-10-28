@@ -7,8 +7,13 @@ on:
     paths-ignore:
       - '.github/workflows/build.yml'
       - '.github/workflows/apply-atpro-archive-once.yml'
+      - '.github/workflows/unpack-atpro-v1-5-0.yml'
   pull_request:
     branches: [ main, dev ]
+    paths-ignore:
+      - '.github/workflows/build.yml'
+      - '.github/workflows/apply-atpro-archive-once.yml'
+      - '.github/workflows/unpack-atpro-v1-5-0.yml'
   workflow_dispatch:
     inputs:
       version:
