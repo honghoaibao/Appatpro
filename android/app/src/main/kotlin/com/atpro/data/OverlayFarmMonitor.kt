@@ -39,26 +39,26 @@ import com.atpro.accessibility.TikTokAccessibilityService
 object OverlayFarmMonitor {
     const val TAG = "OverlayMonitor"
 
-    // ── Palette (design tokens) ──────────────────────────────
-    private const val C_BG       = 0xF50D0D18.toInt()
-    private const val C_BG2      = 0xF0141428.toInt()
-    private const val C_BORDER   = 0x556C63FF.toInt()
-    private const val C_PURPLE   = 0xFF7C73FF.toInt()
-    private const val C_GREEN    = 0xFF10B981.toInt()
-    private const val C_AMBER    = 0xFFF59E0B.toInt()
-    private const val C_RED      = 0xFFEF4444.toInt()
-    private const val C_TEXT     = 0xFFEEEEF5.toInt()
-    private const val C_MUTED    = 0xFF8B8FA8.toInt()
-    private const val C_DIM      = 0xFF4B5563.toInt()
+    // ── Palette (design tokens) — v1.3.1: làm giàu màu sắc, tăng độ tương phản ──
+    private const val C_BG       = 0xF5111114.toInt()
+    private const val C_BG2      = 0xF518181C.toInt()
+    private const val C_BORDER   = 0xFF2A2A31.toInt()
+    private const val C_PURPLE   = 0xFF7B83FF.toInt()
+    private const val C_GREEN    = 0xFF34D399.toInt()
+    private const val C_AMBER    = 0xFFFBBF24.toInt()
+    private const val C_RED      = 0xFFF87171.toInt()
+    private const val C_TEXT     = 0xFFF4F4F5.toInt()
+    private const val C_MUTED    = 0xFFA1A1AA.toInt()
+    private const val C_DIM      = 0xFF71717A.toInt()
 
-    // ── Log-entry colours (v1.2.8) ───────────────────────────
-    private const val C_LOG_PURPLE = 0xFF9D92F5.toInt()   // OPEN, SWITCH, ACC, RELOAD
-    private const val C_LOG_CYAN   = 0xFF22D3EE.toInt()   // SCAN, LIST, CMT, FEED
-    private const val C_LOG_AMBER  = 0xFFF59E0B.toInt()   // CFG, NORM, WARN, FIX
-    private const val C_LOG_GREEN  = 0xFF10B981.toInt()   // FOUND, HOME, FOLLOW, OK
+    // ── Log-entry colours (v1.3.1: đồng bộ với palette mới) ──
+    private const val C_LOG_PURPLE = 0xFF9EA4FF.toInt()   // OPEN, SWITCH, ACC, RELOAD, RECOVER
+    private const val C_LOG_CYAN   = 0xFF38BDF8.toInt()   // SCAN, LIST, CMT, FEED, FB, IG, X
+    private const val C_LOG_AMBER  = 0xFFFBBF24.toInt()   // CFG, NORM, WARN, FIX, WATCH, WDG
+    private const val C_LOG_GREEN  = 0xFF34D399.toInt()   // FOUND, HOME, FOLLOW, OK, DONE
     private const val C_LOG_PINK   = 0xFFF472B6.toInt()   // TIM (like ❤)
-    private const val C_LOG_RED    = 0xFFEF4444.toInt()   // ERR
-    private const val C_LOG_MUTED  = 0xFF6B7280.toInt()   // default / BTN
+    private const val C_LOG_RED    = 0xFFF87171.toInt()   // ERR
+    private const val C_LOG_MUTED  = 0xFF71717A.toInt()   // default / BTN / SKIP
 
     // ─────────────────────────────────────────────────────────
     //  Internal state
@@ -71,14 +71,20 @@ object OverlayFarmMonitor {
     // Views
     private var tvHeader:       View?     = null
     private var statusDotBg:    GradientDrawable? = null
+    private var statusDotGlowBg: GradientDrawable? = null
     private var tvServiceLabel: TextView? = null   // v1.2.9: label đối diện AT PRO
     private var tvAccount:      TextView? = null
     private var tvSessionTime:  TextView? = null
     private var tvTotalTime:    TextView? = null
-    // v1.2.9: Golike task mode rows
+    // v1.2.9: task mode rows (v1.4.0: không còn gắn với Golike)
+    // v1.3.2: cấu trúc lại — thêm progress bar trực quan (progressFill) + pill
+    // trạng thái lỗi (tvConsecErrors đổi từ text phẳng sang pill bo tròn màu),
+    // gộp 3 view lẻ vào 1 nhóm taskRows để show/hide 1 lần thay vì 3 lần.
     private var tvTaskAccount:  TextView? = null
     private var tvTaskProgress: TextView? = null
+    private var progressTrack:  LinearLayout? = null   // v1.3.2: thanh tiến độ — child(0)=fill, child(1)=empty
     private var tvConsecErrors: TextView? = null
+    private var taskRows:       View?     = null   // v1.3.2: nhóm 3 row trên, show/hide 1 lần
     private var farmRows:       View?     = null   // timeRow chỉ dùng trong FARM mode
     private var isTaskMode:     Boolean   = false
     private var btnPauseResume: TextView? = null
@@ -151,10 +157,8 @@ object OverlayFarmMonitor {
                 // v1.2.9: apply service label + mode after view is built
                 tvServiceLabel?.text = serviceLabel
                 tvServiceLabel?.visibility = if (serviceLabel.isNotEmpty()) View.VISIBLE else View.GONE
-                farmRows?.visibility   = if (isTaskMode) View.GONE else View.VISIBLE
-                tvTaskAccount?.visibility  = if (isTaskMode) View.VISIBLE else View.GONE
-                tvTaskProgress?.visibility = if (isTaskMode) View.VISIBLE else View.GONE
-                tvConsecErrors?.visibility = if (isTaskMode) View.VISIBLE else View.GONE
+                farmRows?.visibility = if (isTaskMode) View.GONE else View.VISIBLE
+                taskRows?.visibility = if (isTaskMode) View.VISIBLE else View.GONE
                 Log.i(TAG, "Overlay shown [label=$serviceLabel taskMode=$isTaskMode]")
             } catch (e: Exception) {
                 Log.e(TAG, "show: ${e.message}")
@@ -170,9 +174,11 @@ object OverlayFarmMonitor {
             } catch (_: Exception) {}
             overlayView    = null; windowManager  = null
             tvHeader       = null; tvAccount      = null; statusDotBg    = null
+            statusDotGlowBg = null
             tvServiceLabel = null
             tvSessionTime  = null; tvTotalTime    = null
             tvTaskAccount  = null; tvTaskProgress = null; tvConsecErrors = null
+            progressTrack  = null; taskRows       = null
             farmRows       = null; isTaskMode     = false
             btnPauseResume = null
             btnStop        = null; btnMinimize    = null
@@ -192,8 +198,9 @@ object OverlayFarmMonitor {
     }
 
     /**
-     * v1.2.9: Cập nhật trạng thái popup khi làm nhiệm vụ Golike (isTaskMode = true).
+     * v1.2.9: Cập nhật trạng thái popup khi làm nhiệm vụ kiếm tiền (isTaskMode = true).
      * Hiển thị: tên acc, số nhiệm vụ thành công / tổng, lỗi liên tiếp, và log action.
+     * v1.3.2: Thêm cập nhật thanh tiến độ (progressTrack) + pill lỗi đổi màu nền/viền.
      */
     fun updateTask(
         accountId:     String,
@@ -204,10 +211,32 @@ object OverlayFarmMonitor {
     ) {
         handler.post {
             tvTaskAccount?.text  = "@$accountId"
-            tvTaskProgress?.text = "✓ $successCount nhiệm vụ   |   Tổng: $totalCount"
+            tvTaskProgress?.text = "✓ $successCount / $totalCount"
+
+            progressTrack?.let { track ->
+                val ratio = if (totalCount > 0)
+                    (successCount.toFloat() / totalCount.toFloat()).coerceIn(0f, 1f)
+                else 0f
+                (track.getChildAt(0)?.layoutParams as? LinearLayout.LayoutParams)?.let {
+                    it.weight = ratio; track.getChildAt(0).layoutParams = it
+                }
+                (track.getChildAt(1)?.layoutParams as? LinearLayout.LayoutParams)?.let {
+                    it.weight = 1f - ratio; track.getChildAt(1).layoutParams = it
+                }
+                track.requestLayout()
+            }
+
             tvConsecErrors?.let { tv ->
-                tv.text      = "Lỗi liên tiếp: $consecErrors"
-                tv.setTextColor(if (consecErrors > 0) C_LOG_RED else C_LOG_GREEN)
+                tv.text = "Lỗi liên tiếp: $consecErrors"
+                val c = if (consecErrors > 0) C_LOG_RED else C_LOG_GREEN
+                tv.setTextColor(c)
+                val strokeW = TypedValue.applyDimension(
+                    TypedValue.COMPLEX_UNIT_DIP, 1f, tv.context.resources.displayMetrics
+                ).toInt().coerceAtLeast(1)
+                (tv.background as? GradientDrawable)?.apply {
+                    setColor(c and 0x00FFFFFF or 0x22000000)
+                    setStroke(strokeW, c and 0x00FFFFFF or 0x55000000)
+                }
             }
             if (action.isNotEmpty()) {
                 val entry = parseLogMsg(action) ?: LogEntry(action.take(42), C_LOG_MUTED)
@@ -451,6 +480,106 @@ object OverlayFarmMonitor {
             LogEntry("💬 $body", C_LOG_CYAN)
         }
 
+        // ── v1.3.1: mở rộng whitelist — các tag này đã tồn tại trong log() khắp
+        // codebase (recovery, Facebook/IG/X nurture, task mode, watchdog...) nhưng
+        // trước đây parseLogMsg() không nhận diện → không BAO GIỜ hiện lên overlay,
+        // dù vẫn ghi logcat. Người dùng chỉ thấy "action" chung chung (từ update())
+        // mà không thấy các sự kiện quan trọng như đang khôi phục/đang gặp lỗi gì.
+
+        // ACCS: sự kiện tài khoản (follow-friends popup, account-update-prompt...)
+        msg.startsWith("ACCS:") ->
+            LogEntry("👤 " + msg.removePrefix("ACCS:").trim().take(42), C_LOG_PURPLE)
+
+        // AUTH: xác thực/mật mã
+        msg.startsWith("AUTH:") ->
+            LogEntry("🔐 " + msg.removePrefix("AUTH:").trim().take(42), C_LOG_AMBER)
+
+        // WATCH: rời feed bất thường khi đang xem video
+        msg.startsWith("WATCH:") ->
+            LogEntry("👁 " + msg.removePrefix("WATCH:").trim().take(42), C_LOG_AMBER)
+
+        // WDG-RECOVER / RECOVER: đang khôi phục về feed sau khi bị kẹt
+        msg.startsWith("WDG-RECOVER:") ->
+            LogEntry("🛠 " + msg.removePrefix("WDG-RECOVER:").trim().take(42), C_LOG_PURPLE, dots = true)
+        msg.startsWith("RECOVER:") ->
+            LogEntry("🛠 " + msg.removePrefix("RECOVER:").trim().take(42), C_LOG_PURPLE, dots = true)
+
+        // WDG: cảnh báo watchdog chung
+        msg.startsWith("WDG:") ->
+            LogEntry("🐕 " + msg.removePrefix("WDG:").trim().take(42), C_LOG_AMBER)
+
+        // POPUP / NOTIFY: xử lý popup lạ
+        msg.startsWith("POPUP:") ->
+            LogEntry("💬 " + msg.removePrefix("POPUP:").trim().take(42), C_LOG_AMBER)
+        msg.startsWith("NOTIFY:") ->
+            LogEntry("🔔 " + msg.removePrefix("NOTIFY:").trim().take(42), C_LOG_AMBER)
+
+        // WELLBEING: màn hình nghỉ ngơi/giới hạn sử dụng của TikTok
+        msg.startsWith("WELLBEING:") ->
+            LogEntry("🌙 " + msg.removePrefix("WELLBEING:").trim().take(42), C_LOG_AMBER)
+
+        // LIMIT: giới hạn tốc độ hành động (comment/like rate limit)
+        msg.startsWith("LIMIT:") ->
+            LogEntry("⏱ " + msg.removePrefix("LIMIT:").trim().take(42), C_LOG_AMBER)
+
+        // CMT SKIP / LIKE SKIP: bỏ qua do rate limit
+        msg.startsWith("CMT SKIP:") ->
+            LogEntry("⏭ Bỏ qua bình luận (giới hạn)", C_LOG_MUTED)
+        msg.startsWith("LIKE SKIP:") ->
+            LogEntry("⏭ Bỏ qua thích (giới hạn)", C_LOG_MUTED)
+
+        // SKIP: bỏ qua hành động chung
+        msg.startsWith("SKIP:") ->
+            LogEntry("⏭ " + msg.removePrefix("SKIP:").trim().take(42), C_LOG_MUTED)
+
+        // DONE: hoàn tất phiên/nhiệm vụ
+        msg.startsWith("DONE:") ->
+            LogEntry("🏁 " + msg.removePrefix("DONE:").trim().take(42), C_LOG_GREEN, pulse = true)
+
+        // FB REELS / FB: nuôi acc Facebook
+        msg.startsWith("FB REELS:") ->
+            LogEntry("🎬 " + msg.removePrefix("FB REELS:").trim().take(42), C_LOG_CYAN)
+        msg.startsWith("FB:") ->
+            LogEntry("📘 " + msg.removePrefix("FB:").trim().take(42), C_LOG_CYAN)
+
+        // IG: nuôi acc Instagram
+        msg.startsWith("IG:") ->
+            LogEntry("📷 " + msg.removePrefix("IG:").trim().take(42), C_LOG_CYAN)
+
+        // X: nuôi acc X/Twitter
+        msg.startsWith("X:") ->
+            LogEntry("🐦 " + msg.removePrefix("X:").trim().take(42), C_LOG_CYAN)
+
+        // LIVE-FEED: phát hiện live trong feed
+        msg.startsWith("LIVE-FEED:") ->
+            LogEntry("🔴 " + msg.removePrefix("LIVE-FEED:").trim().take(42), C_LOG_AMBER)
+
+        // TASK-FOLLOW / TASK-LIKE / TASK: chế độ nhiệm vụ kiếm tiền
+        msg.startsWith("TASK-FOLLOW:") ->
+            LogEntry("✓ " + msg.removePrefix("TASK-FOLLOW:").trim().take(42), C_LOG_GREEN, pulse = true)
+        msg.startsWith("TASK-LIKE:") ->
+            LogEntry("❤ " + msg.removePrefix("TASK-LIKE:").trim().take(42), C_LOG_PINK, pulse = true)
+        msg.startsWith("TASK:") ->
+            LogEntry("📌 " + msg.removePrefix("TASK:").trim().take(42), C_LOG_PURPLE)
+
+        // REST: nghỉ giữa các phiên/tài khoản
+        msg.startsWith("REST:") ->
+            LogEntry("☕ " + msg.removePrefix("REST:").trim().take(42), C_LOG_MUTED, dots = true)
+
+        // SEARCH / SHOP / INBOX / SAVE: hành vi nuôi acc phụ trợ
+        msg.startsWith("SEARCH:") ->
+            LogEntry("🔎 " + msg.removePrefix("SEARCH:").trim().take(42), C_LOG_CYAN)
+        msg.startsWith("SHOP:") ->
+            LogEntry("🛍 " + msg.removePrefix("SHOP:").trim().take(42), C_LOG_CYAN)
+        msg.startsWith("INBOX:") ->
+            LogEntry("✉ " + msg.removePrefix("INBOX:").trim().take(42), C_LOG_CYAN)
+        msg.startsWith("SAVE:") ->
+            LogEntry("🔖 " + msg.removePrefix("SAVE:").trim().take(42), C_LOG_GREEN, pulse = true)
+
+        // DEV: log debug nội bộ
+        msg.startsWith("DEV:") ->
+            LogEntry("🧪 " + msg.removePrefix("DEV:").trim().take(42), C_LOG_MUTED)
+
         // WARN: cảnh báo chung
         msg.startsWith("WARN:") ->
             LogEntry("⚠ " + msg.removePrefix("WARN:").trim().take(42), C_LOG_AMBER)
@@ -575,13 +704,17 @@ object OverlayFarmMonitor {
         // ── Full panel ──────────────────────────────────────
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(13), dp(11), dp(13), dp(11))
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            // v1.4.0: nền đặc + viền mảnh (bỏ gradient dọc)
             background = GradientDrawable().apply {
-                colors = intArrayOf(C_BG, C_BG2)
-                orientation = GradientDrawable.Orientation.TOP_BOTTOM
-                gradientType = GradientDrawable.LINEAR_GRADIENT
-                cornerRadius = dp(16).toFloat()
+                setColor(C_BG)
+                cornerRadius = dp(18).toFloat()
                 setStroke(dp(1), C_BORDER)
+            }
+            // v1.3.1: elevation thật (API 21+) → Android tự đổ bóng mềm phía dưới
+            // panel, tạo cảm giác "nổi" thay vì phẳng như trước.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                elevation = dp(10).toFloat()
             }
         }
         fullPanel = root
@@ -678,12 +811,26 @@ object OverlayFarmMonitor {
         val tvLogo = text("AT PRO", 10f, C_PURPLE, bold = true).apply {
             typeface = Typeface.DEFAULT_BOLD; letterSpacing = 0.08f
         }
+        // v1.3.1: vòng glow mờ phía sau chấm trạng thái — cảm giác "đang sống" rõ hơn
+        // thay vì 1 chấm đặc phẳng lì.
+        val dotGlowBg = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(C_GREEN and 0x00FFFFFF or 0x33000000)
+        }.also { statusDotGlowBg = it }
+        val dotGlowView = View(context).apply { background = dotGlowBg }
         val dotBg = GradientDrawable().apply {
             shape = GradientDrawable.OVAL; setColor(C_GREEN)
         }.also { statusDotBg = it }
         val dotView = View(context).apply { background = dotBg }
+        val dotStack = FrameLayout(context)
+        dotStack.addView(dotGlowView, FrameLayout.LayoutParams(dp(11), dp(11)).apply {
+            gravity = Gravity.CENTER
+        })
+        dotStack.addView(dotView, FrameLayout.LayoutParams(dp(7), dp(7)).apply {
+            gravity = Gravity.CENTER
+        })
         header.addView(tvLogo)
-        header.addView(dotView, LinearLayout.LayoutParams(dp(7), dp(7)).apply {
+        header.addView(dotStack, LinearLayout.LayoutParams(dp(11), dp(11)).apply {
             gravity = Gravity.CENTER_VERTICAL; setMargins(dp(5), 0, 0, 0)
         })
         tvHeader = dotView
@@ -725,8 +872,8 @@ object OverlayFarmMonitor {
         fun divider() = View(context).apply {
             setBackgroundColor(C_BORDER)
             layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 1
-            ).apply { setMargins(0, dp(6), 0, dp(6)) }
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(1)
+            ).apply { setMargins(0, dp(7), 0, dp(7)) }
         }
         body.addView(divider())
 
@@ -746,20 +893,66 @@ object OverlayFarmMonitor {
         body.addView(timeRow)
         farmRows = timeRow  // reference để ẩn/hiện theo mode
 
-        // ── TASK mode: account + progress + errors ───────────
-        tvTaskAccount = text("@—", 10.5f, C_TEXT).apply {
-            visibility = View.GONE
-        }.also { body.addView(it) }
+        // ── TASK mode (v1.3.2): popup nhiệm vụ TikTok — account,
+        // thanh tiến độ trực quan, pill trạng thái lỗi. Gộp vào 1 taskGroup
+        // để show/hide 1 lần (thay vì set visibility từng view lẻ như trước).
+        val taskGroup = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility  = View.GONE
+        }
 
-        tvTaskProgress = text("✓ 0 nhiệm vụ   |   Tổng: 0", 9f, C_GREEN).apply {
-            setPadding(0, dp(2), 0, 0)
-            visibility = View.GONE
-        }.also { body.addView(it) }
+        tvTaskAccount = text("@—", 10.5f, C_TEXT).also { taskGroup.addView(it) }
 
+        // Hàng nhãn "Nhiệm vụ" + giá trị "✓ N / Tổng M" — cùng pattern với
+        // hàng "Phiên / Tổng" của FARM mode phía trên.
+        val taskProgressRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(3), 0, 0)
+        }
+        val lblTask = text("Nhiệm vụ  ", 8.5f, C_DIM)
+        tvTaskProgress = text("✓ 0 / 0", 9f, C_GREEN, bold = true)
+        taskProgressRow.addView(lblTask)
+        taskProgressRow.addView(tvTaskProgress)
+        taskGroup.addView(taskProgressRow)
+
+        // Thanh tiến độ — track mờ + fill xanh, tỉ lệ set qua layout_weight
+        // (không cần đo pixel, tự co giãn đúng theo panelWidthPx hiện tại).
+        val fillView = View(context).apply {
+            background = GradientDrawable().apply {
+                setColor(C_GREEN); cornerRadius = dp(3).toFloat()
+            }
+        }
+        val emptyView = View(context)
+        val track = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = GradientDrawable().apply {
+                setColor(C_BORDER and 0x00FFFFFF or 0x33000000)
+                cornerRadius = dp(3).toFloat()
+            }
+            addView(fillView,  LinearLayout.LayoutParams(0, dp(4), 0f))
+            addView(emptyView, LinearLayout.LayoutParams(0, dp(4), 1f))
+        }
+        progressTrack = track
+        taskGroup.addView(track, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(4)
+        ).apply { setMargins(0, dp(4), 0, dp(1)) })
+
+        // Pill trạng thái lỗi liên tiếp — nền/viền đổi màu xanh↔đỏ theo
+        // consecErrors (set động trong updateTask()), thay cho text phẳng cũ.
         tvConsecErrors = text("Lỗi liên tiếp: 0", 8.5f, C_LOG_GREEN).apply {
-            setPadding(0, dp(1), 0, 0)
-            visibility = View.GONE
-        }.also { body.addView(it) }
+            setPadding(dp(6), dp(2), dp(6), dp(2))
+            background = GradientDrawable().apply {
+                setColor(C_LOG_GREEN and 0x00FFFFFF or 0x22000000)
+                cornerRadius = dp(10).toFloat()
+                setStroke(dp(1), C_LOG_GREEN and 0x00FFFFFF or 0x55000000)
+            }
+        }
+        taskGroup.addView(tvConsecErrors, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { setMargins(0, dp(5), 0, 0) })
+
+        body.addView(taskGroup)
+        taskRows = taskGroup
 
         // ── Log area (v1.2.8: hỗ trợ màu động) ─────────────
         tvUserLog = TextView(context).apply {
@@ -794,9 +987,9 @@ object OverlayFarmMonitor {
                     compoundDrawablePadding = dp(3)
                 }
                 background = GradientDrawable().apply {
-                    setColor(color and 0x00FFFFFF or 0x1A000000)
-                    cornerRadius = dp(6).toFloat()
-                    setStroke(1, color and 0x00FFFFFF or 0x40000000)
+                    setColor(color and 0x00FFFFFF or 0x22000000)
+                    cornerRadius = dp(10).toFloat()
+                    setStroke(dp(1), color and 0x00FFFFFF or 0x55000000)
                 }
             }
 
@@ -912,9 +1105,12 @@ object OverlayFarmMonitor {
             d.setBounds(0, 0, sz, sz)
             btn.setCompoundDrawables(d, null, null, null)
         }
+        val strokeW = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP, 1f, context.resources.displayMetrics
+        ).toInt().coerceAtLeast(1)
         (btn.background as? GradientDrawable)?.apply {
-            setColor(color and 0x00FFFFFF or 0x1A000000)
-            setStroke(1, color and 0x00FFFFFF or 0x40000000)
+            setColor(color and 0x00FFFFFF or 0x22000000)
+            setStroke(strokeW, color and 0x00FFFFFF or 0x55000000)
         }
     }
 
@@ -923,9 +1119,11 @@ object OverlayFarmMonitor {
         if (isPaused) {
             updateBtnStyle(btn, "Tiếp tục", C_GREEN, R.drawable.ic_ov_play)
             statusDotBg?.setColor(C_AMBER)
+            statusDotGlowBg?.setColor(C_AMBER and 0x00FFFFFF or 0x33000000)
         } else {
             updateBtnStyle(btn, "Dừng", C_AMBER, R.drawable.ic_ov_pause)
             statusDotBg?.setColor(C_GREEN)
+            statusDotGlowBg?.setColor(C_GREEN and 0x00FFFFFF or 0x33000000)
         }
     }
 

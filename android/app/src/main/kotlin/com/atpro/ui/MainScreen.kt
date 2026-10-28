@@ -1,6 +1,17 @@
 package com.atpro.ui
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import com.atpro.ui.theme.AtDivider
+import com.atpro.ui.theme.pressClickable
+import com.atpro.ui.theme.AtColors
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -32,10 +43,10 @@ import com.atpro.ui.stats.StatsScreen
 import com.atpro.ui.stats.StatsViewModel
 
 // ── Design tokens ────────────────────────────────────────────
-private val BgDark    = Color(0xFF0D0D14)
-private val NavBg     = Color(0xFF13131F)
-private val Purple    = Color(0xFF6C63FF)
-private val TextMuted = Color(0xFF6B7280)
+private val BgDark    = AtColors.Bg
+private val NavBg     = AtColors.Surface
+private val Purple    = AtColors.Accent
+private val TextMuted = AtColors.TextMuted
 
 // ─────────────────────────────────────────────────────────────
 //  Tab definition
@@ -46,7 +57,7 @@ private enum class Tab(
     val label: String,
     val icon:  ImageVector,
 ) {
-    DASHBOARD("Dashboard",  Icons.Rounded.Home),
+    DASHBOARD("Tổng quan", Icons.Rounded.Home),
     SERVICES ("Dịch vụ",   Icons.Rounded.Layers),
     STATS    ("Thống kê",  Icons.Rounded.BarChart),
     ACCOUNTS ("Tài khoản", Icons.Rounded.ManageAccounts),
@@ -76,44 +87,7 @@ fun MainScreen(
     Scaffold(
         containerColor      = BgDark,
         contentWindowInsets = WindowInsets(0),
-        bottomBar = {
-            NavigationBar(
-                modifier       = Modifier.navigationBarsPadding(),
-                containerColor = NavBg,
-                tonalElevation = 0.dp,
-            ) {
-                Tab.entries.forEach { tab ->
-                    NavigationBarItem(
-                        selected = selectedTab == tab,
-                        onClick  = { selectedTab = tab },
-                        icon     = {
-                            Icon(
-                                tab.icon,
-                                contentDescription = tab.label,
-                                modifier = Modifier.size(22.dp),
-                            )
-                        },
-                        label = {
-                            // v1.2.9: softWrap=false + Ellipsis phòng mất chữ trên màn nhỏ
-                            Text(
-                                tab.label,
-                                fontSize  = 10.sp,
-                                maxLines  = 1,
-                                softWrap  = false,
-                                overflow  = TextOverflow.Ellipsis,
-                            )
-                        },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor   = Purple,
-                            selectedTextColor   = Purple,
-                            unselectedIconColor = TextMuted,
-                            unselectedTextColor = TextMuted,
-                            indicatorColor      = Purple.copy(alpha = 0.12f),
-                        ),
-                    )
-                }
-            }
-        },
+        bottomBar = { AtBottomBar(selected = selectedTab, onSelect = { selectedTab = it }) },
     ) { innerPadding ->
         Box(
             modifier = Modifier
@@ -136,11 +110,6 @@ fun MainScreen(
                     Tab.DASHBOARD -> DashboardScreen(vm = dashboardVm)
 
                     Tab.SERVICES  -> ServicesScreen(
-                        isGolikeLoggedIn    = dashboardVm.uiState.collectAsState().value.isGolikeLoggedIn,
-                        golikeCoin          = dashboardVm.uiState.collectAsState().value.golikeCoin,
-                        golikeHoldCoin      = dashboardVm.uiState.collectAsState().value.golikeHoldCoin,
-                        onSaveGolikeToken   = dashboardVm::saveGolikeToken,
-                        onClearGolikeToken  = dashboardVm::clearGolikeToken,
                         onOpenFarmService   = {
                             dashboardVm.setServiceMode(com.atpro.automation.ServiceMode.FARM)
                             selectedTab = Tab.DASHBOARD
@@ -197,5 +166,70 @@ fun MainScreen(
             onDismiss        = dashboardVm::dismissUpdate,
             onUpdate         = { dashboardVm.startUpdate() },
         )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  v1.4.0 — Thanh điều hướng dưới: phẳng, vạch chỉ báo trượt mượt, nhấn co nhẹ.
+//  (Thay NavigationBar mặc định của Material — viên thuốc chỉ báo trông "mặc định".)
+// ─────────────────────────────────────────────────────────────
+@Composable
+private fun AtBottomBar(selected: Tab, onSelect: (Tab) -> Unit) {
+    Column(
+        Modifier
+            .background(BgDark)
+            .navigationBarsPadding()
+    ) {
+        AtDivider()
+        BoxWithConstraints(Modifier.fillMaxWidth().height(60.dp)) {
+            val itemW = maxWidth / Tab.entries.size
+            val indicatorX by animateDpAsState(
+                targetValue   = itemW * selected.ordinal,
+                animationSpec = spring(dampingRatio = 0.8f, stiffness = 450f),
+                label         = "nav_indicator",
+            )
+            Box(
+                Modifier
+                    .offset(x = indicatorX + itemW / 2 - 12.dp)
+                    .width(24.dp)
+                    .height(2.dp)
+                    .clip(RoundedCornerShape(1.dp))
+                    .background(com.atpro.ui.theme.AtColors.TextPrim)
+            )
+            Row(Modifier.fillMaxSize()) {
+                Tab.entries.forEach { tab ->
+                    val tint by animateColorAsState(
+                        targetValue   = if (tab == selected) com.atpro.ui.theme.AtColors.TextPrim else TextMuted,
+                        animationSpec = tween(180),
+                        label         = "nav_tint",
+                    )
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .pressClickable(pressedScale = 0.92f) { onSelect(tab) },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Icon(
+                            tab.icon,
+                            contentDescription = tab.label,
+                            tint     = tint,
+                            modifier = Modifier.size(22.dp),
+                        )
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            tab.label,
+                            color      = tint,
+                            fontSize   = 10.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines   = 1,
+                            softWrap   = false,
+                            overflow   = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
     }
 }

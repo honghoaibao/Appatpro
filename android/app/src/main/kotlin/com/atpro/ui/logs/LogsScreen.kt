@@ -1,6 +1,8 @@
 package com.atpro.ui.logs
 
 import androidx.compose.animation.*
+import com.atpro.ui.theme.AtColors
+import com.atpro.ui.theme.AtType
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -26,14 +28,14 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 // ── Design tokens ─────────────────────────────────────────────
-private val BgDark   = Color(0xFF0D0D14)
-private val CardDark = Color(0xFF1A1A2E)
-private val Purple   = Color(0xFF6C63FF)
-private val Green    = Color(0xFF10B981)
-private val Amber    = Color(0xFFF59E0B)
-private val RedBad   = Color(0xFFEF4444)
-private val TextSec  = Color(0xFF9CA3AF)
-private val TextMuted= Color(0xFF6B7280)
+private val BgDark   = AtColors.Bg
+private val CardDark = AtColors.Surface
+private val Purple   = AtColors.Accent
+private val Green    = AtColors.Success
+private val Amber    = AtColors.Warning
+private val RedBad   = AtColors.Danger
+private val TextSec  = AtColors.TextSec
+private val TextMuted= AtColors.TextMuted
 
 private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
@@ -68,7 +70,7 @@ fun LogsScreen(vm: LogsViewModel, onNavigateUp: (() -> Unit)? = null) {
         ) {
             Text(
                 "Nhật ký",
-                color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                style = AtType.Title.copy(fontSize = 22.sp), color = AtColors.TextPrim,
                 modifier = Modifier.weight(1f),
             )
             AnimatedVisibility(
@@ -132,7 +134,7 @@ fun LogsScreen(vm: LogsViewModel, onNavigateUp: (() -> Unit)? = null) {
                         labelColor             = TextSec,
                     ),
                     border        = FilterChipDefaults.filterChipBorder(
-                        borderColor         = Color(0xFF374151),
+                        borderColor         = AtColors.Hairline,
                         selectedBorderColor = levelColor(lvl).copy(alpha = 0.4f),
                         enabled = true, selected = levelFilter == lvl,
                     ),

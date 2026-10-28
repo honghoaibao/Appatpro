@@ -6,7 +6,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.view.animation.AccelerateDecelerateInterpolator
-import android.view.animation.OvershootInterpolator
+import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -27,7 +27,7 @@ class SplashActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor     = android.graphics.Color.TRANSPARENT
-        window.navigationBarColor = android.graphics.Color.parseColor("#0D0D14")
+        window.navigationBarColor = android.graphics.Color.parseColor("#09090B")
 
         val root = buildSplashView()
         setContentView(root)
@@ -41,7 +41,7 @@ class SplashActivity : AppCompatActivity() {
     private fun buildSplashView(): FrameLayout {
         val ctx = this
         val bg  = FrameLayout(ctx).apply {
-            setBackgroundColor(android.graphics.Color.parseColor("#0D0D14"))
+            setBackgroundColor(android.graphics.Color.parseColor("#09090B"))
         }
 
         val center = LinearLayout(ctx).apply {
@@ -52,21 +52,21 @@ class SplashActivity : AppCompatActivity() {
         // Logo text "AT PRO"
         val tvLogo = TextView(ctx).apply {
             text      = "AT PRO"
-            textSize  = 38f
+            textSize  = 30f
             typeface  = android.graphics.Typeface.DEFAULT_BOLD
-            setTextColor(android.graphics.Color.parseColor("#6C63FF"))
-            letterSpacing = 0.12f
+            setTextColor(android.graphics.Color.parseColor("#F4F4F5"))
+            letterSpacing = 0.28f
             gravity   = android.view.Gravity.CENTER
             alpha     = 0f
-            scaleX    = 0.6f
-            scaleY    = 0.6f
+            scaleX    = 0.92f
+            scaleY    = 0.92f
         }
 
         // Tagline
         val tvTag = TextView(ctx).apply {
-            text     = "Nền tảng nuôi tài khoản tự động"
+            text     = "Tự động hoá tài khoản"
             textSize = 12f
-            setTextColor(android.graphics.Color.parseColor("#6B7280"))
+            setTextColor(android.graphics.Color.parseColor("#71717A"))
             gravity  = android.view.Gravity.CENTER
             alpha    = 0f
             val lp  = LinearLayout.LayoutParams(
@@ -78,9 +78,10 @@ class SplashActivity : AppCompatActivity() {
 
         // Version badge
         val tvVer = TextView(ctx).apply {
-            text     = "v1.2.7"
+            // v1.4.0: lấy phiên bản thật thay vì chuỗi cố định (trước đây luôn hiện "v1.2.7")
+            text     = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "" } catch (e: Exception) { "" }
             textSize = 10f
-            setTextColor(android.graphics.Color.parseColor("#374151"))
+            setTextColor(android.graphics.Color.parseColor("#52525B"))
             gravity  = android.view.Gravity.CENTER
             alpha    = 0f
             val lp   = LinearLayout.LayoutParams(
@@ -94,7 +95,7 @@ class SplashActivity : AppCompatActivity() {
         val dot = View(ctx).apply {
             val dotBg = android.graphics.drawable.GradientDrawable().apply {
                 shape = android.graphics.drawable.GradientDrawable.OVAL
-                setColor(android.graphics.Color.parseColor("#6C63FF"))
+                setColor(android.graphics.Color.parseColor("#34D399"))
             }
             background = dotBg
             alpha      = 0f
@@ -134,13 +135,13 @@ class SplashActivity : AppCompatActivity() {
             duration = 600
             interpolator = AccelerateDecelerateInterpolator()
         }
-        val logoScaleX = ObjectAnimator.ofFloat(tvLogo, "scaleX", 0.6f, 1f).apply {
+        val logoScaleX = ObjectAnimator.ofFloat(tvLogo, "scaleX", 0.92f, 1f).apply {
             duration = 700
-            interpolator = OvershootInterpolator(1.5f)
+            interpolator = DecelerateInterpolator(1.6f)
         }
-        val logoScaleY = ObjectAnimator.ofFloat(tvLogo, "scaleY", 0.6f, 1f).apply {
+        val logoScaleY = ObjectAnimator.ofFloat(tvLogo, "scaleY", 0.92f, 1f).apply {
             duration = 700
-            interpolator = OvershootInterpolator(1.5f)
+            interpolator = DecelerateInterpolator(1.6f)
         }
 
         // Tagline: fade in với delay
@@ -158,13 +159,13 @@ class SplashActivity : AppCompatActivity() {
             duration   = 400
             startDelay = 700
         }
-        val dotPulse1 = ObjectAnimator.ofFloat(dot, "scaleX", 1f, 1.8f, 1f).apply {
+        val dotPulse1 = ObjectAnimator.ofFloat(dot, "scaleX", 1f, 1.5f, 1f).apply {
             duration   = 600
             startDelay = 900
             repeatCount = ObjectAnimator.INFINITE
             repeatMode  = ObjectAnimator.RESTART
         }
-        val dotPulse2 = ObjectAnimator.ofFloat(dot, "scaleY", 1f, 1.8f, 1f).apply {
+        val dotPulse2 = ObjectAnimator.ofFloat(dot, "scaleY", 1f, 1.5f, 1f).apply {
             duration   = 600
             startDelay = 900
             repeatCount = ObjectAnimator.INFINITE

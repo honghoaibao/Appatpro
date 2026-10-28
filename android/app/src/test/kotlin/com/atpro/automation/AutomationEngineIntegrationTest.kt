@@ -94,7 +94,7 @@ class AutomationEngineIntegrationTest {
             every  { scope }        returns testScope
             every  { screenWidth }  returns 1080
             every  { screenHeight } returns 2400
-            every  { getRootNode() } returns null
+            coEvery { getRootNode() } returns null  // v1.3.1: getRootNode() giờ là suspend fun
             every  { pressBack()   } returns true
             every  { launchTikTok()         } returns false  // default: fail
             every  { openTikTokSettings()   } returns true

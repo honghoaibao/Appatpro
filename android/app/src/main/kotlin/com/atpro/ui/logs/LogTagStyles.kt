@@ -1,6 +1,7 @@
 package com.atpro.ui.logs
 
 import androidx.compose.material.icons.Icons
+import com.atpro.ui.theme.AtColors
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -18,16 +19,16 @@ import androidx.compose.ui.graphics.vector.ImageVector
  */
 
 // ── Màu sắc dùng chung ───────────────────────────────────────────────────────
-private val Green        = Color(0xFF10B981)
-private val Amber        = Color(0xFFF59E0B)
-private val RedBad       = Color(0xFFEF4444)
+private val Green        = AtColors.Success
+private val Amber        = AtColors.Warning
+private val RedBad       = AtColors.Danger
 private val Blue         = Color(0xFF60A5FA)
-private val Cyan         = Color(0xFF69C9D0)
-private val Purple       = Color(0xFF6C63FF)
-private val Pink         = Color(0xFFEC4899)
-private val Violet       = Color(0xFF8B5CF6)
+private val Cyan         = AtColors.Info
+private val Purple       = AtColors.Accent
+private val Pink         = AtColors.Rose
+private val Violet       = AtColors.Accent
 private val FacebookBlue = Color(0xFF1877F2)
-private val Slate        = Color(0xFF9CA3AF)
+private val Slate        = AtColors.TextSec
 
 /** Danh mục cấp cao — dùng để lọc (FilterChip) và làm màu accent-bar mặc định. */
 const val LOG_LEVEL_INFO    = "INFO"
@@ -86,7 +87,7 @@ private val TAG_STYLES: Map<String, LogTagStyle> = mapOf(
     "SHOP"         to LogTagStyle(Blue,         Icons.Rounded.Storefront,      LOG_LEVEL_INFO),
     "SEARCH"       to LogTagStyle(Blue,         Icons.Rounded.Search,          LOG_LEVEL_INFO),
 
-    // Task mode (Golike)
+    // Task mode (nhiệm vụ kiếm tiền)
     "TASK"         to LogTagStyle(Violet,       Icons.Rounded.Assignment,      LOG_LEVEL_INFO),
     "TASK-FOLLOW"  to LogTagStyle(Violet,       Icons.Rounded.PersonAdd,       LOG_LEVEL_INFO),
     "TASK-LIKE"    to LogTagStyle(Violet,       Icons.Rounded.Favorite,        LOG_LEVEL_INFO),

@@ -232,6 +232,11 @@ class LocalRepository(context: Context) : IFarmRepository {
         taskJobDelaySecs          = getConfigInt   ("task_job_delay_secs",         4),
         taskJobsPerAccount        = getConfigInt   ("task_jobs_per_account",       5),
         taskMaxConsecFailures     = getConfigInt   ("task_max_consec_failures",    3),
+        // [v1.3.3] Nuôi acc ngắn sau job + nuôi acc lâu định kỳ
+        taskFarmAfterJobMinSecs   = getConfigInt   ("task_farm_after_job_min_secs", 5),
+        taskFarmAfterJobMaxSecs   = getConfigInt   ("task_farm_after_job_max_secs", 20),
+        taskLongFarmEveryNJobs    = getConfigInt   ("task_long_farm_every_n_jobs",  3),
+        taskLongFarmDurationSecs  = getConfigInt   ("task_long_farm_duration_secs", 180),
         // [v1.2.4] Demo nuôi acc
         facebookNurtureDurationSecs = getConfigInt   ("fb_nurture_duration_secs",     180),
         facebookLikeRate            = getConfigDouble("fb_like_rate",                 0.10).toFloat(),

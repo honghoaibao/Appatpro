@@ -1,6 +1,7 @@
 package com.atpro.ui.dashboard
 
 import androidx.compose.animation.*
+import com.atpro.ui.theme.AtColors
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -15,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -25,15 +27,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 // ── Design tokens (shared palette) ───────────────────────────
-private val BgDark     = Color(0xFF0D0D14)
-private val CardDark   = Color(0xFF1A1A2E)
-private val BorderDark = Color(0xFF374151)
-private val Purple     = Color(0xFF6C63FF)
-private val Pink       = Color(0xFFEC4899)
-private val Green      = Color(0xFF10B981)
-private val Amber      = Color(0xFFF59E0B)
-private val TextSec    = Color(0xFF9CA3AF)
-private val TextMuted  = Color(0xFF6B7280)
+private val BgDark     = AtColors.Bg
+private val CardDark   = AtColors.Surface
+private val BorderDark = AtColors.Hairline
+private val Purple     = AtColors.Accent
+private val Pink       = AtColors.Rose
+private val Green      = AtColors.Success
+private val Amber      = AtColors.Warning
+private val TextSec    = AtColors.TextSec
+private val TextMuted  = AtColors.TextMuted
 
 // ─────────────────────────────────────────────────────────────
 //  PermissionScreen
@@ -77,10 +79,10 @@ fun PermissionScreen(
                 modifier = Modifier
                     .size(64.dp)
                     .clip(RoundedCornerShape(18.dp))
-                    .background(Brush.linearGradient(listOf(Purple, Pink))),
+                    .background(AtColors.TextPrim),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("AT", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+                Text("AT", color = AtColors.Bg, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
             }
 
             Spacer(Modifier.height(20.dp))
@@ -199,9 +201,9 @@ private fun PermissionItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(16.dp))
             .background(bgColor)
-            .border(1.dp, borderColor, RoundedCornerShape(14.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(16.dp))
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -237,9 +239,10 @@ private fun PermissionItem(
                 if (required) {
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Purple.copy(alpha = 0.15f))
-                            .padding(horizontal = 5.dp, vertical = 1.dp),
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Purple.copy(alpha = 0.18f))
+                            .border(1.dp, Purple.copy(alpha = 0.3f), RoundedCornerShape(20.dp))
+                            .padding(horizontal = 7.dp, vertical = 2.dp),
                     ) {
                         Text(
                             "Bắt buộc",
