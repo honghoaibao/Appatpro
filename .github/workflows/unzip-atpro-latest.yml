@@ -63,6 +63,8 @@ jobs:
                   # Replace the previous extracted project, but retain uploaded ZIPs
                   # and this extraction workflow so future uploads can be processed.
                   for child in repo_root.iterdir():
+                      if child.name == ".git":
+                          continue
                       if child.name.endswith(".zip") and child.is_file():
                           continue
                       if child == (repo_root / workflow_rel):
