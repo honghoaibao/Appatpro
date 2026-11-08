@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- AT PRO launcher icon background — khớp nền logo AT mới (v1.8.0) — navy #010112 -->
+    <color name="ic_launcher_background">#010112</color>
+    <!-- Dark background for all native screens (replaces Flutter launch bg) -->
+    <color name="bg_dark">#0D0D14</color>
+</resources>

@@ -1,0 +1,1048 @@
+API REFERENCE — FOLLOW4FOLLOW  (BẢN v2.7 — DEVTOOLS 29/10 COMPLETE-RESPONSE + AUDIT 28/10 + FIELD-TESTED + PARITY v2.2)
+=====================================================
+
+Nguồn:
+- Bundle front-end:  https://follow4follow.net/_nuxt/Bfp0_r72.js  (340 KB, chính)
+                     https://follow4follow.net/_nuxt/BEnDMXnR.js  (axios instance + INTERCEPTOR gắn header — verified)
+                     https://follow4follow.net/_nuxt/Cs2oLB4-.js  (earn service module — verified shape fetch/complete/skip/report)
+                     https://follow4follow.net/_nuxt/7n7d6fUg.js  (earn-coin + jobs API layer)
+                     https://follow4follow.net/_nuxt/BwQeHLG_.js  (account API layer)
+                     https://follow4follow.net/_nuxt/DBkPpj9p.js  (page earn thật — verified complete/skip/report)
+                     https://follow4follow.net/_nuxt/r8cOutak.js  (page profile — verified change-password/update-profile)
+                     https://follow4follow.net/_nuxt/CnafK9dO.js  (page account tiktok — verified account/add)
+                     https://follow4follow.net/_nuxt/DW7NnfqZ.js  (page withdraw — verified 5 kênh rút)
+                     https://follow4follow.net/_nuxt/CWI32y8u.js  (page order — verified order/buy)
+                     https://follow4follow.net/_nuxt/CafqD5BY.js  (page support — verified FormData fields)
+                     B0fYbuUu.js (referral) · C2mIQ7fi.js (order service) · DSmDpGFC.js (promotions) · ISufPJEP.js (blogs)
+- Đối chiếu với 29 ảnh Network/DevTools và 2 ảnh đăng nhập bổ sung.
+- v2.6 audit 28/10: browser thật + hook fetch/XHR duyệt 40 route; 63 chunk
+  build mới (cur_*.js — tên file deploy mới: BEnDMXnR, Cs2oLB4-, DBkPpj9p,
+  C18RyN2x account API, C2mIQ7fi order API, FXwO0qH9 referral, DvZKu5Ct
+  blogs, DWkAKcMi signup-bonus; chunk cũ B2k1PcJF... không còn tồn tại).
+- v2.1: audit lại TOÀN BỘ body trên call-site thật của từng trang → sửa 7 body sai,
+        nâng 12 endpoint lên VERIFIED, bổ sung 12 endpoint còn thiếu.
+- v2.2: rà lại lần 2 sau báo cáo "vẫn lỗi cũ" → bổ sung mục HEADERS BẮT BUỘC
+        (interceptor BEnDMXnR.js: Bearer + x-ts + x-sign tự gắn MỌI request,
+        x-sign KHÔNG gồm body), semantic refresh=1 của GET /user/earn-coin
+        (chỉ gửi khi refetch), cờ success trong envelope, guard accountActive=null.
+- v2.3: XÁC NHẬN THỰC ĐỊA (user-run 2026-10-27, tool v1.6): GET /user/earn-coin +
+- v2.4: verify TOÀN BỘ GET params từ service modules thật (C2mIQ7fi order,
+        B0fYbuUu referral, ISufPJEP blogs, 7n7d6fUg notifications/social,
+        BEnDMXnR finance) → công bố 73/82 path VERIFIED trong tool v2.0;
+        xác nhận transfer coin bị web TẮT (disable-transfer).
+        complete-job + skip-job + tiktok-like/mark-start hoạt động ĐÚNG như web.
+        Bổ sung: envelope PHÂN TRANG đầy đủ (mục 3) — mọi endpoint list dùng chung,
+        và cách tool v1.6 hiển thị response (smart viewer, mục 3.1).
+- v2.5: FIELD-TESTED lần 2 (DevTools 27/10, tool v2.1): bắt lỗi "Lịch sử earn-coin
+        rỗng" — nguyên nhân là THIẾU action (web luôn gửi action=follow|like);
+        account/list mirror đúng query web (chỉ type + page, KHÔNG search);
+        ghi response schema THẬT của cả 2 (data.data + meta cùng cấp,
+        coin_received là CHUỖI, status đi kèm status_label — xem mục 4.3/4.4).
+
+- v2.6: AUDIT DEVTOOLS TRỰC TIẾP (28/10, preview chưa đăng nhập): chạy browser thật
+        + hook fetch/XHR, duyệt 40 route, tải 63 chunk JS build HIỆN TẠI (deploy mới,
+        chunk cũ đổi tên). KẾT LUẬN: catalogue 82 endpoint ĐỦ 100% so với client —
+        không thiếu endpoint nào. Nâng cấp: /jobs + /jobs/{id}/claim + /jobs/claim-all
+        + /accounts/* + /notifications root + /notifications/{id}/read từ
+        "screenshot LOW" → VERIFIED client-code (cur_Cs2oLB4-.js: claim & read KHÔNG
+        body); order/buy có field reaction (FB reaction service, join ',');
+        xác minh /user/promotions standalone KHÔNG tồn tại (whitelist demo dùng
+        startsWith prefix); ghi CHẾ ĐỘ DEMO của web (401 + sessionStorage
+        demo_mode=1 → SPA tự render dữ liệu mẫu, whitelist 9 prefix được gọi
+        không token) — mục 11.2; demo response shape 12 endpoint (mục 11.3).
+- v2.7: RESPONSE THẬT CỦA COMPLETE-JOB (DevTools 29/10 — ảnh chụp user, HTTP 200
+        Cloudflare): data trả {coin_received: 26, current_balance: 36,
+        balance_pending: 52, account_daily_usage: {done: 1, limit: 150,
+        remaining: 149}} — message "Bạn đã nhận được 26 xu thành công".
+        Bản cũ chỉ ghi job_today/coin_pending_today (build cũ) — nay ghi CHÍNH XÁC
+        field theo response thật; tool v2.3 hiển thị đủ 4 nhóm + đồng bộ hạn mức
+        lên header phiên sau mỗi Complete (xem mục 4.2).
+
+Mục tiêu: cung cấp đủ thông tin (method + path + query + body + response schema)
+để phát triển tool/script riêng trên tài khoản cá nhân.
+
+Cấp độ tin cậy:
+- HIGH   = thư viện axios gọi + request schema trích được trực tiếp trong bundle
+- MEDIUM = thư viện axios gọi, body truyền thẳng (pass-through); body field suy đoán từ i18n + mock response
+- LOW    = chỉ thấy label trong Network, không có trong bundle
+
+============================================================
+1. BASE URL, HEADERS, ENVELOPE
+============================================================
+
+Base URL       : https://api.follow4follow.net
+Web origin     : https://follow4follow.net
+Response CType : application/json; charset=utf-8
+
+Headers mặc định (INTERCEPTOR TỰ GẮN trên MỌI request — verified BEnDMXnR.js):
+  Accept           : application/json
+  Authorization    : Bearer <ACCESS_TOKEN>     ← interceptor: localStorage token; MỌI request
+  Content-Type     : application/json           ← cho POST/PUT có body JSON
+  Origin           : https://follow4follow.net
+  Referer          : https://follow4follow.net/
+  User-Agent      :Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36
+  x-ts             : <Unix timestamp seconds>   ← interceptor tạo mỗi request
+  x-sign           : <hex 64 ký tự>              ← interceptor tạo mỗi request
+
+⚠ QUAN TRỌNG — 3 header BẮT BUỘC trên mọi request gọi API /user/*:
+  1. Authorization : Bearer <token>   — thiếu → 401 "Chức năng này cần đăng nhập"
+  2. x-ts          : Unix timestamp   — lệch giờ máy > ~60s → bị từ chối (chống replay)
+  3. x-sign        : HMAC (mục 2)     — sai → từ chối
+  → Tool f4f.py tự gắn cả 3 ở Client.request() cho MỌI request — xem panel
+    "Chi tiết lỗi" trong tool để chứng minh headers đã gửi.
+  Lưu ý: x-sign chỉ ký `{ts}:{METHOD}:{path}` — KHÔNG gồm body, nên thứ tự
+  key trong body không ảnh hưởng chữ ký (nhưng body phải ĐỦ field).
+
+============================================================
+2. X-SIGN / X-TS — ĐÃ XÁC ĐỊNH HOÀN TOÀN
+============================================================
+
+Thuật toán (trích từ bundle Bfp0_r72.js, biến Pm):
+
+  const Pm = "follow4follow_key";
+  const t  = Math.floor(Date.now()/1e3);                 // = X-Ts
+  const n  = `${t}:${METHOD.toUpperCase()}:${url.split("?")[0]}`;
+  const a  = hex(HMAC_SHA256(key=Pm, msg=n));            // = X-Sign
+
+Tương đương Python:
+
+  import hashlib, hmac, time
+  ts    = int(time.time())
+  path  = path.split("?", 1)[0]
+  msg   = f"{ts}:{method.upper()}:{path}".encode()
+  sign  = hmac.new(b"follow4follow_key", msg, hashlib.sha256).hexdigest()
+
+Bằng chứng khớp (ảnh DevTools POST /user/auth/login):
+  X-Ts  = 1793087078   (= 2026-10-27 14:44:38 +07)
+  X-Sign= 589b0d565bd8ce3db463535bbac382f55096350eb8de0df605dbcb0e84b8028e  ✅
+          (sửa lỗi OCR: 'o' → '0')
+
+Lưu ý:
+- Pm là chuỗi hardcode trong bundle front-end, bất kỳ ai tải JS cũng thấy được.
+  Vì vậy X-Sign chỉ là lớp chống bot/scan nhẹ; lớp xác thực thật là Bearer token.
+- Path phải là path tương đối bắt đầu "/" (vd "/user/auth/login"), không full URL.
+- Query string phải bị strip: ký "?" trở đi không nằm trong message.
+- Method phải in hoa (POST, không post).
+- Server thường chỉ chấp nhận X-Ts trong khoảng ±60s so với now (chống replay).
+
+============================================================
+3. ENVELOPE RESPONSE
+============================================================
+
+Mọi response đều có cấu trúc:
+
+{
+  "status_code": <integer>,   ← có thể KHÁC HTTP transport status; cần kiểm cả hai
+  "message":     <string>,    ← có thể rỗng
+  "errors":      <null|object>, ← null khi OK; khi validation lỗi: {field: [msg,...]}
+  "data":        <object|array|null>
+}
+
+QUAN TRỌNG:
+- HTTP transport có thể = 200 nhưng JSON status_code = 400 (đã quan sát).
+- data có thể là object, array, hoặc null.
+- Endpoint phân trang: items nằm ở data.data (lồng thêm một lớp).
+
+ENVELOPE PHÂN TRANG (dùng chung bởi mọi endpoint list — transaction/withdraw/
+account/transfer/earn-coin/list/order/refill-list/support…):
+
+{
+  "status_code": 200,
+  "message":     "",
+  "errors":      null,
+  "data": {
+    "data":         [ ...items... ],   ← MẢNG item (có thể rỗng [])
+    "per_page":     10,
+    "total_page":   1,
+    "current_page": 1,
+    "total":        0
+  }
+}
+
+→ Khi data.data = [] và total = 0: HỢP LỆ (không phải lỗi) — nghĩa là "chưa có
+  dữ liệu/trang này trống". Tool v1.6 hiển thị "∅ Không có dữ liệu — trang 1/1
+  · tổng 0" thay vì dump từng field như bản cũ.
+
+3.1  CÁCH TOOL v1.6 HIỂN THỊ RESPONSE (smart viewer)
+------------------------------------------------------------
+- Nhận diện envelope phân trang ở trên → render BẢNG danh sách item + dòng meta
+  "trang x/y · tổng N · M/trang"; danh sách rỗng → panel "∅ Không có dữ liệu".
+- data là dict thường → bảng Trường/Giá trị (flatten dict lồng, che token).
+- data là mảng dict → bảng các cột; mảng rỗng → "Không có dữ liệu".
+- Field kèm cạnh mảng (vd accountActive, account_daily_usage trong /user/earn-coin)
+  → hiển thị thêm bảng phụ "— thông tin kèm" (không bị mất như bản cũ).
+- KHÔNG còn hỏi "Xem JSON thô? [y/n]" sau mỗi request — thay bằng 1 dòng:
+  "Enter = tiếp tục · j = JSON thô" (chỉ bấm j khi cần đối chiếu DevTools).
+- Lỗi (HTTP>=400 hoặc JSON status_code>=400 hoặc errors khác null) → thêm panel
+  "Chi tiết lỗi" kèm chứng minh 3 header đã gửi (x-ts / x-sign / Bearer).
+
+============================================================
+4. DANH SÁCH ENDPOINT ĐẦY ĐỦ (82 endpoint — audit đủ 28/10)
+============================================================
+
+Mỗi mục dưới đây có format:
+
+  METHOD PATH                       [query|body|path_params]   [confidence]
+    Request body schema  : {...}
+    Response data schema  : {...}
+    Notes                 : ...
+
+------------------------------------------------------------------------
+4.1  AUTH
+------------------------------------------------------------------------
+
+POST /user/auth/login                                       [HIGH - VERIFIED call-site login page]
+  Body (trang login gọi `.login({username, password})` — KHÔNG có recaptcha):
+    {"username": "<string>", "password": "<string>"}
+  Response data:
+    {
+      "user": {
+        "id": int, "username": str, "email": str, "status": str,
+        "avatar": str|null, "login_type": str,
+        "access_token": str (sensitive),
+        "user_smm": bool, "api_key_smm": str|null,
+        "password_changed": bool, "password_changed_at": ISO,
+        "must_change_password": bool, "generated_password": str|null,
+        "password_security": {
+          "password_changed": bool, "password_changed_at": ISO,
+          "must_change_password": bool, "generated_password": str|null
+        },
+        "ref_code": str, "terms_accepted_at": ISO,
+        "can_deposit": bool, "show_refill": bool,
+        "balance": str, "balance_pending": str,
+        "level": {"id": int, "name": str, "description": str, "icon": str|null}
+      },
+      "access_token": str (sensitive; đây là field chính client dùng),
+      "type_token": "Bearer"
+    }
+  Notes: Truy cập access_token qua cả data.access_token và data.user.access_token;
+         dùng data.access_token là chuẩn.
+
+POST /user/auth/register                                   [HIGH]
+  Body:
+    {
+      "username":               str,
+      "password":               str,
+      "password_confirmation":  str (= confirmPassword),
+      "g_recaptcha_response":   str (reCAPTCHA v3 token),
+      "ref_code":               str (optional, từ URL ?ref=)
+    }
+  Response: cùng shape với POST /user/auth/login.
+
+POST /user/auth/logout                                     [HIGH]
+  Body: none
+  Response: {status_code:int, message:str, errors:null, data:null}
+
+GET  /user/auth/me                                         [HIGH]
+  Response data: bằng với login.data.user (single user object).
+
+POST /user/auth/change-password                            [HIGH - VERIFIED call-site profile page]
+  Body (form reset sau submit: {current_password, password, password_confirmation}
+  — KHÔNG phải new_password như suy đoán cũ):
+    {
+      "current_password":          str,
+      "password":                  str,
+      "password_confirmation":     str
+    }
+
+POST /user/auth/forgot-password                            [HIGH]
+  Body: {"email": str}
+
+POST /user/auth/reset-password                             [MEDIUM]
+  Body (Laravel convention):
+    {
+      "email":                 str,
+      "token":                 str (từ URL reset email),
+      "password":              str,
+      "password_confirmation": str
+    }
+
+POST /user/auth/update-profile                             [MEDIUM]
+  Body (pass-through, field tùy chọn):
+    {"name": str?, "avatar": str?, "email": str?}
+  Notes: call-site thật đã verify field `email` được dùng qua PUT /user/profile
+         ({email}) — 2 endpoint này song song tồn tại.
+
+POST /user/auth/generate-smm-api-key                       [HIGH]
+  Body: none
+  Response data: {"api_key_smm": str}
+
+POST /user/auth/accept-terms                               [HIGH]
+  Body: none
+
+POST /user/auth/google/token                               [HIGH]
+  Body:
+    {"token": str (Google OAuth ID token), "ref_code": str (optional)}
+
+------------------------------------------------------------------------
+4.2  ACCOUNT (PROFILE / SETTINGS)
+------------------------------------------------------------------------
+
+GET  /user/profile                                         [HIGH]
+  Response: bằng /user/auth/me (single user object).
+
+PUT  /user/profile                                         [MEDIUM]
+  Body: cùng /user/auth/update-profile.
+
+GET  /user/balance                                         [HIGH]
+  Response data: {"balance": str|int, "balance_formatted": str}
+
+GET  /user/dashboard                                       [HIGH]
+  Response data:
+    {
+      "balance": str, "balance_pending": str,
+      "total_coin": int,
+      "level": {"name": str, "icon": str|null},
+      "today_earned": str, "tasks_done_today": int
+    }
+
+GET  /user/leaderboard?limit=N                             [HIGH]
+  Query: {"limit": int (default 20)}
+  Response data:
+    {
+      "leaderboard": [          ← chữ thường trong bundle demo
+        {"rank": int, "username": str (che một phần),
+         "coins": int, "avatar": str|null}
+      ],
+      "my_rank": int
+    }
+  LƯU Ý: Ảnh DevTools của bạn thấy "Leaderboard" viết HOA. Có thể field casing
+         khác nhau giữa demo mode và server thật → parse cả 2 case.
+
+GET  /user/feature-flags                                    [HIGH]
+  Response data:
+    {
+      "api_tab": bool, "earn_api_tab": bool, "order_api_tab": bool,
+      "daily_job_limits": {"tiktok": int, "facebook": int}
+    }
+
+------------------------------------------------------------------------
+4.3  SOCIAL ACCOUNTS (IG / Tiktok / FB của chính user)
+------------------------------------------------------------------------
+
+✔ FIELD-TESTED (2026-10-27, DevTools user-run — tool v2.1)
+GET  /user/account/list?type=X&page=N                      [HIGH + FIELD-TESTED ✓]
+  Query ĐÚNG như web gửi (DevTools :path = "/user/account/list?type=tiktok&page=1"):
+    {"type": str (tiktok|facebook|instagram), "page": int (default 1)}
+  ⚠ Web KHÔNG bao giờ gửi search/uid — tool ≤2.0 có search tuỳ chọn;
+    v2.1 đã bỏ để request giống hệt web 100%.
+  Response data: PHÂN TRANG PHẲNG (data.data + meta CÙNG CẤP):
+    {
+      "data": [
+        {"id": int, "uid": str, "name": str, "video": int,
+         "avatar": URL (tiktokcdn),
+         "create_time": "YYYY-MM-DD HH:MM:SS",   // ngày tạo TÀI KHOẢN TikTok
+         "status": str (vd "Hoạt động"),
+         "type": str, "country": str (vd "vn"),
+         "create_at": "DD/MM/YYYY HH:MM:SS"}      // ngày linked vào F4F
+      ],
+      "per_page": 10, "total_page": int, "current_page": int, "total": int
+    }
+  Sample thực tế (27/10): id 8589 · uid 6983264181085832219 · name hoaibao.2009
+    · video 3 · status "Hoạt động" · country "vn" · total 1
+  id → dùng làm account_id cho active-acc / quick-switch / complete / skip;
+  uid → dùng cho skip/report.
+
+GET  /user/account/active?type=X                            [HIGH]
+  Query: {"type": str}
+  Response: single account object hoặc null.
+
+POST /user/account/active-acc                              [HIGH]
+  Body: {"account_id": int, "type": str}
+
+POST /user/account/add                                     [HIGH - VERIFIED call-site account page]
+  Body (3 trang tiktok/facebook/instagram đều gọi `.addAccount({link, g_recaptcha_response, type})`):
+    {
+      "type":                 str (tiktok|facebook|instagram),
+      "link":                 str (link profile hoặc username),
+      "g_recaptcha_response": str (reCAPTCHA v3 token)
+    }
+  KHÔNG phải `username_or_cookie` như bản cũ.
+  Response success: {status_code:200, message:"Thêm tài khoản Tiktok thành công", errors:null, data:null}
+  Response 422    : {status_code:422, data:{errors:{...}}}
+
+POST /user/account/add-bulk                                [HIGH]
+  Body: {"type": str, "links": [str, ...]}
+
+POST /user/convert-link                                     [HIGH]
+  Body: {"link": str, "type": str (optional)}
+
+GET  /user/account/quick-switch?type=X                     [HIGH]
+  Query: {"type": str}
+  Response: danh sách account khả dụng cho quick-switch (cùng shape account/list.data).
+
+POST /user/account/quick-switch                            [HIGH]
+  Body: {"account_id": int, "type": str}
+
+------------------------------------------------------------------------
+4.4  EARN-COIN (JOB SYSTEM)
+------------------------------------------------------------------------
+
+✔ FIELD-TESTED (2026-10-27, tool v1.6/v2.1 — xác nhận từ người dùng + DevTools):
+  GET /user/earn-coin, complete-job, skip-job, tiktok-like/mark-start
+  hoạt động ĐÚNG như bản web khi body + headers khớp bên dưới.
+  (report-job dùng cùng shape — đã verify bundle, chưa test riêng.)
+  v2.1: thêm GET /user/earn-coin/list + GET /user/account/list — parse ảnh
+  DevTools 27/10 (x-ts 1793118925 / 1793119026): action là BẮT BUỘC cho
+  earn-coin/list; account/list chỉ gửi type+page. Chi tiết ngay bên dưới.
+
+GET  /user/earn-coin?platform=X&type=Y[&refresh=1][&uid=Z]  [HIGH - verified + FIELD-TESTED ✓]
+  Query:
+    {
+      "platform": str (tiktok|facebook),
+      "type":      str (follow|like),
+      "refresh":  int 1 (CHỈ gửi khi REFETCH — lần đầu tải trang web KHÔNG gửi
+                   refresh; uid chỉ thêm khi có account),
+      "uid":      str (accountActive.name || accountActive.uid — web truyền vậy)
+    }
+  Response data:
+    {
+      "accountActive": {"id": int, "uid": str, "name": str, "avatar": URL},
+      "jobs": [
+        {"id": int, "link": URL, "type_job": str (follow|like),
+         "object_id": str, "original_link": URL,
+         "quantity": int, "run": int, "remains": int,
+         "reward_amount": str (vd "26")}
+      ],
+      "account_daily_usage": {"done": int, "limit": int, "remaining": int, "reached": bool}
+    }
+  ⚠ GUARD: accountActive = null → WEB CHẶN chạy job (bắt thêm/kích hoạt tài khoản).
+    Tool cũng phải CHẶN — nếu vẫn complete/skip với account_id=null → server
+    exception → 500 "Có lỗi hệ thống" (nguyên nhân lỗi cũ của tool).
+  Web map job → UI: username='@'+object_id, url=link, typeJob=type_job.
+
+POST /user/earn-coin/complete-job                          [HIGH - verified + FIELD-TESTED ✓]
+  Body (ĐỦ 4 field như web — thiếu account_id/type → 500 "Có lỗi hệ thống"):
+    {
+      "job_id":    int,
+      "account_id": int,          // id của accountActive
+      "type":      str (tiktok|facebook),
+      "type_job":  str (follow|like)   // lấy từ job.type_job
+    }
+  ✔ RESPONSE THẬT (DevTools 29/10 — HTTP 200, Cloudflare):
+    {
+      "status_code": 200,
+      "message": "Bạn đã nhận được 26 xu thành công",
+      "data": {
+        "coin_received": 26,                  // số xu server GHI NHẬN (int)
+        "current_balance": 36,                // số dư SAU khi cộng
+        "balance_pending": 52,                // xu chờ duyệt
+        "account_daily_usage": {"done": 1, "limit": 150, "remaining": 149}
+      }
+    }
+  → tool v2.3: bảng "Số dư" hiển thị đủ 4 nhóm — Nhận được / Số dư / Pending /
+    Hạn mức hôm nay (bar ▓░░ + done/limit/remaining) — và GHI ĐÈ hạn mức lên
+    progress bar ở header phiên NGAY SAU mỗi Complete, không cần refetch jobs.
+    (job_today / coin_pending_today là field của build cũ — tool vẫn hiển thị
+    nếu server trả: hiển thị có điều kiện.)
+  Điều kiện thành công (web): `status_code === 200` — skip/report còn nhận thêm
+  cờ `success: true` (web check `200===status_code || success`).
+  Error nghiệp vụ: 400 "Tài khoản <X> chưa làm job này..." /
+                   "tài khoản chưa thực hiện follow" — cần follow THẬT rồi mới C.
+  Rate-limit: HTTP 429 → data.retry_after (giây), thông điệp "Bạn thao tác hơi nhanh"
+  Lưu ý: web đếm ngược 5s sau khi mở link mới cho bấm Complete.
+
+POST /user/earn-coin/skip-job                              [HIGH - verified + FIELD-TESTED ✓]
+  Body:
+    {
+      "job_id":    int,
+      "account_id": int,
+      "uid":       str,           // accountActive.uid
+      "object_id": str,           // job.object_id (không có @) — fallback: job_id
+      "type":      str (tiktok|facebook)
+    }
+
+POST /user/earn-coin/report-job                            [HIGH - verified DBkPpj9p.js]
+  Body:
+    {
+      "job_id":    int,
+      "account_id": int,
+      "uid":       str,
+      "object_id": str,
+      "type":      str (tiktok|facebook),
+      "message":   str            // lý do báo lỗi (web dùng field `message`, KHÔNG phải `reason`)
+    }
+
+POST /user/earn-coin/tiktok-like/mark-start               [HIGH - verified + FIELD-TESTED ✓]
+  Body: {"job_id": int, "account_id": int}
+  Notes: CHỈ cho job LIKE — web gọi NGAY TRƯỚC khi mở link (fire-and-forget),
+         server ghi dấu thời điểm bắt đầu để đối chiếu khi complete.
+
+✔ FIELD-TESTED (2026-10-27, DevTools user-run — tool v2.1)
+GET  /user/earn-coin/list?type=X&page=N&action=Y           [HIGH + FIELD-TESTED ✓]
+  Query ĐÚNG như web (DevTools :path = "…/user/earn-coin/list?type=tiktok&page=1&action=follow"):
+    {
+      "type":   str (tiktok),
+      "page":   int (default 1),
+      "action": str (follow|like)  ← BẮT BUỘC — web LUÔN gửi
+                  follow = lịch sử job follow · like = lịch sử job like
+    }
+  ⚠ ROOT CAUSE "Lịch sử earn-coin → Không có dữ liệu · Tổng 0" (tool ≤2.0):
+    action từng là TUỲ CHỌN → Enter là bị bỏ → server lọc và trả rỗng.
+    Web KHÔNG gửi uid cho endpoint này; filters[i][key]/[data] chỉ là năng lực
+    cũ trong bundle — trang Lịch sử web KHÔNG dùng.
+  Response data: PHÂN TRANG PHẲNG (data.data + meta cùng cấp — KHÔNG có links):
+    {
+      "data": [
+        {"id": int, "job_id": int, "object_id_job": str,
+         "link_job": URL, "uid_do_job": str,
+         "coin_received": str (vd "26" — CHUỖI, không phải số),
+         "status": int (vd 2 — ĐỪNG tự map cứng, hãy hiển thị status_label),
+         "status_label": str (vd "Chờ duyệt"),
+         "approved_at": null|str,
+         "created_at": "DD/MM/YYYY HH:MM:SS"}
+      ],
+      "per_page": 10, "total_page": int, "current_page": int, "total": int
+    }
+  Sample thực tế (27/10): job 55070 → @kim_truong.28 · +26 · "Chờ duyệt"
+    · 22:35:13 · job 55155 → video/770137211464803581 · +10 · "Chờ duyệt"
+    · 23:08:21 (request action=like).
+
+GET  /user/earn-coin/statistical?type=X                    [HIGH]
+  Query: {"type": str}
+  Response data:
+    {
+      "total_jobs": int, "today_jobs": int,
+      "total_pending": str, "today_pending": str,
+      "total_approved": str, "today_approved": str
+    }
+
+GET  /user/job-rewards                                      [HIGH]
+  Response data (array):
+    [
+      {"platform": str, "type_job": str, "key": str (vd "tiktok-follow"),
+       "jobs": int, "remains": int,
+       "max_reward": int, "max_reward_formatted": str}
+    ]
+
+------------------------------------------------------------------------
+4.5  JOBS (claim hàng ngày)
+------------------------------------------------------------------------
+
+GET  /jobs                                                 [HIGH]
+  Query: bất kỳ filter params (verify trên account thật)
+  Response: danh sách jobs khả dụng để claim.
+
+POST /jobs/{id}/claim                                      [HIGH]
+  Body: none
+
+POST /jobs/claim-all                                       [HIGH]
+  Body: none
+
+------------------------------------------------------------------------
+4.6  ACCOUNTS (public / social tokens)
+------------------------------------------------------------------------
+
+GET  /accounts/{type}                                      [HIGH]
+  Path param: type (tiktok|facebook|instagram)
+  Response: danh sách linked social accounts.
+
+POST /accounts/{type}                                      [HIGH]
+  Path param: type
+  Body: object chứa credentials hoặc cookie (verify trên account thật).
+
+DELETE /accounts/{type}/{id}                              [HIGH]
+  Path params: type, id
+
+POST /accounts/{type}/{id}/refresh                         [HIGH]
+  Body: none
+
+------------------------------------------------------------------------
+4.7  TRANSACTION / DEPOSIT / WITHDRAW / TRANSFER
+------------------------------------------------------------------------
+
+GET  /user/transaction/list?search=S&page=N&per_page=P
+                            &orders[i][key]=..&orders[i][dir]=asc
+                            &filters[i][key]=..&filters[i][data]=..   [HIGH]
+  Query:
+    {
+      "search": str, "page": int, "per_page": int (default 20),
+      "orders[i][key]":  str, "orders[i][dir]":  asc|desc,
+      "filters[i][key]": str, "filters[i][data]": str
+    }
+  Response: phân trang (cùng envelope earn-coin/list).
+
+GET  /user/deposit/info?month=YYYYMM                       [HIGH]
+  Query: {"month": int (optional, format YYYYMM)}
+  Response: deposit methods + history for month.
+
+GET  /user/withdraw/info                                   [HIGH]
+  Response: config các kênh rút (banks list, networks list, telcos, limits).
+
+GET  /user/withdraw/list?search=S&page=N&per_page=P&...    [HIGH]
+  Query: cùng pattern /user/transaction/list (search, page, per_page, orders, filters).
+  Response: PHÂN TRANG
+    data[i] = {
+      "id": int, "type": str (bank|zalopay|paypal|crypto|card),
+      "bank_name": str|null, "account_name": str|null,
+      "account_number": str|null (masked),
+      "telco": str|null, "note": str|null,
+      "network": str|null, "address": str|null,
+      "amount": str (with unit), "amount_received": str,
+      "status": str (pending|completed|rejected),
+      "result": str|null, "created_at": ISO
+    }
+
+GET  /user/withdraw/statistical                            [HIGH]
+  Response data:
+    {
+      "amountPendingWithdraw":   int,
+      "amountCompletedWithdraw": int,
+      "amountRejectedWithdraw":  int
+    }
+
+POST /user/withdraw/bank                                   [HIGH - VERIFIED call-site withdraw page]
+  Body: {"bank_name": str, "account_name": str, "account_number": str,
+         "amount": int (parseInt từ form)}
+
+POST /user/withdraw/zalopay                                [HIGH - VERIFIED call-site withdraw page]
+  Body (cùng shape với bank — KHÔNG phải chỉ phone):
+    {"bank_name": str, "account_number": str (ZaloPay phone),
+     "account_name": str, "amount": int}
+
+POST /user/withdraw/paypal                                 [HIGH - VERIFIED call-site withdraw page]
+  Body (field là `email` — KHÔNG phải account_number như bản cũ):
+    {"email": str (PayPal email), "amount": int}
+
+POST /user/withdraw/crypto                                 [HIGH - VERIFIED call-site withdraw page]
+  Body (field là `wallet_address` — KHÔNG phải `address` như bản cũ):
+    {"network": str (bep20|trc20|...), "wallet_address": str, "amount": int}
+
+POST /user/withdraw/card                                   [HIGH - VERIFIED call-site withdraw page]
+  Body: {"telco": str (Viettel|MobiFone|VinaPhone...), "amount": int}
+
+POST /user/transfer/coin                                   [MEDIUM — WEB ĐÃ TẮT]
+  ⚠ v2.4 xác nhận: route /transfer có middleware ['auth','disable-transfer'],
+    component trang chỉ render div rỗng (Bh5WwoGn.js — 122 bytes) → KHÔNG có
+    call-site thật. API còn nằm trong client lib (transferCoins) nhưng server
+    CÓ THỂ từ chối. Body dưới đây là best-effort từ i18n form:
+    {
+      "username": str (user nick người nhận)   ← hoặc "recipient", thử cả 2 nếu 422,
+      "amount":   int
+    }
+  Notes (i18n): min 1.000.000 Coin/lần, max 5.000.000 Coin/ngày, phí 10%/lần;
+  nếu đang chạy tool cày coin phải TẮT trước khi chuyển, không sẽ fail.
+
+GET  /user/transfer/list?search=S&page=N&per_page=P&...    [HIGH]
+  Query: cùng pattern /user/transaction/list.
+  Response data[i] = {
+    "id": int, "username_send": str, "username_receive": str,
+    "quantity": str (with unit), "fee": str (with unit), "created_at": ISO
+  }
+
+GET  /user/transfer/fee                                    [HIGH]
+  Response data: {"fee_percent": int, "min_transfer": int, "max_per_day": int}
+
+GET  /user/transfer/statistical                            [HIGH]
+  Response data: {"total_sent": int, "today_sent": int, "total_fee": int}
+
+------------------------------------------------------------------------
+4.8  ORDER (boost engagement — mua follow/like)
+------------------------------------------------------------------------
+
+GET  /user/order/services?type=X[&action=Y]                [HIGH - VERIFIED order service]
+  Query: {"type": str, "action": str (optional)}
+  Response data[i] = {
+    "id": int, "name": str, "price": int,
+    "min": int, "max": int,
+    "type": str (follow|like|view),
+    "type_service": str (people|bot),
+    "description": str
+  }
+
+GET  /user/order/statistical?type=X[&action=Y]             [HIGH - VERIFIED order service]
+  Query: {"type": str, "action": str (optional)}
+  Response data: {"status_completed": int, "status_processing": int, "total_orders": int}
+
+POST /user/order/buy                                       [HIGH - VERIFIED call-site order page]
+  Body:
+    {
+      "service":      int (service id — chọn từ /user/order/services),
+      "link":         str,
+      "original_link": str,
+      "object_id":    str,
+      "quantity":     int (default 50),
+      "note":         str (optional, rỗng nếu không ghi)
+    }
+
+GET  /user/order/list?type=X&search=S&per_page=P&page=N[&action=Y]
+                             &filters[i][key]=..&filters[i][data]=..
+                             &orders[i][key]=..&orders[i][dir]=..    [HIGH - VERIFIED order service]
+  Query: {"type": str, "search": str, "per_page": int (20), "page": int (1),
+          "action": str (optional), filters[i][..], orders[i][..]}
+  Response data[i] = {
+    "id": int, "link": URL, "object_id": str,
+    "service_id": int, "service_name": str,
+    "quantity": int, "run": int, "remains": int,
+    "charge": str (with unit), "note": str,
+    "status": str (pending|checking_order|processing|inprogress|running|
+                   completed|violate|violated|canceled|refunded|partial|paused|error),
+    "status_label": str, "can_cancel": bool,
+    "created_at": ISO
+  }
+
+GET  /user/order/{id}                                      [HIGH - VERIFIED order service]
+  Path param: order id. Response: single order object (shape như list[i]).
+
+GET  /user/order/cancel-preview?order_id=N                 [HIGH - VERIFIED]
+  Query: {"order_id": int} — xem trước số coin hoàn lại khi hủy.
+
+POST /user/order/cancel                                    [HIGH - VERIFIED]
+  Body: {"order_id": int}
+
+POST /user/order/refill                                    [HIGH - VERIFIED]
+  Body: {"order_id": int} — yêu cầu bù (bảo hành tụt).
+
+GET  /user/order/refill-history?order_id=N                 [HIGH - VERIFIED]
+  Query: {"order_id": int}
+
+GET  /user/order/refill-list?page=N&per_page=P             [HIGH - VERIFIED]
+  Query: pagination params (pass-through object).
+  Response: các trạng thái refill: pending|processing|completed|rejected.
+
+------------------------------------------------------------------------
+4.9  REFERRAL
+------------------------------------------------------------------------
+
+GET  /user/referral/summary                               [HIGH - VERIFIED referral service]
+  Response data:
+    {
+      "ref_code":          str,
+      "ref_link":          URL,
+      "f1_count":          int, "f2_count": int,
+      "total_commission":  str, "pending_commission": str,
+      "claimed_commission": str,
+      "f1_rate": float, "f2_rate": float, "enabled": bool
+    }
+
+GET  /user/referral/f1?page=1&per_page=20                  [HIGH - VERIFIED]
+  Query: {"page": int (1), "per_page": int (20)}
+  Response data[i] = {"id": int, "username": str, "created_at": ISO, "total_commission": str}
+
+GET  /user/referral/f2?page=1&per_page=20                  [HIGH - VERIFIED]
+  Query: như f1. Response: cùng shape /user/referral/f1.
+
+GET  /user/referral/commissions?page=1&per_page=20[&status=X]   [HIGH - VERIFIED]
+  Query: {"page": int, "per_page": int, "status": str (optional)}
+  Response data[i] = {
+    "id": int, "from_username": str, "level": int (1|2),
+    "amount": str, "status": str (pending|claimed),
+    "created_at": ISO
+  }
+
+POST /user/referral/claim                                  [HIGH - VERIFIED]
+  Body: {"commission_id": int}
+
+POST /user/referral/claim-all                              [HIGH - VERIFIED]
+  Body: none
+
+------------------------------------------------------------------------
+4.10 SUPPORT
+------------------------------------------------------------------------
+
+POST /user/support/tickets                                [HIGH - VERIFIED call-site support page]
+  Content-Type: multipart/form-data   ← KHÁC mặc định JSON! (service set header rõ ràng)
+  Body (FormData — web dùng e.append):
+    {
+      "category":    str,
+      "title":       str,
+      "order_info":  str,
+      "description": str,
+      "images[]":    File[] (optional — TỐI ĐA 5 ảnh, chỉ nhận hình)
+    }
+  KHÔNG phải {category, title, message, files[]} như bản cũ.
+  Tool f4f.py tự gửi endpoint này dạng multipart (MULTIPART_PATHS),
+  text fields OK; đính kèm ảnh phải làm bằng tay trên web.
+
+GET  /user/support/tickets?search=S&status=X&page=N&per_page=P    [HIGH]
+  Query: {"search": str, "status": str (pending|answered|closed), "page": int, "per_page": int (default 10)}
+  Response data[i] = {
+    "id": int, "category": str, "category_label": str,
+    "title": str, "status": str (answered|pending|closed),
+    "status_label": str, "created_at": ISO
+  }
+
+------------------------------------------------------------------------
+4.11 NOTIFICATIONS / MENUS / BLOG / PROMOTIONS / RATE
+------------------------------------------------------------------------
+
+GET  /user/notifications                                  [HIGH - VERIFIED main service]
+GET  /notifications                                       [MEDIUM — earn client + demo mock dùng path này;
+                 path thật có lẽ là /user/notifications]
+  Response data: {
+    "data": [{"id": int, "type": str, "title": str, "message": str, "read": bool, "created_at": ISO}],
+    "unread": int
+  }
+
+POST /notifications/{id}/read                             [MEDIUM - earn client]
+  Path param: notification id.
+  Body: none.
+
+GET  /user/menus                                          [HIGH]
+  Response: array of {id, label, icon, route, sort}.
+
+GET  /user/blogs[?limit=4]                                [HIGH - VERIFIED blogs service]
+  Query: limit tuỳ chọn (dashboard web gửi limit=4).
+GET  /user/blogs/categories                               [HIGH - VERIFIED]
+GET  /user/blogs/popular?limit=5                          [HIGH - VERIFIED — web mặc định limit=5]
+GET  /user/blogs/{id}                                     [HIGH - VERIFIED]
+  Response: list / detail blog posts.
+
+GET  /user/promotions/signup-bonus                        [HIGH - VERIFIED — path /user/promotions KHÔNG tồn tại,
+                 chỉ có signup-bonus]
+  Response data: {"active": bool, "title": str, "amount": int,
+                  "end_at": "YYYY-MM-DD HH:MM:SS", "remaining": int|null}
+
+GET  /user/rate                                           [HIGH]
+  Response data: {"rate": int (vd 26000), "from": "USD", "to": "COIN"}
+
+============================================================
+5. QUY TẮC PARSE RESPONSE CHO TOOL
+============================================================
+
+1. Đọc HTTP status của response.
+2. Parse JSON body. (Nếu không parse được, lưu raw text.)
+3. Kiểm tra body.status_code (nếu có), body.errors, body.message.
+4. Chỉ đọc body.data theo schema riêng của endpoint; KHÔNG giả định data luôn là object.
+   - /user/auth/me               → data = object
+   - /user/account/list         → data = object { data: [...], per_page, ... }
+   - /user/leaderboard          → data = object { leaderboard: [...], my_rank }
+   - /user/job-rewards          → data = array trực tiếp (không lồng)
+   - /user/withdraw/list        → data = object { data: [...], meta, links }
+5. Che access_token, Authorization, X-Sign, X-Ts, username, email, ref_code, uid,
+   avatar URL khi log — không bao giờ in ra file hoặc console.
+6. Với POST pass-through (login, changePassword, withdraw*, transferCoins, …):
+   body schema ở trên là SUY ĐOÁN từ i18n + mock data. Validate trên tài khoản
+   thử nghiệm trước khi triển khai production.
+
+============================================================
+6. CẬP NHẬT KHI SITE ĐỔI BUNDLE
+============================================================
+
+1. Tải lại trang chủ:        curl -sSL https://follow4follow.net/ -o home.html
+2. Liệt kê bundle:           grep -oE '/_nuxt/[A-Za-z0-9_\-]+\.js' home.html | sort -u
+3. Tải tất cả về js/         (lặp qua từng path)
+4. Tìm signing:              rg 'importKey' js/
+5. Tìm secret Pm:             rg -oN 'Pm\s*=\s*"[^"]+"' js/Bfp0_r72.js
+6. Tìm API layer:             rg 'Rm\.(post|get|put|patch|delete)' js/
+                              rg '/user/account/' js/
+                              rg '/user/earn-coin' js/
+                              rg '/accounts/' js/
+7. Nếu Pm đổi → sửa SECRET trong sign.py rồi re-run self-test.
+   Nếu thuật toán đổi → test sẽ FAIL → tái dịch JS.
+
+============================================================
+7. DANH SÁCH ENDPOINT THEO NHÓM (để tích hợp vào CLI)
+============================================================
+
+  AUTH (11):        /user/auth/{login, register, logout, me, change-password,
+                            forgot-password, reset-password, update-profile,
+                            generate-smm-api-key, accept-terms, google/token}
+  PROFILE (3):      /user/profile GET, /user/profile PUT, /user/balance GET
+  DASHBOARD (2):    /user/dashboard, /user/feature-flags
+  LEADERBOARD (1):  /user/leaderboard
+  ACCOUNTS (8):     /user/account/{list, active, active-acc, add, add-bulk,
+                                  quick-switch (GET), quick-switch (POST), convert-link}
+  EARN-COIN (8):    /user/earn-coin (GET), /user/earn-coin/{complete-job, skip-job,
+                                          report-job, tiktok-like/mark-start},
+                    /user/earn-coin/{list, statistical}
+  JOB-REWARDS (1):  /user/job-rewards
+  JOBS (3):         /jobs (GET), /jobs/{id}/claim, /jobs/claim-all
+  /ACCOUNTS/ (4):   /accounts/{type} GET/POST, /accounts/{type}/{id} DELETE,
+                    /accounts/{type}/{id}/refresh POST
+  TRANSACTION (1):  /user/transaction/list
+  DEPOSIT (1):      /user/deposit/info
+  WITHDRAW (8):     /user/withdraw/{info, list, statistical, bank, zalopay,
+                                    paypal, crypto, card}
+  TRANSFER (4):     /user/transfer/{coin, list, fee, statistical}
+  ORDER (10):       /user/order/{list, services, statistical, buy, {id},
+                             cancel-preview, cancel, refill, refill-history, refill-list}
+  REFERRAL (6):     /user/referral/{summary, f1, f2, commissions, claim, claim-all}
+  SUPPORT (2):      /user/support/tickets POST (multipart!), /user/support/tickets GET
+  NOTIFICATIONS (3): /user/notifications, /notifications,
+                     /notifications/{id}/read
+  CONTENT (6):       /user/menus, /user/blogs (+ categories, popular, {id}),
+                     /user/promotions/signup-bonus, /user/rate
+  ────────────────
+  TOTAL:            81 endpoint entries (v2.1 — đã audit call-site; VERIFIED: 25+)
+
+Kết quả audit v2.1 so với bản cũ:
+- SỬA body sai: change-password (password/password_confirmation), account/add
+  (link + g_recaptcha_response), withdraw zalopay (cùng shape bank), paypal (email),
+  crypto (wallet_address), support POST (category/title/order_info/description/images[]),
+  promotions (→ /user/promotions/signup-bonus)
+- THÊM 12 endpoint: order buy/{id}/cancel-preview/cancel/refill/refill-history/
+  refill-list, referral claim/claim-all, blogs categories/popular/{id}
+- Nâng lên VERIFIED (call-site thật): login, register, forgot-password,
+  change-password, account/add, add-bulk, quick-switch, active-acc, convert-link,
+  complete/skip/report/mark-start, order buy/cancel/refill, referral claim/claim-all,
+  withdraw x5, support POST
+
+================================================================================
+MỤC 10 — PARITY v2.0: MỌI ENDPOINT HOẠT ĐỘNG NHƯ FLOW EARN (tool v2.0)
+================================================================================
+
+Tool v2.0 áp dụng toàn bộ tiêu chuẩn của flow earn-coin cho CẢ 82 endpoint
+(ngoại trừ endpoint chỉ admin — server sẽ trả 403 và tool tự đề nghị ẩn):
+
+1. HEADERS TỰ ĐỘNG ĐỦ — interceptor embedded gắn x-ts + x-sign + Bearer +
+   Content-Type + Origin + Referer + UA trên MỌI request (đã field-test).
+   Panel "Chi tiết lỗi" luôn in lại headers đã gửi để tự kiểm chứng.
+
+2. MESSAGE NGHIỆP VỤ + GỢI Ý (GENERAL_HINTS) — mọi response có `message`
+   đều hiện panel nổi; các nhóm message thường gặp có gợi ý xử lý sẵn:
+   - unauthenticated / chưa đăng nhập / hết hạn → đăng nhập lại (mục 1)
+   - thao tác hơi nhanh / too many              → rate-limit, chờ rồi thử
+   - không đủ                                   → thiếu coin, earn/nạp thêm
+   - captcha / recaptcha                        → hướng dẫn lấy token v3 từ web
+   - đã tồn tại / not found / không tìm thấy    → trùng / sai id
+   - admin / forbidden / không có quyền         → chỉ admin (tool đề nghị ẩn)
+   - tham quan (demo), điều khoản/terms, chưa kích hoạt, hết quota...
+
+3. 429 TỰ ĐẾM NGƯỢC — đọc retry_after (gốc hoặc trong data), đếm ngược
+   động với thanh tiến trình, đúng như web.
+
+4. FIELD_GUIDE — trước khi điền form, tool in hướng dẫn từng endpoint:
+   id lấy ở đâu (Order list → cancel/refill; Referral commissions → claim;
+   Thông báo → read; Blogs → {id}...), format month=YYYYMM, cảnh báo
+   "sai mạng ví = mất tiền" (crypto),captcha lấy từ DevTools (add/register)...
+
+5. ĐIỀN FORM AN TOÀN — trường có tập giá trị cố định thành menu chọn:
+   type/platform (tiktok|facebook), telco (Viettel|MobiFone|VinaPhone),
+   network (bep20|trc20|erc20), category (withdraw|deposit|account|other).
+
+6. ENDPOINT CHỈ ADMIN — server trả 403 hoặc message 'admin/forbidden/
+   không có quyền' → tool hiện gợi ý + hỏi "Ẩn endpoint này khỏi menu
+   (phiên này)?" → lần sau không còn hiện (chỉ admin mới thấy được).
+
+7. CHẠY LẠI NHANH — sau mỗi kết quả: Enter = về danh sách · j = JSON thô ·
+   e = chạy lại endpoint này (thử giá trị khác không phải chọn lại từ đầu).
+
+8. CLEAR TOÀN BỘ MÀN HÌNH — clear_screen gửi \033[2J + \033[3J + \033[H:
+   xoá cả vùng nhìn thấy LẪN SCROLLBACK (lịch sử cuộn), hoạt động trên
+   xterm/GNOME/Windows Terminal/iTerm2/Termux; Windows legacy bật VT qua
+   os.system(""). Env F4F_NO_ANIM=1 tắt hiệu ứng nếu cần.
+
+LUU Ý FLOW HOÀN THÀNH/BỎ QUA JOB (đã FIELD-TEST, user xác nhận hoạt động):
+- Complete: {job_id, account_id, type, type_job} — KHÔNG gửi uid
+- Skip:     {job_id, account_id, uid, object_id, type}
+- Report:   {..., type, message}   (field `message`, KHÔNG phải `reason`)
+- Mở job LIKE → mark-start {job_id, account_id} TRƯỚC khi mở link
+- Mở link xong đợi ≥5s (web đếm ngược) rồi mới bấm Complete
+- 429 → tool đếm ngược data.retry_after rồi ở lại job
+- Lỗi "chưa thực hiện follow/like" → mở link + follow THẬT rồi Complete lại
+
+============================================================
+MỤC 11 — AUDIT DEVTOOLS 28/10 (browser thật + 63 chunk build mới)
+============================================================
+
+11.0. PHƯƠNG PHÁP
+- Chạy browser thật (headless Chromium) ở chế độ XEM TRƯỚC chưa đăng nhập:
+  web cho vào thẳng dashboard với dữ liệu ảo (user "ban_dang_xem_thu",
+  125.000 coin demo) và cho thao tác — mọi nút bấm đều chặn client-side,
+  KHÔNG phát sinh request API thật (xem 11.2) → chỉ dùng để duyệt route.
+- Inject hook fetch + XMLHttpRequest TRƯỚC khi điều hướng để ghi lại
+  url/method/headers/body/status của mọi call (tương đương tab Network
+  của DevTools, giữ được log xuyên soft-navigation SPA).
+- Duyệt đủ 40 route (sitemap 14 route SEO + router runtime khai báo 40),
+  thu 63 chunk JS của BUILD HIỆN TẠI (deploy mới — chunk cũ đổi tên,
+  các file B2k1PcJF/BFV7AX2G... không còn tồn tại) rồi extract TOÀN BỘ
+  lệnh HTTP client: 63 method get/post/put/delete.
+
+11.1. KẾT LUẬN ĐỐI CHIẾU
+- Catalogue 82 endpoint của tool v2.2 ĐỦ 100% so với client build 28/10:
+  mỗi path tĩnh trong chunk đều có trong catalogue; mỗi lệnh .get/.post/
+  .put/.delete đều khớp 1 entry. KHÔNG endpoint nào bị bỏ sót.
+- /user/promotions standalone + /user/auth/google standalone: KHÔNG tồn
+  tại như endpoint riêng — whitelist demo (11.2) chỉ dùng startsWith()
+  khớp PREFIX "/user/promotions" (→ signup-bonus) và "/user/auth/google"
+  (→ auth/google/token). Đừng thêm 2 path này vào catalogue.
+- Nhóm nâng cấp tin cậy (LOW → VERIFIED client-code, cur_Cs2oLB4-.js):
+  GET  /jobs                          getJobs(o={}) — params generic
+  POST /jobs/{id}/claim               claimJob(id) — KHÔNG body
+  POST /jobs/claim-all                claimAllJobs() — KHÔNG body
+  GET  /accounts/{type}               getLinkedAccounts("tiktok")
+  POST /accounts/{type}               addAccount(type, body) — dead code,
+                                      body thật không xác định được
+  DELETE /accounts/{type}/{id}        removeAccount(type,id) — không body
+  POST /accounts/{type}/{id}/refresh  refreshAccountToken — không body
+  GET  /notifications                 getNotifications(o={}) — params generic
+  POST /notifications/{id}/read       markNotificationRead(id) — KHÔNG body
+- LƯU Ý dead-code: build 28/10 không còn trang nào gọi nhóm /jobs và
+  /accounts/* (trang /account/* dùng /user/account/list; job-rewards dùng
+  /user/job-rewards) — nhưng path vẫn tồn tại phía server, tool giữ nguyên.
+- Google OAuth flow thực tế: trang /auth/google/callback nhận token Google
+  từ popup rồi gọi POST /user/auth/google/token {token, ref_code?} →
+  {status_code:200, data:{access_token, user}} (BEnDMXnR.js loginWithGoogle).
+  KHÔNG có lệnh nào gọi GET/POST /user/auth/google gốc.
+
+11.2. CHẾ ĐỘ DEMO / XEM TRƯỚC CỦA WEB (Bfp0_r72.js — verified)
+- Bật: sessionStorage demo_mode = "1" (banner "Chế độ demo - dữ liệu mẫu",
+  user ban_dang_xem_thu, 125.000 coin). Khi token chưa đăng nhập (401) và
+  Em() thấy demo_mode → interceptor response TỰ CHUYỂN thành
+  {demo:true, status_code:401, message:"Chức năng ... (xem thử)"} và SPA
+  render dữ liệu mẫu client-side → KHÔNG phải response server thật.
+- WHITELIST 9 prefix được GỌI THẬT không cần token (server trả 200):
+  /user/blogs · /user/menus · /user/promotions* · /user/notifications ·
+  /user/auth/login · /user/auth/register · /user/auth/google* ·
+  /user/auth/forgot-password · /user/auth/reset-password
+  (*=prefix, endpoint thật là signup-bonus và auth/google/token).
+  Khác whitelist: method POST/PUT/DELETE bị chặn ngay client-side.
+- Ý nghĩa với tool CLI: vô dụng để "dò response thật" — muốn response thật
+  vẫn phải đăng nhập lấy token; demo chỉ xác nhận ĐƯỜNG DẪN + params.
+  Mọi request thật của tool vẫn gửi đủ 5 header (Bearer, X-Sign, X-Ts,
+  Content-Type, Origin) như mục 1.
+
+11.3. DEMO RESPONSE SHAPE (dùng để parse an toàn — client-side mock)
+- /user/rate            {rate:26000, from:"USD", to:"COIN"}
+- /notifications        {data:[], unread:0}
+- /jobs                 {data:[]}
+- /user/job-rewards     [{platform, type_job, key:"tiktok-follow", jobs,
+                         remains, max_reward, max_reward_formatted}]
+- /user/feature-flags   {api_tab:false, earn_api_tab:false,
+                         order_api_tab:true, daily_job_limits:{tiktok:100,
+                         facebook:200}}
+- /user/dashboard       {balance, balance_pending, total_coin,
+                         level:{name,icon}, today_earned, tasks_done_today}
+- /user/leaderboard     {leaderboard:[{rank,username,coins,avatar}], my_rank}
+- /user/earn-coin/statistical  {today_earned, jobs_done_today, balance,
+                         total_jobs, today_jobs, total_pending,
+                         today_pending, total_approved, today_approved}
+- /user/earn-coin (get-job)    {message:"Got 3 jobs", username, uid,
+                         data:[{id, object_id, ...}]}
+- /user/order/statistical      {status_completed, status_processing,
+                         total_orders}
+- /user/order/list      [{id, link, object_id, service_id, service_name,
+                         quantity, run, remains, charge, status:
+                         "inprogress", status_label:"Đang chạy",
+                         can_cancel, created_at}]
+- /user/order/services  {data:[{id, name, price, min, max, type, ...}]}
+- /user/withdraw/list   [{id, type, bank_name, account_name,
+                         account_number, network, address, amount,
+                         amount_received, status, result, created_at}]
+- /user/transaction/list [{id, type, type_label, description, charge, ...}]
+- /user/support/tickets [{id, category, category_label, title, status,
+                         status_label, created_at}]
+- /user/referral/commissions [{id, from_username, level, amount, status,
+                         created_at}]
+
+11.4. BỔ SUNG XÁC MINH CALL-SITE (build 28/10)
+- order/buy body: {service, link, original_link, object_id, quantity,
+  note:""} + reaction CHỈ khi service reaction (FB): reaction =
+  reactions.join(",") hoặc reaction đơn (cur_DraUqZY4.js FB, cur_DaSuhmBY.js
+  TikTok) — flow luôn convert-link trước để lấy object_id.
+- account/add body (call-site cur_CnafK9dO.js TikTok): {link,
+  g_recaptcha_response, type} — Instagram không gửi recaptcha (cur_Ca5B0f_F).
+- account/list query: {type, page} (+search khi gõ ô tìm, debounce 400ms).
+- earn-coin (get-job) query: {platform, type, refresh?:1, uid?} — uid = 
+  account.name || account.uid (cur_DBkPpj9p.js getEarnCoinJobs).
+- earn-coin/list query: {type, page, action?, filters[0][key]=status&
+  filters[0][data]=<status>} — web UI gửi status QUA filters, không phải
+  param ?status= (tool gửi action là đủ, đã FIELD-TESTED v2.5).
+- withdraw/list query: {search, per_page:10, page, orders[i][key],
+  orders[i][dir], filters[i][key], filters[i][data]}
+- transaction/list query: {search, per_page:20, page, orders[], filters[]}
+- support/tickets: GET {search, status, page, per_page:10}; POST
+  multipart/form-data (MULTIPART_PATHS trong tool đã xử lý).
+- transfer/list query: {search?, page, filters[i][key], filters[i][data]}.
+- leaderboard query: {limit:20} — KHÔNG phải page/per_page.

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v1.12.0 — Biểu tượng thông báo (đơn sắc, Android tự tô màu): chữ "A" cách điệu. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M12,2.5 L3.2,21.5 H7.1 L8.7,17.8 H15.3 L16.9,21.5 H20.8 Z M12,9.2 L14,14.4 H10 Z" />
+</vector>
