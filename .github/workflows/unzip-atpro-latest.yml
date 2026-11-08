@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - ".github/workflows/unzip-atpro-latest.yml"
+      - "*.zip"
 
 permissions:
   contents: write
@@ -19,21 +20,28 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Extract archive contents into repository root
+      - name: Find and extract newest uploaded ZIP into repository root
         shell: bash
         run: |
           set -euo pipefail
-          ZIP_FILE="atpro_v1_12_0.zip"
-          test -f "$ZIP_FILE" || { echo "Missing $ZIP_FILE"; exit 1; }
 
-          python3 - <<'PY'
+          ZIP_COMMIT="$(git log -1 --format=%H -- '*.zip')"
+          test -n "$ZIP_COMMIT" || { echo "No ZIP upload commit found"; exit 1; }
+
+          ZIP_FILE="$(git diff-tree --no-commit-id --name-only -r "$ZIP_COMMIT" -- '*.zip' | sort -V | tail -n 1)"
+          test -n "$ZIP_FILE" && test -f "$ZIP_FILE" || { echo "Latest ZIP not found: $ZIP_FILE"; exit 1; }
+          echo "Extracting: $ZIP_FILE"
+
+          python3 - "$ZIP_FILE" <<'PY'
           from pathlib import Path, PurePosixPath
           from zipfile import ZipFile
           from tempfile import TemporaryDirectory
           import shutil
+          import sys
 
-          archive = Path("atpro_v1_12_0.zip")
+          archive = Path(sys.argv[1])
           repo_root = Path(".").resolve()
+          workflow_rel = Path(".github/workflows/unzip-atpro-latest.yml")
 
           with ZipFile(archive) as z:
               members = [m for m in z.infolist() if m.filename]
@@ -42,37 +50,43 @@ jobs:
                   if name.is_absolute() or ".." in name.parts:
                       raise SystemExit(f"Unsafe ZIP path: {member.filename}")
 
-              # The uploaded archive has a wrapper directory named "atpro".
-              # Extract that directory's contents directly into the repository root.
-              file_paths = [
-                  PurePosixPath(m.filename)
-                  for m in members
-                  if not m.is_dir()
-              ]
-              has_atpro_wrapper = bool(file_paths) and all(
+              file_paths = [PurePosixPath(m.filename) for m in members if not m.is_dir()]
+              has_wrapper = bool(file_paths) and all(
                   p.parts and p.parts[0] == "atpro" for p in file_paths
               )
 
               with TemporaryDirectory() as temp_dir:
                   temp_root = Path(temp_dir)
                   z.extractall(temp_root)
-                  source_root = temp_root / "atpro" if has_atpro_wrapper else temp_root
+                  source_root = temp_root / "atpro" if has_wrapper else temp_root
+
+                  # Replace the previous extracted project, but retain uploaded ZIPs
+                  # and this extraction workflow so future uploads can be processed.
+                  for child in repo_root.iterdir():
+                      if child.name.endswith(".zip") and child.is_file():
+                          continue
+                      if child == (repo_root / workflow_rel):
+                          continue
+                      if child.is_dir():
+                          shutil.rmtree(child)
+                      else:
+                          child.unlink()
 
                   for child in source_root.iterdir():
                       destination = repo_root / child.name
                       if child.is_dir():
                           shutil.copytree(child, destination, dirs_exist_ok=True)
                       else:
-                          destination.parent.mkdir(parents=True, exist_ok=True)
                           shutil.copy2(child, destination)
 
-          # Remove the old wrapper directory created by the earlier extraction.
-          old_wrapper = repo_root / "atpro"
-          if old_wrapper.is_dir():
-              shutil.rmtree(old_wrapper)
+                  # Ensure the extraction workflow remains available even if
+                  # the project archive contains its own .github directory.
+                  workflow = repo_root / workflow_rel
+                  if not workflow.exists():
+                      raise SystemExit("Extraction workflow was unexpectedly removed")
           PY
 
-      - name: Commit flattened source
+      - name: Commit extracted project files
         shell: bash
         run: |
           set -euo pipefail
@@ -80,8 +94,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           if git diff --cached --quiet; then
-            echo "No flattened source changes to commit."
+            echo "No extracted changes to commit."
           else
-            git commit -m "Move AT PRO v1.12.0 source to repository root"
+            git commit -m "Extract latest AT PRO source into repository root"
             git push
           fi
