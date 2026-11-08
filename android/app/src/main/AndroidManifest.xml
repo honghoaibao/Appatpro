@@ -111,28 +111,10 @@
         <activity
             android:name=".ui.dashboard.DashboardActivity"
             android:exported="false"
+            android:launchMode="singleTop"
             android:hardwareAccelerated="true"
             android:theme="@style/AppTheme"
             android:windowSoftInputMode="adjustResize" />
-
-        <!-- Native Compose accounts — TASK-009 -->
-        <activity
-            android:name=".ui.accounts.AccountsActivity"
-            android:exported="false"
-            android:theme="@style/AppTheme"
-            android:windowSoftInputMode="adjustResize" />
-
-        <!-- Native Compose logs — TASK-010 -->
-        <activity
-            android:name=".ui.logs.LogsActivity"
-            android:exported="false"
-            android:theme="@style/AppTheme" />
-
-        <!-- Native Compose stats — TASK-012 -->
-        <activity
-            android:name=".ui.stats.StatsActivity"
-            android:exported="false"
-            android:theme="@style/AppTheme" />
 
         <!-- Native Compose config — TASK-015 -->
         <activity
@@ -140,12 +122,6 @@
             android:exported="false"
             android:theme="@style/AppTheme"
             android:windowSoftInputMode="adjustResize" />
-
-        <!-- Native Compose schedule — TASK-016 -->
-        <activity
-            android:name=".ui.schedule.ScheduleActivity"
-            android:exported="false"
-            android:theme="@style/AppTheme" />
 
         <!-- [v1.0.9] FileProvider để share đường dẫn APK cập nhật với hệ thống installer -->
         <provider

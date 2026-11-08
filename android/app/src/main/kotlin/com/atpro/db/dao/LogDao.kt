@@ -14,6 +14,10 @@ interface LogDao {
     @Insert
     suspend fun insert(log: FarmLogEntity)
 
+    /** v1.10.0 — ghi nhiều dòng trong một giao dịch (LocalRepository.log gom lô). */
+    @Insert
+    suspend fun insertAll(logs: List<FarmLogEntity>)
+
     /** Dọn log cũ — gọi từ LocalRepository.cleanup() (7-day retention). */
     @Query("DELETE FROM farm_logs WHERE timestamp < :before")
     suspend fun deleteOlderThan(before: Long)

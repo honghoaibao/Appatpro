@@ -1,8 +1,8 @@
 # AT PRO — Tự động hóa mạng xã hội trên Android
 
-Công cụ tự động hóa chạy trực tiếp trên thiết bị Android (không cần PC), dữ liệu lưu hoàn toàn local. Dịch vụ chính là **TikTok** (nuôi acc; làm nhiệm vụ kiếm tiền qua `TaskProvider` — đang chờ tích hợp **Follow4Follow**); có thêm luồng nuôi acc cho Facebook, Instagram, X/Twitter, Threads, Snapchat.
+Công cụ tự động hóa chạy trực tiếp trên thiết bị Android (không cần PC), dữ liệu lưu hoàn toàn local. Dịch vụ chính là **TikTok** (nuôi acc; làm nhiệm vụ kiếm tiền Like/Follow qua **Follow4Follow** — `TaskProvider`); có thêm luồng nuôi acc cho Facebook, Instagram, X/Twitter, Threads, Snapchat.
 
-- **Phiên bản hiện tại:** v1.5.0 (`versionCode 37`)
+- **Phiên bản hiện tại:** v1.12.0 (`versionCode 44`)
 - **Package:** `com.atpro` · **minSdk 24 / targetSdk & compileSdk 34**
 - **Ngôn ngữ giao diện, log, comment:** tiếng Việt
 
@@ -10,13 +10,13 @@ Công cụ tự động hóa chạy trực tiếp trên thiết bị Android (kh
 
 | Layer | Tech |
 |-------|------|
-| UI | Jetpack Compose (Material 3) + hệ thiết kế riêng `ui/theme/AtTheme.kt` |
+| UI | Jetpack Compose (Material 3) + hệ thiết kế riêng **Sky** `ui/theme/AtTheme.kt` (xanh da trời · trắng · xanh dương · đen; chế độ **Sáng/Tối** đổi ngay trong Cài đặt → Giao diện) |
 | Tự động hóa | Android Accessibility Service (`TikTokAccessibilityService`) |
 | Lưu trữ | Room 2.6.1 (SQLite local), DataStore Preferences |
 | Realtime UI | Kotlin Coroutines/Flow → StateFlow → Compose |
 | Đa thiết bị | NanoHTTPD WebSocket Server (LAN) |
 | Lập lịch | WorkManager + AlarmManager |
-| Nhiệm vụ kiếm tiền | `TaskProvider` (lớp trừu tượng; Golike/WebView đã gỡ ở v1.4.0) |
+| Nhiệm vụ kiếm tiền | `TaskProvider` → Follow4Follow (`tasks/f4f/`, `HttpURLConnection` + HMAC-SHA256 ký request; Golike/WebView đã gỡ ở v1.4.0) |
 | CI/CD | GitHub Actions + `gradle/actions/setup-gradle@v6` (Gradle 8.3, JDK 17) |
 
 > Flutter đã được gỡ hoàn toàn (ADR-0004). Không có Hilt trong `build.gradle` — khởi tạo phụ thuộc qua singleton/`getInstance()`.
@@ -40,20 +40,22 @@ Công cụ tự động hóa chạy trực tiếp trên thiết bị Android (kh
     │                    OverlayFarmMonitor, TikTokDeepLinks, BootReceiver, AccessibilitySettingsHelper
     ├── db/              AtProDatabase, dao/ (Account, Session, Log, Config), entity/
     ├── tasks/           TaskProvider (+ TaskJob/TaskAccount/TaskResult), TaskProviders
+    │   └── f4f/         Follow4FollowProvider, F4fApiClient, F4fSigner, F4fHttp, F4fAuth (đăng nhập + phiên), F4fHints/F4fJson
     ├── network/         LanWebSocketServer, UpdateChecker, DiscordNotifier
     ├── notification/    AtProNotificationManager
     ├── scheduler/       ScheduledFarmManager
     ├── security/        StringEncryptor (+ AppConstants, gồm cờ TASKS_ENABLED)
-    └── ui/              theme/ (AtTheme: màu, kiểu chữ, thành phần, hiệu ứng), MainScreen, SplashActivity, dashboard/, accounts/, logs/, stats/,
-                         config/, schedule/, services/
+    └── ui/              theme/ (AtTheme: bảng màu Sáng/Tối, kiểu chữ, thành phần, hiệu ứng), f4f/ (Ví Follow4Follow: tổng quan, xếp hạng, rút tiền, lịch sử, giới thiệu, thông báo), settings/ (Cài đặt một cấp: giao diện, công cụ, cấu hình), MainScreen (5 tab + màn hình phủ), dashboard/, accounts/, logs/, stats/,
+                         config/, schedule/, services/, tasks/ (F4fAccountCard + F4fLoginDialog)
 ```
 
 ## Tính năng chính
 
 - **Nuôi acc TikTok:** xem video, like, follow, comment, inbox, shop; chuyển acc bằng deep link; tự xử lý popup (2 tầng + chống lặp vòng); watchdog + tự hồi phục khi kẹt. Từ v1.4.0 tỉ lệ like/follow/xem bình luận được điều tiết bởi `RateGate` (bám sát cấu hình, ít dao động) và gắn với thời gian xem video.
-- **Nhiệm vụ TikTok kiếm tiền (task mode):** engine nói chuyện với nhà cung cấp qua `TaskProvider` (lấy acc → lấy job → làm Like/Follow bằng Accessibility → báo cáo → nuôi acc). **Hiện chưa có nhà cung cấp nào:** Golike đã gỡ hoàn toàn ở v1.4.0, Follow4Follow chưa tích hợp (cần tài liệu API) nên `AppConstants.TASKS_ENABLED = false` và giao diện hiển thị "Sắp có".
+- **Nhiệm vụ TikTok kiếm tiền (task mode) — Follow4Follow:** đăng nhập Follow4Follow trong app (tab Dịch vụ → *Nhiệm vụ kiếm tiền*, hoặc Cài đặt → Nhiệm vụ), sau đó engine lấy acc đã liên kết → lấy job Like/Follow → mở link bằng deep link → làm bằng Accessibility → báo hoàn thành (đợi ≥5s, xử lý giới hạn tốc độ 429) hoặc bỏ qua → nuôi acc ngắn giữa các job. Tự chuyển acc active phía server (`quick-switch`), dừng acc khi hết lượt trong ngày. App chỉ lưu token (không lưu mật khẩu). Tài liệu: [`.claude/context/Follow4FollowAPI_Documentation.md`](.claude/context/Follow4FollowAPI_Documentation.md). Cờ `AppConstants.TASKS_ENABLED` để ẩn/hiện toàn bộ tính năng.
+- **Ví Follow4Follow (v1.7.0):** màn hình riêng mở từ tab Dịch vụ — số dư/cấp/tỷ giá/job còn lại hôm nay, **bảng xếp hạng** (podium top 3 + hạng của bạn), **rút tiền** qua 5 kênh (ngân hàng, ZaloPay, PayPal, Crypto, thẻ cào; luôn có hộp thoại xác nhận, chống gửi trùng), lịch sử job (Follow/Like), lịch sử rút tiền, giới thiệu (mã/link/hoa hồng + nhận hoa hồng), thông báo.
 - **Dịch vụ khác:** Facebook (kể cả xem Reels), Instagram, X, Threads, Snapchat — mức demo/nuôi cơ bản.
-- **Lịch tự động:** tab Lịch (`ScheduledFarmManager`), khôi phục sau khi khởi động lại máy (`BootReceiver`).
+- **Lịch tự động:** màn hình phủ mở từ Tổng quan hoặc Cài đặt (`ScheduledFarmManager`), khôi phục sau khi khởi động lại máy (`BootReceiver`).
 - **Overlay:** cửa sổ nổi hiển thị trạng thái farm, thu nhỏ/kéo được (`OverlayFarmMonitor`).
 - **Thông báo:** Android notification + Discord webhook; kiểm tra bản mới từ GitHub Releases (`UpdateChecker`).
 
@@ -123,11 +125,11 @@ Workflow: `.github/workflows/build.yml` (tên: *AT PRO — Build APK*).
 
 ```bash
 # Chạy tay
-gh workflow run "AT PRO — Build APK" -f version=1.4.0 -f build=36
+gh workflow run "AT PRO — Build APK" -f version=1.12.0 -f build=44
 
 # Push tag → build + tạo GitHub Release
-git tag v1.4.0
-git push origin v1.4.0
+git tag v1.12.0
+git push origin v1.12.0
 ```
 
 ## Tests
@@ -147,27 +149,32 @@ gradle test        # hoặc ./gradlew test nếu đã có wrapper
 | `TaskNurtureTest` | 8 |
 | `FarmBehaviorTest` | 9 |
 | `PopupLoopGuardTest` | 6 |
-| **Tổng** | **76** |
+| `F4fSignerTest` | 5 |
+| `F4fApiClientTest` | 11 |
+| `Follow4FollowProviderTest` | 24 |
+| `F4fAuthManagerTest` | 12 |
+| `F4fTokenCodecTest` | 4 |
+| `F4fServiceTest` | 26 |
+| **Tổng** | **158** |
 
-Chưa có test tự động cho phần phụ thuộc cây node thật (`taskOneAccount()`, `doLikeTask()`, `doSimpleFarm()`…) — cần QA trên thiết bị thật.
+Phần Follow4Follow (ký request, đăng nhập, luồng job) test hoàn toàn offline bằng transport giả (`FakeF4fTransport`). Chưa có test tự động cho phần phụ thuộc cây node thật (`taskOneAccount()`, `doLikeTask()`, `doSimpleFarm()`…) — cần QA trên thiết bị thật.
 
 ## Bảo mật
 
 - **StringEncryptor** — AES encrypt package name, tránh quét chuỗi tĩnh; nơi đặt `AppConstants`.
 - **Accessibility Service** — tên trung tính ("AT PRO Automation").
-- Ràng buộc dự án (`.claude/context/constraints.md`): các trường nhạy cảm (credential, token) phải đi qua `StringEncryptor`; không commit keystore. Từ v1.4.0 app không còn lưu token Golike; khi tích hợp Follow4Follow, khóa API phải đi qua `StringEncryptor`.
+- Ràng buộc dự án (`.claude/context/constraints.md`): các trường nhạy cảm (credential, token) phải đi qua `StringEncryptor`; không commit keystore. Từ v1.4.0 app không còn lưu token Golike. Từ v1.6.0 token Follow4Follow được che bằng `StringEncryptor` (che chuỗi, không phải mã hoá mạnh) và app **không lưu mật khẩu**; không log token/`x-sign`.
 
 ## Tài liệu trong `.claude/`
 
 | Thư mục | Nội dung |
 |---------|----------|
 | `CLAUDE.md` | Quy tắc làm việc với repo |
-| `context/` | `project_overview`, `architecture`, `current_focus`, `constraints`, `glossary`, `GolikeAPI_Documentation` (lưu trữ — Golike đã gỡ) |
-| `decisions/` | ADR-0001 … ADR-0007 |
+| `context/` | `project_overview`, `architecture`, `current_focus`, `constraints`, `glossary`, `Follow4FollowAPI_Documentation` + `follow4follow/` (tham chiếu API đầy đủ + `f4f.py` đã field-test) |
+| `decisions/` | ADR-0001 … ADR-0014 |
 | `principles/` | Quy tắc Android, kiến trúc, coding, git, hiệu năng, bảo mật |
-| `revision/` | Ghi chú theo phiên bản: `v1.2.0.md` … `v1.4.0.md` |
-| `revisions/` | Nhật ký sửa lỗi/phiên làm việc theo ngày (v1.0.x – v1.1.x) |
-| `tasks/` | `backlog`, `completed_tasks`, `technical_debt`, checklist QA |
+| `revision/` | Ghi chú theo phiên bản (giữ 10 bản gần nhất): `v1.3.3.md` … `v1.12.0.md` |
+| `tasks/` | `backlog`, `completed_tasks`, `technical_debt` |
 | `skills/` | Skill dùng trong quá trình phát triển |
 
 ## Changelog (tóm tắt)
@@ -176,11 +183,18 @@ Chi tiết từng bản nằm trong `.claude/revision/vX.Y.Z.md`.
 
 | Bản | Điểm chính |
 |-----|-----------|
-| **v1.5.0** (37) | Thiết kế lại giao diện: hệ thiết kế `AtTheme` (một bảng màu, bề mặt phẳng, một màu nhấn), thanh điều hướng/tab/nút/hộp thoại mới, hiệu ứng (nhấn co nhẹ, vào màn lần lượt, chỉ báo trượt, số đếm lên, chấm trạng thái lan toả), màn Dịch vụ gọn còn một kiểu hàng, popup overlay và splash đồng bộ màu |
+| **v1.12.0** (44) | **Nhận nhiệm vụ theo `f4f.py` v2.8** (danh sách acc `quick-switch`, luôn kèm `uid`, thang đổi acc S1–S5, 429 chờ-thử-lại, job hết hạn, trace); **chọn tài khoản nhận nhiệm vụ riêng** (Tự động / Chọn tay, `TaskAccountSelector`); **thông báo nâng cấp** (4 nhóm, giờ yên tĩnh, tổng kết nhiệm vụ + xu, tiến độ trên thông báo đang chạy, mở đúng tab, nút gửi thử); 401 giữa phiên dừng cả lượt (ADR-0014) |
+| v1.11.0 (43) | **Sửa bấm nhầm "Đăng xuất" khi chuyển acc** ("Đăng xuất" chứa chữ x bị coi là nút đóng; nhận diện popup + chọn dòng theo acc đang dùng; `openSwitchList()` có chặn + huỷ hộp đăng xuất); **thanh kéo mới** `AtSlider`; nuôi lâu tối đa 50 job, thời lượng ≥ 30s; **tab Nuôi acc riêng** cho kiếm tiền; **ngưỡng số tim tối thiểu**; logic hashtag mới (không phân biệt dấu, ranh giới từ); **nhật ký dễ đọc** (`LogPolish`, chip "Chi tiết"); hiệu ứng popup/thẻ/nhật ký (ADR-0013) |
+| v1.10.0 (42) | **Back về feed** sau báo cáo job (phân loại trang theo thanh điều hướng); **bảng xếp hạng F4F hiện xu** (`parseCoinText`); F4F làm lại (bỏ Giới thiệu, ô Xu chờ · Làm hôm nay · Tổng xu); **Thống kê kiếm tiền + biểu đồ** (`EarningsStore`, Canvas); Quyền/Thông báo tách riêng, thẻ quyền bố cục dọc + chặn cỡ chữ hệ thống; Cài đặt/Tài khoản/Lịch tinh gọn; **popup nhỏ + thanh đếm ngược**; tối ưu pin (memo cây node, gom ghi log); bỏ chữ thừa (ADR-0012) |
+| v1.9.0 (41) | **Sửa lỗi không tìm thấy nút Follow** trên mọi loại hồ sơ (viết lại bộ dò: khớp nhãn chính xác trong hàng nút, bấm cha clickable, chờ hồ sơ tải, chạm cử chỉ dự phòng, bật `flagIncludeNotImportantViews`); **tối đa 150 job/acc**, nuôi trước job **tối thiểu 10s**; **popup nổi mới** với nhật ký thời gian thực + dữ liệu nhiệm vụ thật; bỏ 6 màn hình/khung dư thừa, `ConfigScreen`/`ScheduleScreen` đồng bộ `AtTopBar` (ADR-0011) |
+| v1.8.0 (40) | **Sửa lỗi không bắt đầu được nhiệm vụ** (chế độ nhiệm vụ đọc acc hiện tại SAU khi mở popup chuyển tài khoản → "@?"); **chuẩn hoá acc đầu chỉ mở Hồ sơ** (không bấm vào acc đang đăng nhập, không switch tạm); **logo mới** (launcher + Splash + app); **bố cục lại**: 5 tab Tổng quan · Dịch vụ · Tài khoản · Nhật ký · Cài đặt, Thống kê/Lịch thành màn hình phủ, Cài đặt một cấp, `AtTopBar` chung; sửa lỗi build `animateFloat` + dọn cảnh báo Kotlin; API v2.7 (`coin_received`) |
+| v1.7.0 (39) | **Giao diện Sky** (xanh da trời · trắng · xanh dương · đen) với chế độ **Sáng/Tối** đổi ngay; thành phần mới (`AtDialog`, `AtTextField`, `AtChip`, `AtListRow`, `AtHeroCard`, …) thay `AlertDialog`/ô nhập rời rạc; thiết kế lại thanh điều hướng, Dashboard (thẻ nổi bật gradient), hộp thoại, Splash, overlay; **Ví Follow4Follow**: xếp hạng, rút tiền 5 kênh, lịch sử, giới thiệu, thông báo (+26 test) |
+| v1.6.0 (38) | Tích hợp **Follow4Follow**: đăng nhập trong app (hộp thoại + thẻ tài khoản, chỉ lưu token), lấy acc/job, `quick-switch` acc, `mark-start` cho job Like, complete (đợi ≥5s) / skip, xử lý 429 + hết lượt ngày + lệch đồng hồ; engine báo lại sau cooldown và skip khi lỗi nghiệp vụ; `TASKS_ENABLED = true`; +55 test; tài liệu API vào `.claude/context/`; dọn tài liệu cũ |
+| v1.5.0 (37) | Thiết kế lại giao diện: hệ thiết kế `AtTheme` (một bảng màu, bề mặt phẳng, một màu nhấn), thanh điều hướng/tab/nút/hộp thoại mới, hiệu ứng (nhấn co nhẹ, vào màn lần lượt, chỉ báo trượt, số đếm lên, chấm trạng thái lan toả), màn Dịch vụ gọn còn một kiểu hàng, popup overlay và splash đồng bộ màu |
 | v1.4.0 (36) | Gỡ Golike + WebView; thêm lớp `TaskProvider` (chờ Follow4Follow); thuật toán nuôi acc mới (`RateGate`, `WatchPlan`); popup chống lặp vòng + thêm hộp thoại quyền Android 13; thẻ "Nhiệm vụ kiếm tiền" thay thẻ Golike |
 | v1.3.3 (35) | Bật lại Golike TikTok (`GOLIKE_ENABLED = true`, đã gỡ ở v1.4.0); nuôi acc ngắn 5–20s sau mỗi job + nuôi lâu định kỳ (`taskPostJobNurtureSecs`, +8 test); delay "như người thật" trước khi lấy job; `doLikeTask()` thêm double-tap dự phòng; CI chuyển sang `setup-gradle@v6` |
 | v1.3.2 (34) | Sửa `findProfileTab()` bấm nhầm Trang chủ/Đề xuất (giới hạn dải đáy màn hình, +4 test); chuẩn bị popup cho Golike |
 | v1.3.1 (33) | `getRootNode()` thành `suspend` (huỷ được khi app đích treo), thêm `safeScreenRead()`; popup `ACCOUNT_UPDATE_PROMPT`; Facebook tự thoát bottom sheet |
 | v1.3.0 (32) | Bỏ khóa cài đặt nuôi acc; cải thiện tìm nút Like/Comment cho FB/X/IG/Threads/Snapchat; log chi tiết hơn; xem Reels Facebook |
 | v1.2.x | Golike (đăng nhập WebView, task mode, API), tab Lịch tự động, popup farm có log màu, redesign Dịch vụ, sửa đếm ngược/LIKE |
-| v1.1.8 | Daily Screen Time Limit — xem [`revision-2026-06-01-v1_1_8-daily-limit-screen-time.md`](.claude/revisions/revision-2026-06-01-v1_1_8-daily-limit-screen-time.md) |
+| v1.1.8 | Daily Screen Time Limit (giới hạn thời gian dùng màn hình mỗi ngày) |

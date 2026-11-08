@@ -23,6 +23,12 @@ object StringEncryptor {
             0x22,0x3b,0x02,0x17,0xe7,0x84,0x5f,0x1e,0x87,0x3c,0xfd,0xd0,0x3a))
     }
 
+    // "follow4follow_key" — khoá HMAC ký x-sign của Follow4Follow (hằng số công khai trong bundle JS web).
+    val F4F_SIGN_KEY: String by lazy {
+        decrypt(intArrayOf(0x2d,0x1d,0x55,0xe6,0x9e,0x5b,0x43,0x82,0x32,0xfd,0xd0,
+            0x2c,0x3c,0x2d,0x52,0xef,0x88))
+    }
+
     fun encrypt(plain: String): IntArray {
         val bytes = plain.toByteArray(Charsets.UTF_8)
         return IntArray(bytes.size) { i -> (bytes[i].toInt() and 0xFF) xor (KEY[i % KEY.size].toInt() and 0xFF) }
@@ -36,16 +42,14 @@ object AppConstants {
         tiktokPackage, tiktokPackageAlt, "com.ss.android.ugc.aweme"
     )
 
-    /** v1.2.3 — Package Facebook chính thức (Facebook app). Dùng cho demo nuôi acc Facebook. */
     /**
      * v1.4.0: Bật/tắt giao diện + luồng "nhiệm vụ kiếm tiền" (task mode).
-     *
-     * Golike đã bị gỡ hoàn toàn ở v1.4.0. Task mode giờ đi qua `com.atpro.tasks.TaskProvider`;
-     * nhà cung cấp dự kiến là Follow4Follow nhưng CHƯA tích hợp (chưa có tài liệu API) nên
-     * cờ này để `false` — đặt `true` sau khi `TaskProviders.current()` trả về provider thật.
+     * v1.6.0: `true` — nhà cung cấp Follow4Follow (`com.atpro.tasks.f4f`) đã tích hợp đầy đủ
+     * (đăng nhập, lấy acc, lấy job, complete/skip). Đặt `false` để ẩn toàn bộ UI + chặn task mode.
      */
-    const val TASKS_ENABLED = false
+    const val TASKS_ENABLED = true
 
+    /** v1.2.3 — Package Facebook chính thức (Facebook app). Dùng cho demo nuôi acc Facebook. */
     const val FACEBOOK_PKG = "com.facebook.katana"   // Facebook chính
     // v1.2.7: Danh sách gói Facebook theo thứ tự ưu tiên (không gồm Lite)
     val FACEBOOK_PACKAGES = listOf(

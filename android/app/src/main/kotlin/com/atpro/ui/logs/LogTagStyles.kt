@@ -1,9 +1,13 @@
 package com.atpro.ui.logs
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.FormatListBulleted
+import androidx.compose.material.icons.automirrored.rounded.Assignment
 import com.atpro.ui.theme.AtColors
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.ui.graphics.Color
+import com.atpro.data.LogLevel
+import com.atpro.data.LogPolish
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
@@ -19,17 +23,35 @@ import androidx.compose.ui.graphics.vector.ImageVector
  */
 
 // ── Màu sắc dùng chung ───────────────────────────────────────────────────────
-private val Green        = AtColors.Success
-private val Amber        = AtColors.Warning
-private val RedBad       = AtColors.Danger
-private val Blue         = Color(0xFF60A5FA)
-private val Cyan         = AtColors.Info
-private val Purple       = AtColors.Accent
-private val Pink         = AtColors.Rose
-private val Violet       = AtColors.Accent
-private val FacebookBlue = Color(0xFF1877F2)
-private val Slate        = AtColors.TextSec
+// v1.7.0: bảng TAG_STYLES dựng 1 lần lúc nạp class nên KHÔNG được giữ [Color] cứng (sẽ không đổi theo
+// chế độ Sáng/Tối). Mỗi style giữ một [LogTone] và màu thật được tính khi vẽ.
+enum class LogTone {
+    Green, Amber, RedBad, Blue, Cyan, Purple, Pink, Slate, FacebookBlue;
 
+    val color: Color
+        get() = when (this) {
+            Green        -> AtColors.Success
+            Amber        -> AtColors.Warning
+            RedBad       -> AtColors.Danger
+            Blue         -> AtColors.Sky
+            Cyan         -> AtColors.Info
+            Purple       -> AtColors.Accent
+            Pink         -> AtColors.Rose
+            Slate        -> AtColors.TextSec
+            FacebookBlue -> Color(0xFF1877F2)
+        }
+}
+
+private val Green        = LogTone.Green
+private val Amber        = LogTone.Amber
+private val RedBad       = LogTone.RedBad
+private val Blue         = LogTone.Blue
+private val Cyan         = LogTone.Cyan
+private val Purple       = LogTone.Purple
+private val Pink         = LogTone.Pink
+private val Violet       = LogTone.Purple
+private val FacebookBlue = LogTone.FacebookBlue
+private val Slate        = LogTone.Slate
 /** Danh mục cấp cao — dùng để lọc (FilterChip) và làm màu accent-bar mặc định. */
 const val LOG_LEVEL_INFO    = "INFO"
 const val LOG_LEVEL_WARNING = "WARNING"
@@ -37,10 +59,13 @@ const val LOG_LEVEL_ERROR   = "ERROR"
 const val LOG_LEVEL_SUCCESS = "SUCCESS"
 
 data class LogTagStyle(
-    val color:    Color,
+    val tone:     LogTone,
     val icon:     ImageVector,
     val category: String,
-)
+) {
+    /** Màu hiện hành theo chế độ Sáng/Tối (tính mỗi lần đọc). */
+    val color: Color get() = tone.color
+}
 
 private val DEFAULT_STYLE = LogTagStyle(Blue, Icons.Rounded.Info, LOG_LEVEL_INFO)
 private val PHASE_STYLE   = LogTagStyle(Purple, Icons.Rounded.PlayArrow, LOG_LEVEL_INFO)
@@ -74,7 +99,7 @@ private val TAG_STYLES: Map<String, LogTagStyle> = mapOf(
     "ACC"          to LogTagStyle(Cyan,         Icons.Rounded.AccountCircle,   LOG_LEVEL_INFO),
     "SWITCH"       to LogTagStyle(Purple,       Icons.Rounded.SwapHoriz,       LOG_LEVEL_INFO),
     "SCAN"         to LogTagStyle(Cyan,         Icons.Rounded.Search,          LOG_LEVEL_INFO),
-    "LIST"         to LogTagStyle(Cyan,         Icons.Rounded.FormatListBulleted, LOG_LEVEL_INFO),
+    "LIST"         to LogTagStyle(Cyan,         Icons.AutoMirrored.Rounded.FormatListBulleted, LOG_LEVEL_INFO),
     "RELOAD"       to LogTagStyle(Purple,       Icons.Rounded.Refresh,         LOG_LEVEL_INFO),
     "DEV"          to LogTagStyle(Slate,        Icons.Rounded.PhoneAndroid,    LOG_LEVEL_INFO),
     "CFG"          to LogTagStyle(Slate,        Icons.Rounded.Settings,        LOG_LEVEL_INFO),
@@ -88,7 +113,7 @@ private val TAG_STYLES: Map<String, LogTagStyle> = mapOf(
     "SEARCH"       to LogTagStyle(Blue,         Icons.Rounded.Search,          LOG_LEVEL_INFO),
 
     // Task mode (nhiệm vụ kiếm tiền)
-    "TASK"         to LogTagStyle(Violet,       Icons.Rounded.Assignment,      LOG_LEVEL_INFO),
+    "TASK"         to LogTagStyle(Violet,       Icons.AutoMirrored.Rounded.Assignment,      LOG_LEVEL_INFO),
     "TASK-FOLLOW"  to LogTagStyle(Violet,       Icons.Rounded.PersonAdd,       LOG_LEVEL_INFO),
     "TASK-LIKE"    to LogTagStyle(Violet,       Icons.Rounded.Favorite,        LOG_LEVEL_INFO),
 
@@ -104,37 +129,46 @@ private val TAG_STYLES: Map<String, LogTagStyle> = mapOf(
     "SNAPCHAT"     to LogTagStyle(Amber,        Icons.Rounded.Bolt,           LOG_LEVEL_INFO),
 )
 
-/** Kết quả parse 1 dòng log: tag (nếu có) + nội dung + style hiển thị. */
+/** Kết quả parse 1 dòng log: nhãn (nếu có) + nội dung + style hiển thị + cờ "chỉ để gỡ lỗi". */
 data class ParsedLog(
-    val tag:   String?,
-    val body:  String,
-    val style: LogTagStyle,
+    val tag:    String?,
+    val body:   String,
+    val style:  LogTagStyle,
+    val detail: Boolean = false,
 )
 
 /**
- * Tách "TAG: nội dung" → ParsedLog(tag="TAG", body="nội dung", style=...).
- * Hỗ trợ tag có dấu gạch ngang hoặc 1 từ phụ (vd "WDG-RECOVER", "LIKE SKIP",
- * "TASK-FOLLOW"). Message không khớp pattern (vd ">> [Phase 1] ...") → tag=null.
+ * v1.11.0: "TAG: nội dung" → nhãn tiếng Việt + câu đã gọt qua [LogPolish] (xem file đó: ẩn dòng chỉ để gỡ lỗi,
+ * viết lại câu quá thuật ngữ). Icon/màu lấy theo tag gốc, màu theo MỨC ĐỘ hiệu lực (vd job xong → xanh lá).
+ * Dòng không có tag (vd "Chờ feed 1/6...") → không hiện nhãn; mốc giai đoạn ">> …" dùng icon Play.
  */
 fun parseLogMessage(message: String): ParsedLog {
-    // ">> ..." — log mốc giai đoạn (phase marker)
+    val p = LogPolish.polish(message)
     if (message.startsWith(">>")) {
-        return ParsedLog(tag = null, body = message.removePrefix(">>").trim(), style = PHASE_STYLE)
+        return ParsedLog(tag = null, body = p.body, style = PHASE_STYLE, detail = p.detail)
     }
-
-    val match = TAG_REGEX.find(message)
-    if (match != null) {
-        val tag  = match.groupValues[1].trim()
-        val body = message.substring(match.range.last + 1).trim()
-        val style = TAG_STYLES[tag.uppercase()] ?: DEFAULT_STYLE
-        return ParsedLog(tag = tag, body = body.ifEmpty { message }, style = style)
+    val base = TAG_STYLES[p.rawTag.uppercase()] ?: DEFAULT_STYLE
+    val category = when (p.level) {
+        LogLevel.ERROR   -> LOG_LEVEL_ERROR
+        LogLevel.WARNING -> LOG_LEVEL_WARNING
+        LogLevel.SUCCESS -> LOG_LEVEL_SUCCESS
+        LogLevel.INFO    -> LOG_LEVEL_INFO
     }
-
-    return ParsedLog(tag = null, body = message, style = DEFAULT_STYLE)
+    val tone = when {
+        category == base.category      -> base.tone
+        p.level == LogLevel.SUCCESS    -> Green
+        p.level == LogLevel.WARNING    -> Amber
+        p.level == LogLevel.ERROR      -> RedBad
+        else                           -> base.tone
+    }
+    val style = if (category == base.category && tone == base.tone) base else base.copy(tone = tone, category = category)
+    return ParsedLog(
+        tag    = if (p.rawTag.isEmpty()) null else p.label,
+        body   = p.body.ifEmpty { message },
+        style  = style,
+        detail = p.detail,
+    )
 }
-
-/** Regex: 1–2 từ IN HOA (chữ/số/gạch ngang/gạch dưới) theo sau bởi ":". */
-private val TAG_REGEX = Regex("^([A-Z][A-Z0-9_-]*(?: [A-Z][A-Z0-9_-]*)?):")
 
 /**
  * Suy ra "level hiệu lực" của 1 dòng log từ nội dung — dùng cho filter chip.

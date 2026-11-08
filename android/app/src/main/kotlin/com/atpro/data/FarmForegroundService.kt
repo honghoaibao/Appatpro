@@ -11,7 +11,10 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.atpro.MainActivity
 import com.atpro.accessibility.TikTokAccessibilityService
+import com.atpro.R
 import com.atpro.network.LanWebSocketServer
+import com.atpro.notification.RunStatus
+import com.atpro.notification.RunStatusHolder
 import kotlinx.coroutines.*
 
 /**
@@ -50,6 +53,9 @@ class FarmForegroundService : Service() {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var heartbeatJob: Job? = null
 
+    /** v1.12.0: mốc bắt đầu để thông báo hiện đồng hồ chạy ("đã chạy 12:30"). */
+    private val startedAtMs = System.currentTimeMillis()
+
     /**
      * Partial wake lock — giữ CPU active khi màn hình tắt.
      * null khi service chưa start hoặc đã destroy.
@@ -61,6 +67,8 @@ class FarmForegroundService : Service() {
         // Channel MUST exist before startForeground() is called.
         // createNotificationChannel() is idempotent — safe to call multiple times.
         createNotificationChannel()
+        // v1.12.0: engine đẩy tiến độ (tài khoản n/N, job, xu) → cập nhật thông báo ngay (đã chống dồn 3s ở RunStatusHolder).
+        RunStatusHolder.setListener { st -> if (st != null) postStatus(st) }
         scope.launch {
             runCatching { LanWebSocketServer.start(applicationContext) }
                 .onFailure { Log.e("FarmService", "WS start: ${it.message}") }
@@ -107,6 +115,7 @@ class FarmForegroundService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        RunStatusHolder.setListener(null)
         heartbeatJob?.cancel()
         scope.cancel()
         releaseWakeLock()          // TASK-004: luôn release trước khi destroy
@@ -133,8 +142,16 @@ class FarmForegroundService : Service() {
     }
 
     fun updateStatus(text: String) {
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.notify(NOTIF_ID, buildNotification(text))
+        // Có tiến độ từ engine thì ưu tiên hiện nó; không thì hiện dòng mặc định.
+        postStatus(RunStatusHolder.current ?: RunStatus("AT PRO", text, 0, 0))
+    }
+
+    private fun postStatus(status: RunStatus) {
+        try {
+            getSystemService(NotificationManager::class.java)?.notify(NOTIF_ID, buildNotification(status))
+        } catch (e: Exception) {
+            Log.w("FarmService", "postStatus: ${e.message}")
+        }
     }
 
     // ── Wake lock ─────────────────────────────────────────────
@@ -202,14 +219,18 @@ class FarmForegroundService : Service() {
                     return@launch
                 }
 
-                updateStatus(if (farming) "FARM: Đang farm..." else "AT PRO đang chạy...")
+                updateStatus(if (farming) "Đang chạy..." else "AT PRO đang chạy...")
             }
         }
     }
 
     // ── Notification ──────────────────────────────────────────
 
-    private fun buildNotification(text: String): Notification {
+    private fun buildNotification(text: String): Notification =
+        buildNotification(RunStatusHolder.current ?: RunStatus("AT PRO", text, 0, 0))
+
+    /** v1.12.0: thông báo đang chạy có tiêu đề theo chế độ, dòng tiến độ, thanh tiến độ, đồng hồ chạy, nút Dừng. */
+    private fun buildNotification(status: RunStatus): Notification {
         val openPi = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
@@ -219,23 +240,32 @@ class FarmForegroundService : Service() {
             buildIntent(this).apply { action = ACTION_STOP },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("AT PRO")
-            .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_media_play)
+        val b = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(status.title)
+            .setContentText(status.line)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(status.line))
+            .setSmallIcon(R.drawable.ic_stat_atpro)
+            .setColor(0xFF2F7BFF.toInt())
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .setContentIntent(openPi)
-            .addAction(android.R.drawable.ic_media_pause, "Dừng farm", stopPi)
+            .addAction(android.R.drawable.ic_media_pause, "Dừng", stopPi)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
             .setSilent(true)
-            .build()
+            .setShowWhen(true)
+            .setUsesChronometer(true)
+            .setWhen(startedAtMs)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+        if (status.total > 0) b.setProgress(status.total, status.done.coerceIn(0, status.total), false)
+        return b.build()
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = getSystemService(NotificationManager::class.java) ?: return
         val ch = NotificationChannel(
-            CHANNEL_ID, "AT PRO Farm Status", NotificationManager.IMPORTANCE_LOW
-        ).apply { description = "Trạng thái farm TikTok" }
+            CHANNEL_ID, "AT PRO đang chạy", NotificationManager.IMPORTANCE_LOW
+        ).apply { description = "Tiến độ nuôi / làm nhiệm vụ đang chạy (không phát âm)" }
         nm.createNotificationChannel(ch)
     }
 }

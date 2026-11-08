@@ -524,4 +524,123 @@ class NodeTraverserTest {
         assertNotNull(result)
         assertEquals("tab_profile", result!!.resourceId)
     }
+
+    // ── v1.11.0: không bao giờ bấm nhầm "Đăng xuất" ──────────
+
+    @Test
+    fun `findByText kieu chua khong tra ve hang Dang xuat - chu x cua xuat khong duoc coi la nut dong`() {
+        val logout = node(text = "Đăng xuất", clickable = true)
+        val close  = node(text = "Đóng", clickable = true)
+        val root   = node(children = listOf(logout, close))
+
+        assertNull(NodeTraverser.findByText(root, "x"))
+        // Hỏi thẳng nhãn đăng xuất thì vẫn tìm được (dùng để PHÁT HIỆN, không để bấm)
+        assertNotNull(NodeTraverser.findByText(root, "đăng xuất"))
+    }
+
+    @Test
+    fun `detectPopup GENERIC chon nut Dong chu khong chon Dang xuat`() {
+        val logout = node(text = "Đăng xuất", clickable = true)
+        val close  = node(text = "Đóng", clickable = true)
+        val root   = node(children = listOf(logout, close))
+
+        val info = NodeTraverser.detectPopup(root)
+
+        assertTrue(info.detected)
+        assertEquals(NodeTraverser.PopupType.GENERIC, info.type)
+        assertEquals("Đóng", info.dismissButton?.text)
+    }
+
+    @Test
+    fun `detectPopup khong coi man chi co Dang xuat la popup chung`() {
+        val root = node(children = listOf(node(text = "Đăng xuất", clickable = true), node(text = "Thêm tài khoản")))
+        val info = NodeTraverser.detectPopup(root)
+        assertFalse(info.detected)
+    }
+
+    @Test
+    fun `detectPopup nhan ra popup chuyen tai khoan khi chi doc duoc 1 username`() {
+        // Ca thật từ nhật ký: "Discover 1 acc từ switch popup" — acc đang dùng hiện bằng tên hiển thị, không có "@".
+        val u1   = node(text = "@hoaibao.2009")
+        val btn  = node(text = "Chuyển đổi tài khoản")
+        val root = node(children = listOf(u1, btn))
+
+        val info = NodeTraverser.detectPopup(root)
+
+        assertTrue(info.detected)
+        assertEquals(NodeTraverser.PopupType.ACCOUNT_SWITCH, info.type)
+    }
+
+    @Test
+    fun `isLogoutLabel`() {
+        assertTrue(NodeTraverser.isLogoutLabel("Đăng xuất"))
+        assertTrue(NodeTraverser.isLogoutLabel("  LOG OUT "))
+        assertTrue(NodeTraverser.isLogoutLabel("Đăng xuất khỏi TikTok"))
+        assertFalse(NodeTraverser.isLogoutLabel("Chuyển đổi tài khoản"))
+        assertFalse(NodeTraverser.isLogoutLabel("Xem thêm"))
+        assertFalse(NodeTraverser.isLogoutLabel(null))
+    }
+
+    // ── v1.11.0: findSwitchAccountRow ─────────────────────────
+
+    @Test
+    fun `findSwitchAccountRow tim dung hang chuyen doi tai khoan`() {
+        val add    = node(text = "Thêm tài khoản", clickable = true)
+        val switch = node(text = "Chuyển đổi tài khoản", clickable = true)
+        val logout = node(text = "Đăng xuất", clickable = true)
+        val root   = node(children = listOf(add, switch, logout))
+
+        val row = NodeTraverser.findSwitchAccountRow(root, screenHeight = 2400)
+
+        assertNotNull(row)
+        assertEquals("Chuyển đổi tài khoản", row!!.label.text)
+        assertSame(switch, row.tapNode)        // hàng bấm được → ACTION_CLICK lên chính nó
+    }
+
+    @Test
+    fun `findSwitchAccountRow khong nhan khung nhom co mo ta dai chua nhan`() {
+        // Khung "nhóm" có mô tả gộp cả 3 hàng: bấm vào tâm khung có thể rơi trúng Đăng xuất.
+        val group  = node(desc = "Đăng nhập, Thêm tài khoản, Chuyển đổi tài khoản, Đăng xuất", clickable = true)
+        val root   = node(children = listOf(group))
+
+        assertNull(NodeTraverser.findSwitchAccountRow(root, screenHeight = 2400))
+    }
+
+    @Test
+    fun `findSwitchAccountRow ho tro nhan tieng Anh`() {
+        val root = node(children = listOf(node(text = "Switch account", clickable = true), node(text = "Log out", clickable = true)))
+        val row = NodeTraverser.findSwitchAccountRow(root, screenHeight = 2400)
+        assertNotNull(row)
+        assertEquals("Switch account", row!!.label.text)
+    }
+
+    @Test
+    fun `findSwitchAccountRow tra null khi khong co hang`() {
+        val root = node(children = listOf(node(text = "Đăng xuất", clickable = true), node(text = "Thêm tài khoản")))
+        assertNull(NodeTraverser.findSwitchAccountRow(root, screenHeight = 2400))
+        assertNull(NodeTraverser.findSwitchAccountRow(null, screenHeight = 2400))
+    }
+
+    // ── v1.11.0: hộp xác nhận đăng xuất ───────────────────────
+
+    @Test
+    fun `detectLogoutPrompt true khi co hop xac nhan dang xuat`() {
+        val root = node(children = listOf(
+            node(text = "Bạn có chắc chắn muốn đăng xuất?"),
+            node(text = "Đăng xuất", clickable = true),
+            node(text = "Hủy", clickable = true),
+        ))
+        assertTrue(NodeTraverser.detectLogoutPrompt(root))
+        assertEquals("Hủy", NodeTraverser.findLogoutCancel(root)?.text)
+    }
+
+    @Test
+    fun `detectLogoutPrompt false o trang Cai dat chi co hang Dang xuat`() {
+        val root = node(children = listOf(
+            node(text = "Chuyển đổi tài khoản", clickable = true),
+            node(text = "Đăng xuất", clickable = true),
+        ))
+        assertFalse(NodeTraverser.detectLogoutPrompt(root))
+        assertNull(NodeTraverser.findLogoutCancel(root))
+    }
 }

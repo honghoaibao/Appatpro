@@ -84,7 +84,7 @@
 ## TASK-014 ✅ Mark Flutter screens as legacy
 **Completed**: 2026-05-22
 **Files**: `lib/screens/dashboard_screen.dart`, `accounts_screen.dart`, `log_screen.dart`, `config_screen.dart`, `stats_screen.dart`
-**Note**: LEGACY header added. Screens still functional — remove only after QA-013 sign-off.
+**Note**: LEGACY header added. Screens still functional. (Checklist QA-013 đã xoá ở v1.6.0 — FeatureFlags không còn.)
 
 ---
 
@@ -105,7 +105,7 @@
 ## TASK-013 ✅ Flip feature flags — all native
 **Completed**: 2026-05-22
 **Files**: `ui/FeatureFlags.kt`
-**Note**: All 6 flags = true. Manual QA checklist (QA-013-native-screens-checklist.md) must be run on 3 OEM devices before production release.
+**Note**: All 6 flags = true. Checklist QA-013 (đã xoá ở v1.6.0 cùng FeatureFlags) từng yêu cầu chạy thử trên 3 OEM.
 
 ---
 
@@ -121,18 +121,18 @@
 ## HOTFIX-001 ✅ KDoc bracket version tag — v1.0.9
 **Completed**: 2026-05-29
 **Files**: `data/OverlayFarmMonitor.kt` (lines 20, 112), `ui/dashboard/DashboardViewModel.kt` (lines 182, 205)
-**Note**: `[v1.0.9]` trong KDoc bị parser hiểu là link reference → warning. Fix: bỏ ngoặc vuông → `v1.0.9`. `//` comment giữ nguyên. Xem `revisions/revision-2026-05-29-kdoc-bracket-fix-v1_0_9.md`.
+**Note**: `[v1.0.9]` trong KDoc bị parser hiểu là link reference → warning. Fix: bỏ ngoặc vuông → `v1.0.9`. `//` comment giữ nguyên.
 
 ---
 
 ## HOTFIX-002 ✅ Settings crash — negative padding trong CfgSlider
 **Completed**: 2026-05-29
 **Files**: `ui/config/ConfigScreen.kt` (line 1049)
-**Note**: `Modifier.padding(horizontal = (-10).dp)` → `IllegalArgumentException: Padding must be non-negative` tại runtime khi TimingSection compose. Fix: bỏ negative padding. Xem `revisions/revision-2026-05-29-fix-settings-crash-v1_0_9.md`.
+**Note**: `Modifier.padding(horizontal = (-10).dp)` → `IllegalArgumentException: Padding must be non-negative` tại runtime khi TimingSection compose. Fix: bỏ negative padding.
 
 ---
 
 ## HOTFIX-003 ✅ Launcher icon — đồng bộ với icon_app.png
 **Completed**: 2026-05-29
 **Files**: 15 mipmap PNG, `values/colors.xml`
-**Note**: Resize icon_app.png (2000×2000) → 5 density folders. Background color #87CEEB → #015C92. Xem `revisions/revision-2026-05-29-launcher-icon-v1_0_9.md`.
+**Note**: Resize icon_app.png (2000×2000) → 5 density folders. Background color #87CEEB → #015C92.

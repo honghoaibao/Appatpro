@@ -1,6 +1,7 @@
 package com.atpro.accessibility
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -19,6 +20,7 @@ import com.atpro.data.OverlayFarmMonitor
 import com.atpro.data.TikTokDeepLinks
 import kotlinx.coroutines.*
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 /**
  * TikTokAccessibilityService — entry point tunggal cho mọi tương tác với TikTok.
@@ -76,12 +78,12 @@ class TikTokAccessibilityService : AccessibilityService(), IFarmHost {
                 val gesture = GestureDescription.Builder()
                     .addStroke(GestureDescription.StrokeDescription(path, 0, 50)).build()
                 dispatchGesture(gesture, object : GestureResultCallback() {
-                    override fun onCompleted(g: GestureDescription?) { cont.resume(true) {} }
-                    override fun onCancelled(g: GestureDescription?) { cont.resume(false) {} }
+                    override fun onCompleted(g: GestureDescription?) { cont.resume(true) }
+                    override fun onCancelled(g: GestureDescription?) { cont.resume(false) }
                 }, null)
             } catch (e: IllegalArgumentException) {
                 Log.w(TAG, "clickSuspend($x, $y): gesture rejected — ${e.message}")
-                cont.resume(false) {}
+                cont.resume(false)
             }
         }
     }
@@ -97,12 +99,12 @@ class TikTokAccessibilityService : AccessibilityService(), IFarmHost {
                 val gesture = GestureDescription.Builder()
                     .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs)).build()
                 dispatchGesture(gesture, object : GestureResultCallback() {
-                    override fun onCompleted(g: GestureDescription?) { cont.resume(true) {} }
-                    override fun onCancelled(g: GestureDescription?) { cont.resume(false) {} }
+                    override fun onCompleted(g: GestureDescription?) { cont.resume(true) }
+                    override fun onCancelled(g: GestureDescription?) { cont.resume(false) }
                 }, null)
             } catch (e: IllegalArgumentException) {
                 Log.w(TAG, "swipeSuspend($x1,$y1→$x2,$y2): gesture rejected — ${e.message}")
-                cont.resume(false) {}
+                cont.resume(false)
             }
         }
     }
@@ -209,6 +211,17 @@ class TikTokAccessibilityService : AccessibilityService(), IFarmHost {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        com.atpro.data.EarningsStore.init(applicationContext)   // v1.10.0: nhật ký thu nhập cho Thống kê → Kiếm tiền
+        // v1.9.0: TikTok đánh dấu nhiều view (vd chữ "Follow" trên hồ sơ) là "không quan trọng với trợ năng"
+        // → mặc định KHÔNG xuất hiện trong cây node → "không tìm thấy nút Follow". Bật cờ ngay lúc chạy
+        // (ngoài khai báo trong accessibility_service_config.xml) để chắc chắn áp dụng cả khi
+        // hệ thống giữ cấu hình cũ sau khi cập nhật app.
+        runCatching {
+            serviceInfo?.let { info ->
+                info.flags = info.flags or AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+                serviceInfo = info
+            }
+        }
         engine   = AutomationEngine(
             this,
             LocalRepository.getInstance(this),

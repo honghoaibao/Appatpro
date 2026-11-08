@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.List
+import androidx.compose.material.icons.automirrored.rounded.Assignment
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -24,19 +26,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.atpro.db.entity.FarmLogEntity
+import com.atpro.ui.theme.AtChip
+import com.atpro.ui.theme.AtTopBar
 import java.text.SimpleDateFormat
 import java.util.*
 
 // ── Design tokens ─────────────────────────────────────────────
-private val BgDark   = AtColors.Bg
-private val CardDark = AtColors.Surface
-private val Purple   = AtColors.Accent
-private val Green    = AtColors.Success
-private val Amber    = AtColors.Warning
-private val RedBad   = AtColors.Danger
-private val TextSec  = AtColors.TextSec
-private val TextMuted= AtColors.TextMuted
-
+private val BgDark get() = AtColors.Bg
+private val CardDark get() = AtColors.Surface
+private val Purple get() = AtColors.Accent
+private val Green get() = AtColors.Success
+private val Amber get() = AtColors.Warning
+private val RedBad get() = AtColors.Danger
+private val TextSec get() = AtColors.TextSec
+private val TextMuted get() = AtColors.TextMuted
 private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
 // ─────────────────────────────────────────────────────────────
@@ -47,6 +50,7 @@ private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 fun LogsScreen(vm: LogsViewModel, onNavigateUp: (() -> Unit)? = null) {
     val logs        by vm.logs.collectAsStateWithLifecycle()
     val levelFilter by vm.levelFilter.collectAsStateWithLifecycle()
+    val showDetails by vm.showDetails.collectAsStateWithLifecycle()
     val clipboard   = LocalClipboardManager.current
     val listState   = rememberLazyListState()
 
@@ -61,35 +65,12 @@ fun LogsScreen(vm: LogsViewModel, onNavigateUp: (() -> Unit)? = null) {
             .background(BgDark)
             .statusBarsPadding()
     ) {
-        // ── Toolbar ──
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        // ── Toolbar (v1.8.0: AtTopBar chung; quay lại khi mở dạng màn hình phủ) ──
+        AtTopBar(
+            title    = "Nhật ký",
+            subtitle = if (logs.isEmpty()) "Chưa có sự kiện" else "${logs.size} sự kiện gần nhất",
+            onBack   = onNavigateUp,
         ) {
-            Text(
-                "Nhật ký",
-                style = AtType.Title.copy(fontSize = 22.sp), color = AtColors.TextPrim,
-                modifier = Modifier.weight(1f),
-            )
-            AnimatedVisibility(
-                visible = logs.isNotEmpty(),
-                enter   = fadeIn(tween(200)) + scaleIn(tween(200)),
-                exit    = fadeOut(tween(150)) + scaleOut(tween(150)),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Purple.copy(alpha = 0.15f))
-                            .padding(horizontal = 8.dp, vertical = 3.dp),
-                    ) {
-                        Text("${logs.size}", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(Modifier.width(8.dp))
-                }
-            }
             // Copy all
             IconButton(onClick = {
                 val text = logs.joinToString("\n") {
@@ -97,11 +78,11 @@ fun LogsScreen(vm: LogsViewModel, onNavigateUp: (() -> Unit)? = null) {
                 }
                 clipboard.setText(AnnotatedString(text))
             }) {
-                Icon(Icons.Rounded.ContentCopy, null, tint = TextSec, modifier = Modifier.size(20.dp))
+                Icon(Icons.Rounded.ContentCopy, "Sao chép tất cả", tint = TextSec, modifier = Modifier.size(20.dp))
             }
             // Clear all
             IconButton(onClick = vm::clearAll) {
-                Icon(Icons.Rounded.DeleteSweep, null, tint = TextSec, modifier = Modifier.size(20.dp))
+                Icon(Icons.Rounded.DeleteSweep, "Xoá tất cả", tint = TextSec, modifier = Modifier.size(20.dp))
             }
         }
 
@@ -111,7 +92,7 @@ fun LogsScreen(vm: LogsViewModel, onNavigateUp: (() -> Unit)? = null) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             val levels = listOf(
-                null                to ("Tất cả"   to Icons.Rounded.List),
+                null                to ("Tất cả"   to Icons.AutoMirrored.Rounded.List),
                 LOG_LEVEL_INFO      to ("Info"     to Icons.Rounded.Info),
                 LOG_LEVEL_SUCCESS   to ("OK"       to Icons.Rounded.CheckCircle),
                 LOG_LEVEL_WARNING   to ("Cảnh báo" to Icons.Rounded.Warning),
@@ -119,26 +100,11 @@ fun LogsScreen(vm: LogsViewModel, onNavigateUp: (() -> Unit)? = null) {
             )
             items(levels) { (lvl, meta) ->
                 val (label, icon) = meta
-                FilterChip(
-                    selected      = levelFilter == lvl,
-                    onClick       = { vm.setFilter(lvl) },
-                    label         = { Text(label, fontSize = 12.sp) },
-                    leadingIcon   = {
-                        Icon(icon, null, modifier = Modifier.size(14.dp))
-                    },
-                    colors        = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = levelColor(lvl).copy(alpha = 0.15f),
-                        selectedLabelColor     = levelColor(lvl),
-                        selectedLeadingIconColor = levelColor(lvl),
-                        containerColor         = CardDark,
-                        labelColor             = TextSec,
-                    ),
-                    border        = FilterChipDefaults.filterChipBorder(
-                        borderColor         = AtColors.Hairline,
-                        selectedBorderColor = levelColor(lvl).copy(alpha = 0.4f),
-                        enabled = true, selected = levelFilter == lvl,
-                    ),
-                )
+                AtChip(text = label, selected = levelFilter == lvl, onClick = { vm.setFilter(lvl) }, icon = icon)
+            }
+            // v1.11.0: hiện các dòng chỉ để gỡ lỗi (ẩn mặc định cho gọn)
+            item {
+                AtChip(text = "Chi tiết", selected = showDetails, onClick = vm::toggleDetails, icon = Icons.Rounded.Build)
             }
         }
 
@@ -160,7 +126,8 @@ fun LogsScreen(vm: LogsViewModel, onNavigateUp: (() -> Unit)? = null) {
                     reverseLayout       = false,
                 ) {
                     items(logs, key = { it.id }) { log ->
-                        LogRow(log)
+                        // v1.11.0: dòng mới trượt/hiện dần, các dòng cũ dịch chỗ mượt
+                        LogRow(log, Modifier.animateItem())
                     }
                 }
             }
@@ -173,13 +140,13 @@ fun LogsScreen(vm: LogsViewModel, onNavigateUp: (() -> Unit)? = null) {
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun LogRow(log: FarmLogEntity) {
+private fun LogRow(log: FarmLogEntity, modifier: Modifier = Modifier) {
     val parsed = remember(log.message) { parseLogMessage(log.message) }
     val time   = remember(log.timestamp) { timeFmt.format(Date(log.timestamp)) }
     val color  = parsed.style.color
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(CardDark)
@@ -220,16 +187,14 @@ private fun LogRow(log: FarmLogEntity) {
                             text       = tag,
                             color      = color,
                             fontSize   = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            letterSpacing = 0.3.sp,
+                            fontWeight = FontWeight.SemiBold,
                         )
                     }
                     Spacer(Modifier.width(6.dp))
                 }
                 Text(
                     text       = parsed.body,
-                    color      = Color(0xFFE5E7EB),
+                    color      = AtColors.TextPrim,
                     fontSize   = 12.sp,
                     lineHeight = 16.sp,
                     modifier   = Modifier.weight(1f),
@@ -253,7 +218,7 @@ private fun levelColor(level: String?): Color = when (level) {
     LOG_LEVEL_SUCCESS -> Green
     LOG_LEVEL_WARNING -> Amber
     LOG_LEVEL_ERROR   -> RedBad
-    else              -> Color(0xFF60A5FA) // INFO = blue
+    else              -> AtColors.Sky // INFO = xanh da trời
 }
 
 @Composable
@@ -264,23 +229,15 @@ private fun EmptyLogsView() {
         verticalArrangement = Arrangement.Center,
     ) {
         Icon(
-            Icons.Rounded.Assignment,
+            Icons.AutoMirrored.Rounded.Assignment,
             contentDescription = null,
             tint     = TextMuted.copy(alpha = 0.4f),
             modifier = Modifier.size(56.dp),
         )
         Spacer(Modifier.height(16.dp))
         Text(
-            "Chưa có nhật ký nào",
-            color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Nhật ký sẽ xuất hiện\nkhi farm bắt đầu chạy",
-            color     = TextMuted,
-            fontSize  = 13.sp,
-            lineHeight = 20.sp,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            "Chưa có nhật ký",
+            color = AtColors.TextPrim, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
         )
     }
 }

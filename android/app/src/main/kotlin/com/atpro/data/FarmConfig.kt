@@ -177,6 +177,12 @@ data class FarmConfig(
      */
     val hashtagKeywords: List<String> = emptyList(),
 
+    /**
+     * `v1.11.0` Chỉ tim video có số tim >= ngưỡng này (0 = tắt). Áp dụng cho MỌI lần tim khi nuôi acc
+     * (kể cả video khớp hashtag/từ khoá). Không đọc được số tim của video → bỏ qua tim (không đoán).
+     */
+    val minLikesToLike: Int = 0,
+
     // ── Tìm kiếm theo từ khoá [v1.2.0] ──────────────────────────────────
 
     /**
@@ -253,6 +259,37 @@ data class FarmConfig(
 
     /** `v1.3.3` Thời lượng (giây) của phiên nuôi acc LÂU định kỳ ở trên. */
     val taskLongFarmDurationSecs: Int = 180,
+
+    // ── Chọn tài khoản nhận nhiệm vụ [v1.12.0] ──────────────────────────────
+    // Riêng với chế độ Nuôi TikTok (không còn dùng chung "Toàn bộ máy / Danh sách chọn" của Dashboard).
+
+    /** `AUTO` = mọi acc đã liên kết F4F và có trên máy; `SELECTED` = chỉ [taskSelectedAccounts]. Xem `TaskAccountSelector`. */
+    val taskAccountMode: String = "AUTO",
+
+    /** Username (không @, chữ thường) được tick khi [taskAccountMode] = SELECTED. */
+    val taskSelectedAccounts: List<String> = emptyList(),
+
+    // ── Nuôi acc TRONG LÚC kiếm tiền [v1.11.0] ──────────────────────────────
+    // Bộ thiết lập riêng cho các lần nuôi trước/sau job — chỉnh ở Cài đặt → Nhiệm vụ kiếm tiền → Nuôi acc,
+    // không ảnh hưởng chế độ Nuôi acc thường. Không áp dụng cho chính job Tim (job luôn phải tim video được giao).
+
+    /** Xác suất tim mỗi video khi nuôi trước/sau job (0.0–1.0). */
+    val taskFarmLikeRate: Float = 0.30f,
+
+    /** Thời gian xem mỗi video (giây) khi nuôi trước/sau job. */
+    val taskFarmWatchMinSecs: Int = 3,
+    val taskFarmWatchMaxSecs: Int = 8,
+
+    /** Chỉ tim video có số tim >= ngưỡng (0 = tắt) khi nuôi trước/sau job. */
+    val taskFarmMinLikesToLike: Int = 0,
+
+    /** Tim video có hashtag khớp [taskFarmHashtags] (bỏ qua xác suất nhưng vẫn qua ngưỡng số tim). */
+    val taskFarmLikeByHashtag: Boolean = false,
+    val taskFarmHashtags: List<String> = emptyList(),
+
+    /** Tim video có chú thích khớp [taskFarmCaptionKeywords]. */
+    val taskFarmLikeByCaption: Boolean = false,
+    val taskFarmCaptionKeywords: List<String> = emptyList(),
 
     // ── Demo nuôi Facebook [v1.2.3] ─────────────────────────────────────────
 

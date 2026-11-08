@@ -22,16 +22,15 @@ Hard constraints that must never be violated. Check this file before any archite
 
 - **Offline-first**: All data stored in Room (SQLite). No cloud sync, no internet required for core farming
 - **No Supabase**: Removed. Do not re-introduce cloud DB
-- **Encryption**: Sensitive fields (credentials, tokens) must go through `StringEncryptor`
+- **Encryption**: Sensitive fields (credentials, tokens) must go through `StringEncryptor` (Follow4Follow: token qua `F4fTokenCodec`; **không bao giờ lưu mật khẩu**; không log token/`x-sign`)
+- **Follow4Follow**: mọi request phải ký `x-ts`/`x-sign` (`F4fSigner`); `complete-job` chỉ gọi sau ≥5s kể từ lúc mở link; không complete/skip khi `accountActive = null`
+- **Màu giao diện**: chỉ lấy màu qua `AtColors.*` (getter động theo chế độ Sáng/Tối). KHÔNG sao chép vào `val` cấp file / enum / bảng khởi tạo một lần (bị đóng băng, không đổi theo chế độ) — dùng `val X get() = AtColors.Y` hoặc lambda/enum tông (ADR-0009). Hộp thoại dùng `AtDialog`, ô nhập dùng `AtTextField`; không dùng `AlertDialog`/`FilterChip` Material trực tiếp
+- **Thứ tự phát hiện acc**: `detectCurrentAccount()` PHẢI chạy trước `openSwitchPopup()` (popup/Cài đặt TikTok che tab Hồ sơ) — cả nuôi acc và task mode; không bao giờ click vào acc ở vị trí 0 của switch popup (là acc đang login, no-op)
+- **Rút tiền F4F**: luôn qua hộp thoại xác nhận; không bao giờ tự thử lại yêu cầu rút/nhận hoa hồng (tránh trùng)
 
 ## Build constraints
 
 - **Single APK**: No split APKs, no dynamic delivery. Device storage may be limited
-- **Flutter SDK**: Pinned to `>=3.19.0`. Do not upgrade without testing on target devices
-- **Dart SDK**: `>=3.2.0 <4.0.0`
-- **flutter_riverpod**: `^2.4.9` — do not upgrade major without Dart version check
-- `share_plus`: pinned `^7.2.2` (v9 does not exist)
-- `flutter_lints`: pinned `^3.0.1` (v4 requires Dart 3.3+)
 
 ## Code constraints
 

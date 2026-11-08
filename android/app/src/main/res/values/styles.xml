@@ -22,13 +22,4 @@
         <item name="android:windowIsTranslucent">false</item>
         <item name="android:windowNoTitle">true</item>
     </style>
-
-    <!--
-        SplashTheme — used only during app cold start.
-        Identical appearance to AppTheme but declared separately so it can
-        be pointed at by a future SplashScreen API integration without
-        touching the main theme.
-        Currently unused — MainActivity uses AppTheme directly.
-    -->
-    <style name="SplashTheme" parent="AppTheme"/>
 </resources>

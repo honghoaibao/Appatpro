@@ -1,7 +1,23 @@
 package com.atpro.ui.schedule
 
 import androidx.compose.foundation.*
+import com.atpro.ui.theme.staggerIn
+import com.atpro.ui.theme.AtSkeleton
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.animateContentSize
 import com.atpro.ui.theme.AtColors
+import com.atpro.ui.theme.AtTopBar
+import com.atpro.scheduler.ScheduledFarmManager.FarmSchedule
+import com.atpro.ui.theme.AtCard
+import com.atpro.ui.theme.AtChip
+import com.atpro.ui.theme.AtDialog
+import com.atpro.ui.theme.AtEmptyState
+import com.atpro.ui.theme.AtSwitch
+import com.atpro.ui.theme.AtTextField
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.CircleShape
@@ -21,30 +37,27 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.atpro.scheduler.ScheduledFarmManager.FarmSchedule
 
 // ── Palette ───────────────────────────────────────────────────
-private val BgDark    = AtColors.Bg
-private val CardDark  = AtColors.Surface
-private val BorderDark= AtColors.Hairline
-private val Purple    = AtColors.Accent
-private val Green     = AtColors.Success
-private val RedBad    = AtColors.Danger
-private val Amber     = AtColors.Warning
-private val TextSec   = AtColors.TextSec
-private val TextMuted = AtColors.TextMuted
-
+private val BgDark get() = AtColors.Bg
+private val CardDark get() = AtColors.Surface
+private val BorderDark get() = AtColors.Hairline
+private val Purple get() = AtColors.Accent
+private val Green get() = AtColors.Success
+private val RedBad get() = AtColors.Danger
+private val Amber get() = AtColors.Warning
+private val TextSec get() = AtColors.TextSec
+private val TextMuted get() = AtColors.TextMuted
 private val DAY_LABELS = listOf("CN", "T2", "T3", "T4", "T5", "T6", "T7")
 
 // ─────────────────────────────────────────────────────────────
 //  Root
-//  v1.2.8: thêm onNavigateUp để dùng được cả trong tab MainScreen
-//           lẫn standalone ScheduleActivity (default = {}).
+//  v1.2.8: onNavigateUp — v1.9.0: ScheduleActivity đã gỡ; chỉ còn mở dạng màn hình phủ từ MainScreen.
 // ─────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScheduleScreen(vm: ScheduleViewModel, onNavigateUp: () -> Unit = {}) {
+fun ScheduleScreen(vm: ScheduleViewModel, onNavigateUp: (() -> Unit)? = null) {
     val schedules by vm.schedules.collectAsStateWithLifecycle()
     val isLoading by vm.isLoading.collectAsStateWithLifecycle()
     var showAdd   by remember { mutableStateOf(false) }
@@ -52,39 +65,38 @@ fun ScheduleScreen(vm: ScheduleViewModel, onNavigateUp: () -> Unit = {}) {
     Scaffold(
         containerColor = BgDark,
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("Lịch tự động", fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                        Text(
-                            "${schedules.count { it.enabled }} lịch đang bật",
-                            color = TextMuted, fontSize = 11.sp,
-                        )
-                    }
-                },
-                colors  = TopAppBarDefaults.topAppBarColors(containerColor = BgDark),
-                actions = {
+            // v1.9.0: AtTopBar như các màn hình khác (trước là TopAppBar Material riêng); statusBarsPadding vì
+            // đây là màn hình phủ toàn bộ, không còn TopAppBar tự cộng inset thanh trạng thái.
+            AtTopBar(
+                title    = "Lịch tự động",
+                subtitle = "${schedules.count { it.enabled }} lịch đang bật",
+                onBack   = onNavigateUp,
+                modifier = Modifier.statusBarsPadding(),
+                actions  = {
                     IconButton(onClick = vm::load) {
-                        Icon(Icons.Rounded.Refresh, null, tint = TextSec)
+                        Icon(Icons.Rounded.Refresh, contentDescription = "Tải lại", tint = TextSec)
                     }
                 },
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick           = { showAdd = true },
-                containerColor    = Purple,
-                contentColor      = Color.White,
-                shape             = RoundedCornerShape(16.dp),
-            ) {
-                Icon(Icons.Rounded.Add, "Thêm lịch")
-            }
+            ExtendedFloatingActionButton(
+                onClick        = { showAdd = true },
+                containerColor = AtColors.Blue,
+                contentColor   = AtColors.OnBlue,
+                shape          = RoundedCornerShape(16.dp),
+                icon           = { Icon(Icons.Rounded.Add, null) },
+                text           = { Text("Thêm lịch", fontWeight = FontWeight.SemiBold) },
+            )
         },
     ) { padding ->
 
         if (isLoading) {
-            Box(Modifier.fillMaxSize().padding(padding), Alignment.Center) {
-                CircularProgressIndicator(color = Purple)
+            Column(
+                Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                repeat(3) { AtSkeleton(Modifier.fillMaxWidth().height(104.dp)) }
             }
         } else if (schedules.isEmpty()) {
             EmptyScheduleView(Modifier.padding(padding))
@@ -97,12 +109,14 @@ fun ScheduleScreen(vm: ScheduleViewModel, onNavigateUp: () -> Unit = {}) {
                 ),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(schedules, key = { it.id }) { schedule ->
-                    SwipeToDeleteScheduleRow(
-                        schedule = schedule,
-                        onToggle = { vm.toggle(schedule) },
-                        onDelete = { vm.delete(schedule) },
-                    )
+                itemsIndexed(schedules, key = { _, sc -> sc.id }) { index, schedule ->
+                    Box(Modifier.staggerIn(index.coerceAtMost(8), stepMs = 40)) {
+                        SwipeToDeleteScheduleRow(
+                            schedule = schedule,
+                            onToggle = { vm.toggle(schedule) },
+                            onDelete = { vm.delete(schedule) },
+                        )
+                    }
                 }
             }
         }
@@ -136,19 +150,13 @@ private fun SwipeToDeleteScheduleRow(
     )
 
     if (confirmDelete) {
-        AlertDialog(
-            onDismissRequest = { confirmDelete = false },
-            containerColor   = CardDark,
-            title  = { Text("Xóa lịch \"${schedule.label}\"?", color = Color.White) },
-            text   = { Text("WorkManager sẽ hủy tác vụ đã đặt.", color = TextSec) },
-            confirmButton = {
-                TextButton(onClick = { confirmDelete = false; onDelete() }) {
-                    Text("Xóa", color = RedBad)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) { Text("Hủy", color = TextSec) }
-            },
+        AtDialog(
+            onDismiss   = { confirmDelete = false },
+            title       = "Xóa lịch?",
+            message     = "${schedule.label} · %02d:%02d".format(schedule.hourOfDay, schedule.minute),
+            confirmText = "Xóa",
+            onConfirm   = { confirmDelete = false; onDelete() },
+            danger      = true,
         )
     }
 
@@ -171,81 +179,96 @@ private fun SwipeToDeleteScheduleRow(
 
 @Composable
 private fun ScheduleRow(schedule: FarmSchedule, onToggle: () -> Unit) {
-    // v1.2.9: label dịch vụ
-    val serviceLabel = when (schedule.serviceMode) {
-        "FACEBOOK_NURTURE"  -> "Nuôi Facebook"
-        "X_NURTURE"         -> "Nuôi X"
-        "INSTAGRAM_NURTURE" -> "Nuôi Instagram"
-        "THREADS_NURTURE"   -> "Nuôi Threads"
-        "SNAPCHAT_NURTURE"  -> "Nuôi Snapchat"
-        else                -> "Nuôi TikTok"
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(CardDark)
-            .border(1.dp, if (schedule.enabled) AtColors.HairlineHi else BorderDark, RoundedCornerShape(16.dp))
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    val serviceLabel = serviceLabelOf(schedule.serviceMode)
+    val active = schedule.enabled
+    // Thẻ mờ đi khi tắt lịch (chuyển mượt thay vì đổi màu đột ngột).
+    val alpha by animateFloatAsState(if (active) 1f else 0.55f, tween(250), label = "schedule_alpha")
+    val nextRun = remember(schedule) { nextRunText(schedule) }
+
+    AtCard(
+        modifier       = Modifier.fillMaxWidth().animateContentSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
     ) {
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(schedule.label, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Purple.copy(alpha = 0.16f))
-                        .border(1.dp, Purple.copy(alpha = 0.3f), RoundedCornerShape(20.dp))
-                        .padding(horizontal = 7.dp, vertical = 2.dp),
-                ) {
-                    Text(serviceLabel, color = Purple, fontSize = 9.sp, fontWeight = FontWeight.Medium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).graphicsLayer { this.alpha = alpha }) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        "%02d:%02d".format(schedule.hourOfDay, schedule.minute),
+                        color      = if (active) AtColors.TextPrim else TextMuted,
+                        fontSize   = 30.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = (-1).sp,
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        if (schedule.label == serviceLabel || schedule.label.isBlank()) serviceLabel
+                        else "${schedule.label} · $serviceLabel",
+                        color    = TextSec, fontSize = 13.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(bottom = 5.dp).weight(1f, fill = false),
+                    )
                 }
-            }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "%02d:%02d".format(schedule.hourOfDay, schedule.minute),
-                color      = if (schedule.enabled) Purple else TextMuted,
-                fontSize   = 22.sp,
-                fontWeight = FontWeight.ExtraBold,
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf(1, 2, 3, 4, 5, 6, 7).forEach { day ->
-                    val active = day in schedule.daysOfWeek
-                    Box(
-                        modifier = Modifier
-                            .size(27.dp)
-                            .clip(CircleShape)
-                            .background(
-                                if (active && schedule.enabled) Purple.copy(alpha = 0.22f)
-                                else BorderDark.copy(alpha = 0.35f)
-                            )
-                            .then(
-                                if (active && schedule.enabled)
-                                    Modifier.border(1.dp, Purple.copy(alpha = 0.45f), CircleShape)
-                                else Modifier
-                            ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            DAY_LABELS[day - 1],
-                            fontSize   = 9.sp,
-                            color      = if (active && schedule.enabled) Purple else TextMuted,
-                            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                    (1..7).forEach { day ->
+                        val on = day in schedule.daysOfWeek
+                        val bg by animateColorAsState(
+                            if (on) Purple.copy(alpha = 0.18f) else BorderDark.copy(alpha = 0.35f),
+                            tween(200), label = "day_bg",
                         )
+                        Box(
+                            modifier = Modifier.size(26.dp).clip(CircleShape).background(bg),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                DAY_LABELS[day - 1], fontSize = 9.sp,
+                                color      = if (on) Purple else TextMuted,
+                                fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
+                            )
+                        }
                     }
                 }
+                if (nextRun != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(nextRun, color = Green, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
             }
+            AtSwitch(checked = schedule.enabled, onCheckedChange = { onToggle() })
         }
-        Switch(
-            checked         = schedule.enabled,
-            onCheckedChange = { onToggle() },
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = Purple,
-            ),
-        )
+    }
+}
+
+private fun serviceLabelOf(mode: String): String = when (mode) {
+    "FACEBOOK_NURTURE"  -> "Nuôi Facebook"
+    "X_NURTURE"         -> "Nuôi X"
+    "INSTAGRAM_NURTURE" -> "Nuôi Instagram"
+    "THREADS_NURTURE"   -> "Nuôi Threads"
+    "SNAPCHAT_NURTURE"  -> "Nuôi Snapchat"
+    else                -> "Nuôi TikTok"
+}
+
+/** "Còn 2 giờ 15 phút" tới lần chạy kế tiếp (null nếu lịch tắt / không có ngày). Ngày 1 = CN … 7 = T7 như Calendar. */
+private fun nextRunText(s: FarmSchedule): String? {
+    if (!s.enabled || s.daysOfWeek.isEmpty()) return null
+    val now = java.util.Calendar.getInstance()
+    var best: Long? = null
+    for (offset in 0..7) {
+        val c = (now.clone() as java.util.Calendar).apply {
+            add(java.util.Calendar.DAY_OF_YEAR, offset)
+            set(java.util.Calendar.HOUR_OF_DAY, s.hourOfDay)
+            set(java.util.Calendar.MINUTE, s.minute)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        if (c.get(java.util.Calendar.DAY_OF_WEEK) in s.daysOfWeek && c.timeInMillis > now.timeInMillis) {
+            best = c.timeInMillis; break
+        }
+    }
+    val min = ((best ?: return null) - now.timeInMillis) / 60_000L
+    return when {
+        min < 60        -> "Còn $min phút"
+        min < 24 * 60   -> "Còn ${min / 60} giờ ${min % 60} phút"
+        else            -> "Còn ${min / 1_440} ngày ${(min % 1_440) / 60} giờ"
     }
 }
 
@@ -258,142 +281,76 @@ private fun AddScheduleDialog(
     onDismiss: () -> Unit,
     onAdd:     (label: String, hour: Int, minute: Int, days: List<Int>, serviceMode: String) -> Unit,
 ) {
-    var label        by remember { mutableStateOf("Farm") }
     var hour         by remember { mutableIntStateOf(8) }
     var minute       by remember { mutableIntStateOf(0) }
     var selectedDays by remember { mutableStateOf(setOf(2, 3, 4, 5, 6, 7, 1)) }
     var serviceMode  by remember { mutableStateOf("FARM") }
 
-    // Danh sách dịch vụ
-    data class SvcItem(val key: String, val label: String, val accent: Color)
     val services = listOf(
-        SvcItem("FARM",              "Nuôi TikTok",    Color(0xFF69C9D0)),
-        SvcItem("FACEBOOK_NURTURE",  "Nuôi Facebook",  Color(0xFF1877F2)),
-        SvcItem("X_NURTURE",         "Nuôi X",         Color(0xFFEEEEEE)),
-        SvcItem("INSTAGRAM_NURTURE", "Nuôi Instagram", Color(0xFFFD1D1D)),
-        SvcItem("THREADS_NURTURE",   "Nuôi Threads",   Color(0xFFAAAAAA)),
-        SvcItem("SNAPCHAT_NURTURE",  "Nuôi Snapchat",  Color(0xFFFFFC00)),
+        "FARM", "FACEBOOK_NURTURE", "X_NURTURE", "INSTAGRAM_NURTURE", "THREADS_NURTURE", "SNAPCHAT_NURTURE",
     )
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor   = CardDark,
-        title = { Text("Thêm lịch tự động", color = Color.White, fontWeight = FontWeight.Bold) },
-        text  = {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    AtDialog(
+        onDismiss      = onDismiss,
+        title          = "Thêm lịch",
+        confirmText    = "Thêm",
+        confirmEnabled = selectedDays.isNotEmpty(),
+        // v1.10.0: bỏ ô "Tên lịch" — nhãn lấy theo dịch vụ (đỡ một bước nhập).
+        onConfirm      = { onAdd(serviceLabelOf(serviceMode), hour, minute, selectedDays.sorted(), serviceMode) },
+        dismissText    = "Hủy",
+    ) {
+        Column(
+            modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(services) { key ->
+                    AtChip(text = serviceLabelOf(key), selected = key == serviceMode, onClick = { serviceMode = key })
+                }
+            }
 
-                // Tên lịch
-                OutlinedTextField(
-                    value         = label,
-                    onValueChange = { label = it },
-                    label         = { Text("Tên lịch", color = TextSec, fontSize = 12.sp) },
-                    singleLine    = true,
-                    modifier      = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor   = Purple, unfocusedBorderColor  = BorderDark,
-                        focusedTextColor     = Color.White, unfocusedTextColor = Color.White,
-                        focusedContainerColor   = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                    ),
-                )
+            // Giờ : Phút — một hàng, mỗi cột có nút tăng / giảm
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                TimeColumn("%02d".format(hour),   onUp = { hour = (hour + 1) % 24 },      onDown = { hour = (hour - 1 + 24) % 24 })
+                Text(":", color = TextMuted, fontSize = 32.sp, fontWeight = FontWeight.Light, modifier = Modifier.padding(horizontal = 14.dp))
+                TimeColumn("%02d".format(minute), onUp = { minute = (minute + 5) % 60 }, onDown = { minute = (minute - 5 + 60) % 60 })
+            }
 
-                // Chọn dịch vụ
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Dịch vụ:", color = TextSec, fontSize = 13.sp)
-                    androidx.compose.foundation.lazy.LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                (1..7).forEach { day ->
+                    val selected = day in selectedDays
+                    val bg by animateColorAsState(if (selected) AtColors.Blue else AtColors.SurfaceHigh, tween(160), label = "day_pick")
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(bg)
+                            .clickable {
+                                selectedDays = if (selected && selectedDays.size > 1) selectedDays - day else selectedDays + day
+                            },
+                        contentAlignment = Alignment.Center,
                     ) {
-                        items(services) { svc ->
-                            val sel = svc.key == serviceMode
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .background(if (sel) AtColors.SurfaceHigh else CardDark)
-                                    .border(
-                                        1.dp,
-                                        if (sel) AtColors.TextSec else BorderDark,
-                                        RoundedCornerShape(20.dp),
-                                    )
-                                    .clickable { serviceMode = svc.key }
-                                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                            ) {
-                                Text(
-                                    svc.label,
-                                    fontSize   = 11.sp,
-                                    color      = if (sel) svc.accent else TextMuted,
-                                    fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Giờ — row riêng
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Giờ:", color = TextSec, fontSize = 13.sp, modifier = Modifier.width(44.dp))
-                    TimeStepBtn(Icons.Rounded.Remove) { hour = (hour - 1 + 24) % 24 }
-                    Text(
-                        "%02d".format(hour),
-                        color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                    )
-                    TimeStepBtn(Icons.Rounded.Add) { hour = (hour + 1) % 24 }
-                }
-
-                // Phút — row riêng (fix: trước đây cùng row với Giờ → tràn màn hình nhỏ)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Phút:", color = TextSec, fontSize = 13.sp, modifier = Modifier.width(44.dp))
-                    TimeStepBtn(Icons.Rounded.Remove) { minute = (minute - 5 + 60) % 60 }
-                    Text(
-                        "%02d".format(minute),
-                        color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                    )
-                    TimeStepBtn(Icons.Rounded.Add) { minute = (minute + 5) % 60 }
-                }
-
-                // Ngày lặp
-                Column {
-                    Text("Ngày trong tuần:", color = TextSec, fontSize = 13.sp)
-                    Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(1, 2, 3, 4, 5, 6, 7).forEach { day ->
-                            val selected = day in selectedDays
-                            Box(
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(CircleShape)
-                                    .background(if (selected) Purple else BorderDark)
-                                    .clickable {
-                                        selectedDays = if (selected && selectedDays.size > 1)
-                                            selectedDays - day else selectedDays + day
-                                    },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    DAY_LABELS[day - 1],
-                                    fontSize   = 10.sp,
-                                    color      = if (selected) Color.White else TextMuted,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                            }
-                        }
+                        Text(
+                            DAY_LABELS[day - 1], fontSize = 10.sp,
+                            color = if (selected) AtColors.OnBlue else TextMuted, fontWeight = FontWeight.Bold,
+                        )
                     }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onAdd(label.ifBlank { "Farm" }, hour, minute, selectedDays.sorted(), serviceMode) },
-                enabled = selectedDays.isNotEmpty(),
-            ) {
-                Text("Thêm", color = Purple, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Hủy", color = TextSec) }
-        },
-    )
+        }
+    }
+}
+
+@Composable
+private fun TimeColumn(text: String, onUp: () -> Unit, onDown: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        TimeStepBtn(Icons.Rounded.KeyboardArrowUp, onUp)
+        Text(
+            text, color = AtColors.TextPrim, fontSize = 34.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(vertical = 6.dp),
+        )
+        TimeStepBtn(Icons.Rounded.KeyboardArrowDown, onDown)
+    }
 }
 
 @Composable
@@ -403,13 +360,13 @@ private fun TimeStepBtn(
 ) {
     Box(
         modifier = Modifier
-            .size(28.dp)
-            .clip(RoundedCornerShape(6.dp))
+            .size(36.dp)
+            .clip(RoundedCornerShape(10.dp))
             .background(Purple.copy(alpha = 0.15f))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, null, tint = Purple, modifier = Modifier.size(14.dp))
+        Icon(icon, null, tint = Purple, modifier = Modifier.size(20.dp))
     }
 }
 
@@ -419,27 +376,10 @@ private fun TimeStepBtn(
 
 @Composable
 private fun EmptyScheduleView(modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(88.dp)
-                .clip(RoundedCornerShape(50))
-                .background(CardDark),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Rounded.Schedule, contentDescription = null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(38.dp))
-        }
-        Spacer(Modifier.height(16.dp))
-        Text("Chưa có lịch nào", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Nhấn + để thêm lịch farm tự động\nWorkManager sẽ khởi động farm đúng giờ",
-            color     = TextMuted, fontSize = 13.sp, lineHeight = 20.sp,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        AtEmptyState(
+            icon     = Icons.Rounded.Schedule,
+            title    = "Chưa có lịch",
         )
     }
 }

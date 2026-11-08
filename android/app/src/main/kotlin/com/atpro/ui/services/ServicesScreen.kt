@@ -20,23 +20,40 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Group
+import androidx.compose.material.icons.rounded.AccountBalanceWallet
+import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.MonetizationOn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.atpro.R
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.clickable
 import com.atpro.security.AppConstants
+import com.atpro.tasks.f4f.F4fAuth
+import com.atpro.tasks.f4f.F4fAuthState
+import com.atpro.ui.tasks.F4fLoginDialog
+import com.atpro.ui.f4f.F4fHubTab
+import com.atpro.ui.theme.AtBadge
 import com.atpro.ui.theme.AtCard
+import com.atpro.ui.theme.AtHeroCard
 import com.atpro.ui.theme.AtColors
 import com.atpro.ui.theme.AtSectionLabel
 import com.atpro.ui.theme.AtType
@@ -45,9 +62,8 @@ import com.atpro.ui.theme.staggerIn
 // ─────────────────────────────────────────────────────────────────────────────
 //  ServicesScreen
 //
-//  v1.4.0: thiết kế lại. 7 thẻ riêng (mỗi thẻ gradient + viền phát sáng + chip màu thương hiệu)
-//  → 1 kiểu hàng duy nhất: logo · tên · mô tả 1 dòng · mũi tên. Màu thương hiệu chỉ còn ở logo.
-//  Callback giữ nguyên để MainScreen không phải đổi.
+//  v1.4.0: một kiểu hàng duy nhất: logo · tên · mô tả 1 dòng · mũi tên. Màu thương hiệu chỉ còn ở logo.
+//  v1.10.0: chữ mô tả rút gọn; "Thử nghiệm" → "Dịch vụ khác" (bỏ đoạn giải thích); bỏ lối tắt Giới thiệu.
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -59,8 +75,23 @@ fun ServicesScreen(
     onOpenInstagramService: () -> Unit = {},
     onOpenThreadsService:   () -> Unit = {},
     onOpenSnapchatService:  () -> Unit = {},
+    /** v1.7.0: mở màn hình Ví Follow4Follow tại tab chỉ định (null = chưa đăng nhập → hộp thoại đăng nhập). */
+    onOpenF4fHub:           (F4fHubTab) -> Unit = {},
 ) {
     val tasksEnabled = AppConstants.TASKS_ENABLED
+
+    // v1.6.0: dịch vụ nhiệm vụ cần đăng nhập Follow4Follow — chưa đăng nhập thì mở hộp thoại thay vì vào Dashboard.
+    val context = LocalContext.current
+    val f4fState by F4fAuth.manager(context).state.collectAsStateWithLifecycle()
+    // 0 = đóng, 1 = đăng nhập để vào chế độ nhiệm vụ, 2 = đăng nhập để mở Ví
+    var loginIntent by remember { mutableStateOf(0) }
+    val f4fUser = (f4fState as? F4fAuthState.LoggedIn)
+    val taskSubtitle = when {
+        !tasksEnabled -> "Sắp có"
+        f4fUser == null -> "Follow4Follow"
+        else -> "Follow4Follow · ${f4fUser.username.ifBlank { "đã đăng nhập" }}" +
+                (f4fUser.balance?.let { " · $it" } ?: "")
+    }
 
     Column(
         modifier = Modifier
@@ -72,37 +103,70 @@ fun ServicesScreen(
     ) {
         Spacer(Modifier.height(20.dp))
         Text("Dịch vụ", style = AtType.Title, color = AtColors.TextPrim, modifier = Modifier.staggerIn(0))
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(18.dp))
+
+        // v1.7.0: thẻ Ví Follow4Follow — số dư + lối tắt tới Xếp hạng / Rút tiền.
+        if (tasksEnabled) {
+            AtHeroCard(
+                modifier = Modifier.fillMaxWidth().staggerIn(1),
+                onClick  = { if (f4fUser == null) loginIntent = 2 else onOpenF4fHub(F4fHubTab.OVERVIEW) },
+            ) {
+                Text("Ví Follow4Follow", color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    if (f4fUser == null) "Đăng nhập" else (f4fUser.balance ?: "—"),
+                    style = AtType.Title.copy(fontSize = 28.sp), color = Color.White,
+                )
+                if (f4fUser != null) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "@${f4fUser.username.ifBlank { "tài khoản" }}" +
+                            (f4fUser.balancePending?.let { " · chờ $it" } ?: ""),
+                        color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp,
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        WalletShortcut("Xếp hạng", Icons.Rounded.EmojiEvents) { onOpenF4fHub(F4fHubTab.LEADERBOARD) }
+                        WalletShortcut("Rút tiền", Icons.Rounded.AccountBalanceWallet) { onOpenF4fHub(F4fHubTab.WITHDRAW) }
+                    }
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+        }
 
         AtSectionLabel("Chính", Modifier.staggerIn(1))
         Spacer(Modifier.height(10.dp))
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             ServiceRow(
                 title    = "TikTok",
-                subtitle = "Nuôi tài khoản: xem, thích, theo dõi, bình luận",
+                subtitle = "Nuôi tài khoản",
                 modifier = Modifier.staggerIn(2),
                 onClick  = onOpenFarmService,
             ) { PlatformLogo(R.drawable.ic_logo_tiktok, "TikTok") }
 
             ServiceRow(
                 title    = "Nhiệm vụ kiếm tiền",
-                subtitle = if (tasksEnabled) "Like / Follow theo nhiệm vụ" else "Đang chờ tích hợp nhà cung cấp",
+                subtitle = taskSubtitle,
                 modifier = Modifier.staggerIn(3),
-                tag      = if (tasksEnabled) null else "Sắp có",
+                tag      = when {
+                    !tasksEnabled   -> "Sắp có"
+                    f4fUser == null -> "Đăng nhập"
+                    else            -> null
+                },
                 enabled  = tasksEnabled,
-                onClick  = onOpenTaskService,
+                onClick  = { if (f4fUser == null) loginIntent = 1 else onOpenTaskService() },
             ) {
                 Icon(
                     Icons.Rounded.MonetizationOn,
                     contentDescription = null,
-                    tint     = AtColors.TextSec,
+                    tint     = AtColors.Accent,
                     modifier = Modifier.size(22.dp),
                 )
             }
 
             ServiceRow(
                 title    = "Facebook",
-                subtitle = "Lướt feed và thích bài viết",
+                subtitle = "Nuôi tài khoản",
                 modifier = Modifier.staggerIn(4),
                 onClick  = onOpenFacebookService,
             ) { PlatformLogo(R.drawable.ic_logo_facebook, "Facebook") }
@@ -110,38 +174,27 @@ fun ServicesScreen(
 
         Spacer(Modifier.height(28.dp))
 
-        AtSectionLabel("Thử nghiệm", Modifier.staggerIn(5))
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "Chỉ mở app, lướt feed và tương tác cơ bản. Cần cài app tương ứng và bật Trợ năng.",
-            color      = AtColors.TextMuted,
-            fontSize   = 12.sp,
-            lineHeight = 17.sp,
-            modifier   = Modifier.staggerIn(5),
-        )
+        AtSectionLabel("Dịch vụ khác", Modifier.staggerIn(5))
         Spacer(Modifier.height(10.dp))
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             ServiceRow(
                 title    = "X",
-                subtitle = "Lướt timeline, thích tweet",
+                subtitle = "Lướt và thích",
                 modifier = Modifier.staggerIn(6),
-                tag      = "Demo",
                 onClick  = onOpenXService,
             ) { PlatformLogo(R.drawable.ic_logo_x, "X") }
 
             ServiceRow(
                 title    = "Instagram",
-                subtitle = "Lướt Reels, thích bài đăng",
+                subtitle = "Lướt và thích",
                 modifier = Modifier.staggerIn(7),
-                tag      = "Demo",
                 onClick  = onOpenInstagramService,
             ) { PlatformLogo(R.drawable.ic_logo_instagram, "Instagram") }
 
             ServiceRow(
                 title    = "Threads",
-                subtitle = "Lướt feed, thích bài viết",
+                subtitle = "Lướt và thích",
                 modifier = Modifier.staggerIn(8),
-                tag      = "Demo",
                 onClick  = onOpenThreadsService,
             ) {
                 Text("@", color = AtColors.TextPrim, fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -149,14 +202,20 @@ fun ServicesScreen(
 
             ServiceRow(
                 title    = "Snapchat",
-                subtitle = "Xem Spotlight và Stories",
+                subtitle = "Xem Spotlight",
                 modifier = Modifier.staggerIn(9),
-                tag      = "Demo",
                 onClick  = onOpenSnapchatService,
             ) { PlatformLogo(R.drawable.ic_logo_snapchat, "Snapchat") }
         }
 
         Spacer(Modifier.height(32.dp))
+    }
+
+    if (loginIntent != 0) {
+        F4fLoginDialog(
+            onDismiss  = { loginIntent = 0 },
+            onLoggedIn = { if (loginIntent == 2) onOpenF4fHub(F4fHubTab.OVERVIEW) else onOpenTaskService() },
+        )
     }
 }
 
@@ -210,15 +269,7 @@ private fun ServiceRow(
 
             if (tag != null) {
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    tag,
-                    color    = AtColors.TextMuted,
-                    fontSize = 11.sp,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .border(1.dp, AtColors.Hairline, RoundedCornerShape(6.dp))
-                        .padding(horizontal = 8.dp, vertical = 3.dp),
-                )
+                AtBadge(tag, if (tag == "Đăng nhập") AtColors.Accent else AtColors.TextMuted)
             }
             if (enabled) {
                 Spacer(Modifier.width(6.dp))
@@ -241,4 +292,21 @@ private fun PlatformLogo(logoRes: Int, contentDesc: String) {
         contentScale       = ContentScale.Fit,
         modifier           = Modifier.size(28.dp),
     )
+}
+
+/** Nút lối tắt nhỏ nằm trong thẻ ví (nền trắng mờ trên nền gradient). */
+@Composable
+private fun WalletShortcut(text: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(Color.White.copy(alpha = 0.18f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(text, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    }
 }

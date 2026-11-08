@@ -4,9 +4,15 @@ import android.content.Context
 import android.util.Log
 import com.atpro.db.AtProDatabase
 import com.atpro.db.dao.TotalsRow
-import com.atpro.db.entity.*import kotlinx.coroutines.Dispatchers
+import com.atpro.db.entity.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
 
 /**
@@ -123,15 +129,37 @@ class LocalRepository(context: Context) : IFarmRepository {
     fun observeLogs(limit: Int = 200): Flow<List<FarmLogEntity>> =
         logs.observeRecent(limit)
 
+    // v1.10.0 — gom ghi log theo lô: mỗi dòng log trước đây là MỘT lần ghi Room (và làm Flow `observeLogs`
+    // phát lại 200 dòng cho màn Nhật ký) → tốn CPU/pin khi engine log dày. Nay xếp hàng và ghi một lượt/1,2s.
+    private val logQueue = ConcurrentLinkedQueue<FarmLogEntity>()
+    private val logScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile private var logFlushScheduled = false
+
     override suspend fun log(
         message:   String,
         level:     String,
         accountId: String?,
     ) {
-        logs.insert(FarmLogEntity(message = message, level = level, accountId = accountId))
+        logQueue.add(FarmLogEntity(message = message, level = level, accountId = accountId))
+        if (logQueue.size >= 40) { flushLogs(); return }
+        if (!logFlushScheduled) {
+            logFlushScheduled = true
+            logScope.launch {
+                delay(1_200L)
+                logFlushScheduled = false
+                flushLogs()
+            }
+        }
     }
 
-    suspend fun clearLogs() = logs.clearAll()
+    /** Ghi toàn bộ log đang chờ trong một giao dịch. An toàn gọi nhiều lần / song song. */
+    suspend fun flushLogs() {
+        val batch = ArrayList<FarmLogEntity>(32)
+        while (true) { batch.add(logQueue.poll() ?: break) }
+        if (batch.isNotEmpty()) logs.insertAll(batch)
+    }
+
+    suspend fun clearLogs() { logQueue.clear(); logs.clearAll() }
 
     /** Dọn log cũ hơn 7 ngày và session cũ hơn 90 ngày */
     suspend fun cleanup() = withContext(Dispatchers.IO) {
@@ -165,7 +193,16 @@ class LocalRepository(context: Context) : IFarmRepository {
 
     // ── FarmConfig convenience loader ─────────────────────────
 
-    override suspend fun loadFarmConfig(): FarmConfig = FarmConfig(
+    override suspend fun loadFarmConfig(): FarmConfig {
+        // v1.11.0: bộ thiết lập nuôi acc của chế độ kiếm tiền mặc định = giá trị nuôi acc thường đang dùng,
+        // nên nâng cấp lên không làm đổi hành vi cho tới khi người dùng chỉnh riêng.
+        val likeRateNow  = getConfigDouble("like_rate",      0.3).toFloat()
+        val watchMinNow  = getConfigDouble("watch_time_min", 3.0)
+        val watchMaxNow  = getConfigDouble("watch_time_max", 8.0)
+        return buildFarmConfig(likeRateNow, watchMinNow, watchMaxNow)
+    }
+
+    private suspend fun buildFarmConfig(likeRateNow: Float, watchMinNow: Double, watchMaxNow: Double): FarmConfig = FarmConfig(
         minutesPerAccount         = getConfigInt   ("minutes_per_account",      5),
         videoWatchTimeMin         = getConfigDouble("watch_time_min",           3.0),
         videoWatchTimeMax         = getConfigDouble("watch_time_max",           8.0),
@@ -216,6 +253,7 @@ class LocalRepository(context: Context) : IFarmRepository {
         likeByHashtag             = getConfigBool  ("like_by_hashtag",           false),
         hashtagKeywords           = getConfig      ("hashtag_keywords",          "")
                                         .split(",").map { it.trim() }.filter { it.isNotEmpty() },
+        minLikesToLike            = getConfigInt   ("min_likes_to_like",         0),   // v1.11.0
         // [v1.2.0] Tìm kiếm theo từ khoá
         searchEnabled             = getConfigBool  ("search_enabled",            false),
         searchKeywords            = getConfig      ("search_keywords",           "")
@@ -237,6 +275,21 @@ class LocalRepository(context: Context) : IFarmRepository {
         taskFarmAfterJobMaxSecs   = getConfigInt   ("task_farm_after_job_max_secs", 20),
         taskLongFarmEveryNJobs    = getConfigInt   ("task_long_farm_every_n_jobs",  3),
         taskLongFarmDurationSecs  = getConfigInt   ("task_long_farm_duration_secs", 180),
+        // [v1.12.0] Chọn tài khoản nhận nhiệm vụ
+        taskAccountMode           = getConfig      ("task_account_mode",          "AUTO").trim().uppercase().ifEmpty { "AUTO" },
+        taskSelectedAccounts      = getConfig      ("task_selected_accounts",     "")
+                                        .split(",", ";", "\n").map { it.trim().removePrefix("@").lowercase() }.filter { it.isNotEmpty() }.distinct(),
+        // [v1.11.0] Nuôi acc trong lúc kiếm tiền
+        taskFarmLikeRate          = getConfigDouble("task_farm_like_rate",        likeRateNow.toDouble()).toFloat(),
+        taskFarmWatchMinSecs      = getConfigInt   ("task_farm_watch_min_secs",   watchMinNow.toInt().coerceAtLeast(1)),
+        taskFarmWatchMaxSecs      = getConfigInt   ("task_farm_watch_max_secs",   watchMaxNow.toInt().coerceAtLeast(2)),
+        taskFarmMinLikesToLike    = getConfigInt   ("task_farm_min_likes",        0),
+        taskFarmLikeByHashtag     = getConfigBool  ("task_farm_like_by_hashtag",  false),
+        taskFarmHashtags          = getConfig      ("task_farm_hashtags",         "")
+                                        .split(",", ";", "\n").map { it.trim() }.filter { it.isNotEmpty() },
+        taskFarmLikeByCaption     = getConfigBool  ("task_farm_like_by_caption",  false),
+        taskFarmCaptionKeywords   = getConfig      ("task_farm_caption_keywords", "")
+                                        .split(",", ";", "\n").map { it.trim() }.filter { it.isNotEmpty() },
         // [v1.2.4] Demo nuôi acc
         facebookNurtureDurationSecs = getConfigInt   ("fb_nurture_duration_secs",     180),
         facebookLikeRate            = getConfigDouble("fb_like_rate",                 0.10).toFloat(),

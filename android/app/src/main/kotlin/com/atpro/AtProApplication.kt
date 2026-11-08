@@ -1,13 +1,11 @@
 package com.atpro
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.content.Context
-import android.os.Build
 import android.util.Log
 import androidx.multidex.MultiDexApplication
 import com.atpro.data.LocalRepository
 import com.atpro.notification.AtProNotificationManager
+import com.atpro.ui.theme.AtThemeState
 import kotlinx.coroutines.*
 
 class AtProApplication : MultiDexApplication() {
@@ -23,10 +21,13 @@ class AtProApplication : MultiDexApplication() {
     override fun onCreate() {
         super.onCreate()
         _ctx = applicationContext
-        Log.i("AtProApp", "AT PRO v1.1.2 starting")
+        // v1.7.0: nạp chế độ giao diện Sáng/Tối TRƯỚC mọi Activity để khung đầu tiên đã đúng màu.
+        AtThemeState.load(this)
+        com.atpro.ui.theme.AtWindowBackground.install(this)
+        Log.i("AtProApp", "AT PRO starting")
 
-        // Notification channels must be created early
-        createNotificationChannels()
+        // Notification channels must be created early (v1.12.0: tạo ở AtProNotificationManager.ensureChannels)
+        AtProNotificationManager.ensureChannels(this)
 
         appScope.launch {
             runCatching { AtProNotificationManager.loadConfig() }
@@ -36,27 +37,5 @@ class AtProApplication : MultiDexApplication() {
         appScope.launch {
             runCatching { LocalRepository.getInstance(this@AtProApplication).cleanup() }
         }
-    }
-
-    private fun createNotificationChannels() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val nm = getSystemService(NotificationManager::class.java) ?: return
-
-        nm.createNotificationChannel(
-            NotificationChannel("atpro_farm", "Trạng thái farm",
-                NotificationManager.IMPORTANCE_LOW)
-                .apply { description = "Thông tin phiên farm đang chạy (ẩn, không phát âm)" }
-        )
-        nm.createNotificationChannel(
-            NotificationChannel("atpro_alert", "Cảnh báo farm",
-                NotificationManager.IMPORTANCE_DEFAULT)
-                .apply { description = "Checkpoint, lỗi và cảnh báo" }
-        )
-        nm.createNotificationChannel(
-            NotificationChannel("atpro_done", "Hoàn thành phiên",
-                NotificationManager.IMPORTANCE_DEFAULT)
-                .apply { description = "Thông báo khi bắt đầu / hoàn thành nuôi tài khoản" }
-        )
-        Log.i("AtProApp", "Notification channels created")
     }
 }

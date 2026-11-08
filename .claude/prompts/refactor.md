@@ -22,4 +22,4 @@ Refactor rules:
 After refactor:
 - Run `./gradlew test` — all tests must pass
 - Update `.claude/context/architecture.md` if module boundaries changed
-- Add revision note in `.claude/revisions/`
+- Add revision note in `.claude/revision/`

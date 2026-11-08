@@ -6,7 +6,7 @@
 
 ## What it produces
 
-A handoff note in `.claude/revisions/` (follows revision policy: keep last 10).
+A handoff note in `.claude/revision/` (follows revision policy: keep last 10).
 
 ## Handoff template
 

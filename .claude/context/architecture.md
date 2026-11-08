@@ -1,6 +1,6 @@
 # Architecture — Appatpro
 
-_Last updated: 2026-10-26 — v1.5.0 (thêm ui/theme); v1.4.0 (gỡ golike/ → tasks/, thêm FarmBehavior, PopupLoopGuard). Trước đó đồng bộ với v1.3.3: thêm golike/, UpdateChecker, DiscordNotifier, ui/services, ui/golike; getRootNode() là suspend. (Trước đó 2026-05-24: FlutterBridge, FeatureFlags đã gỡ.)_
+_Last updated: 2026-10-31 — v1.8.0 (bố cục 5 tab; ui/settings/; Thống kê/Lịch thành màn hình phủ; AtTopBar; logo mới; sửa thứ tự phát hiện acc ở task mode). Trước đó: v1.7.0 (Sky Sáng/Tối + ui/f4f/); v1.6.0 (tasks/f4f/); v1.5.0 (ui/theme); v1.4.0 (gỡ golike/ → tasks/); v1.3.3 (UpdateChecker, DiscordNotifier, ui/services). (2026-05-24: FlutterBridge, FeatureFlags đã gỡ.)_
 
 ## Layer map
 
@@ -30,8 +30,16 @@ android/app/src/main/kotlin/com/atpro/
 │   └── entity/                         — AccountEntity, SessionEntity, FarmLogEntity, ConfigEntity
 ├── ui/theme/               ANDROID-FIRST ✅   (v1.5.0)
 │   └── AtTheme.kt                      — AtColors (nguồn màu DUY NHẤT), AtType, AtTheme, AtCard/AtButton/AtSegmented/AtStatus/LiveDot/AtDialogCard, pressClickable/staggerIn/AnimatedNumber
-├── tasks/                  ANDROID-FIRST ✅   (v1.4.0 — thay golike/)
-│   └── TaskProvider.kt                 — interface + TaskJob/TaskAccount/TaskResult; TaskProviders.current() = null (chờ Follow4Follow)
+├── tasks/                  ANDROID-FIRST ✅   (v1.4.0 — thay golike/; v1.6.0 — có provider thật)
+│   ├── TaskProvider.kt                 — interface + TaskJob/TaskAccount/TaskResult; TaskProviders.current() = Follow4FollowProvider (singleton)
+│   └── f4f/                            — Follow4Follow (v1.6.0), xem context/Follow4FollowAPI_Documentation.md
+│       ├── Follow4FollowProvider.kt    — luồng acc → quick-switch → job → mark-start → complete/skip; quota, 429, 401
+│       ├── F4fApiClient.kt             — gắn x-ts/x-sign/Bearer, bóc envelope, hiệu chỉnh đồng hồ; không ném exception
+│       ├── F4fSigner.kt                — HMAC-SHA256 ký request (pure, có test vector)
+│       ├── F4fHttp.kt                  — F4fTransport (tách để test) + UrlConnectionTransport
+│       ├── F4fAuth.kt                  — F4fAuthManager (login/refresh/logout, StateFlow), F4fSessionStorage, F4fTokenCodec, singleton F4fAuth
+│       ├── F4fService.kt, F4fModels.kt — Ví (v1.7.0): dashboard, xếp hạng, rút tiền 5 kênh, lịch sử, giới thiệu, thông báo
+│       └── F4fHints.kt, F4fJson.kt     — gợi ý lỗi nghiệp vụ; đọc JSON khoan dung
 ├── network/                ANDROID-FIRST ✅
 │   ├── LanWebSocketServer.kt           — LAN broadcast
 │   ├── UpdateChecker.kt                — kiểm tra bản mới từ GitHub Releases
@@ -41,17 +49,20 @@ android/app/src/main/kotlin/com/atpro/
 ├── scheduler/              ANDROID-FIRST ✅
 │   └── ScheduledFarmManager.kt         — schedule management (contains FarmAlarmReceiver)
 ├── security/               ANDROID-FIRST ✅
-│   └── StringEncryptor.kt              — AES encryption
+│   └── StringEncryptor.kt              — che chuỗi (XOR): package TikTok, khoá ký F4F, token F4F khi lưu (+ AppConstants, cờ TASKS_ENABLED)
 ├── ui/                     ANDROID-FIRST ✅ (Jetpack Compose)
 │   ├── dashboard/   DashboardActivity + DashboardScreen + DashboardViewModel
-│   ├── accounts/    AccountsActivity  + AccountsScreen  + AccountsViewModel
-│   ├── logs/        LogsActivity      + LogsScreen      + LogsViewModel
-│   ├── stats/       StatsActivity     + StatsScreen     + StatsViewModel
+│   ├── accounts/    AccountsScreen    + AccountsViewModel   (tab; v1.9.0: bỏ AccountsActivity)
+│   ├── logs/        LogsScreen        + LogsViewModel       (tab; v1.9.0: bỏ LogsActivity)
+│   ├── stats/       StatsScreen + StatsCharts + StatsViewModel (màn hình phủ; v1.10.0: tab Nuôi acc / Kiếm tiền, biểu đồ Canvas)
 │   ├── config/      ConfigActivity    + ConfigScreen    + ConfigViewModel
-│   ├── schedule/    ScheduleActivity  + ScheduleScreen  + ScheduleViewModel
-│   ├── services/    ServicesScreen    — chọn dịch vụ/ServiceMode, thẻ Nhiệm vụ kiếm tiền (gate TASKS_ENABLED)
-│   ├── MainScreen.kt                   — khung tab điều hướng
-│   └── SplashActivity.kt
+│   ├── schedule/    ScheduleScreen    + ScheduleViewModel   (màn hình phủ; v1.9.0: bỏ ScheduleActivity)
+│   ├── services/    ServicesScreen    — chọn dịch vụ/ServiceMode; hàng Nhiệm vụ kiếm tiền (chưa đăng nhập F4F → mở hộp thoại đăng nhập)
+│   ├── tasks/       F4fAccountCard.kt — F4fLoginDialog + F4fAccountCard (Cài đặt → Nhiệm vụ)
+│   ├── settings/    SettingsHubScreen — tab Cài đặt một cấp (Giao diện · Công cụ: Thống kê, Lịch · Cấu hình · Ứng dụng) → ConfigActivity mở thẳng mục (v1.8.0)
+│   ├── f4f/         F4fHubScreen (6 tab) · F4fWithdrawPanel · F4fHubViewModel · F4fHubCommon — Ví Follow4Follow (v1.7.0)
+│   ├── theme/       AtTheme.kt — AtPalettes (Sáng/Tối) · AtThemeState · AtColors (getter động) · AtTheme · thành phần chuẩn
+│   └── MainScreen.kt                   — khung 5 tab (Tổng quan · Dịch vụ · Tài khoản · Nhật ký · Cài đặt) + màn hình phủ Thống kê/Lịch/Ví F4F
 ├── AtProApplication.kt     — Application class (MultiDexApplication), global ctx
 └── MainActivity.kt         — AppCompatActivity: start service → DashboardActivity → finish()
 ```
@@ -167,3 +178,9 @@ canStart:
 
 `ConfigActivity` was always registered in manifest but had no route in the UI.
 Now accessible via ⚙️ icon in `DashboardScreen.IdleView` header.
+
+> v1.12.0: `tasks/f4f/Follow4FollowProvider.kt` theo `f4f.py` v2.8 (danh sách acc `quick-switch`, `earn-coin` luôn kèm `uid`, thang đổi acc S1–S5, `jobGone`, trace); `tasks/TaskAccountSelector.kt` (chọn acc nhận nhiệm vụ: máy ∩ liên kết ∩ chọn tay); `notification/NotificationPolicy.kt` (lõi thuần: nhóm, giờ yên tĩnh, chống lặp, câu chữ) + `AtProNotificationManager` (vỏ Android: kênh, quyền, nhóm, điều hướng `NotificationNavigator`, tiến độ `RunStatusHolder` → `FarmForegroundService`). Xem ADR-0014.
+>
+> v1.11.0: `accessibility/VideoText.kt` (đọc số tim/hashtag), `data/LogPolish.kt` (nhật ký dễ đọc), `ui/theme/AtSlider.kt`; `NodeTraverser` không bao giờ chọn nhãn Đăng xuất; `AutomationEngine.openSwitchList()`. Xem ADR-0013.
+
+> v1.10.0: `data/EarningsStore.kt` (nhật ký thu nhập từng job) + `data/EarningsStats.kt` (`summarizeEarnings`, hàm thuần) → tab Kiếm tiền của Thống kê. Xem ADR-0012.

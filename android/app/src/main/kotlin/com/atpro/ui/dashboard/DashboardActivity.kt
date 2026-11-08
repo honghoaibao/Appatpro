@@ -1,12 +1,15 @@
 package com.atpro.ui.dashboard
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import com.atpro.notification.NotificationNavigator
 import com.atpro.ui.theme.AtTheme
 import com.atpro.ui.MainScreen
 import com.atpro.ui.accounts.AccountsViewModel
+import com.atpro.ui.logs.LogsViewModel
 import com.atpro.ui.schedule.ScheduleViewModel
 import com.atpro.ui.stats.StatsViewModel
 
@@ -32,11 +35,24 @@ class DashboardActivity : AppCompatActivity() {
     private val scheduleVm: ScheduleViewModel by viewModels {
         ScheduleViewModel.Factory(applicationContext)
     }
+    // v1.8.0: Nhật ký thành tab riêng (trước đây nằm trong Cài đặt).
+    private val logsVm: LogsViewModel by viewModels {
+        LogsViewModel.Factory(applicationContext)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // API ≥ 34: khai báo hiệu ứng mở (fade) — (API < 34 dùng hiệu ứng mặc định của hệ thống).
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            overrideActivityTransition(
+                android.app.Activity.OVERRIDE_TRANSITION_OPEN,
+                android.R.anim.fade_in,
+                android.R.anim.fade_out,
+            )
+        }
         window.statusBarColor     = android.graphics.Color.TRANSPARENT
         window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        handleNotificationIntent(intent)
         setContent {
             AtTheme() {
                 MainScreen(
@@ -44,8 +60,20 @@ class DashboardActivity : AppCompatActivity() {
                     statsVm     = statsVm,
                     accountsVm  = accountsVm,
                     scheduleVm  = scheduleVm,
+                    logsVm      = logsVm,
                 )
             }
         }
+    }
+
+    /** v1.12.0: app đang mở mà người dùng chạm thông báo → chuyển đúng tab (launchMode singleTop). */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNotificationIntent(intent)
+    }
+
+    private fun handleNotificationIntent(intent: Intent?) {
+        intent?.getStringExtra(NotificationNavigator.EXTRA_OPEN_TAB)?.let { NotificationNavigator.request(it) }
     }
 }

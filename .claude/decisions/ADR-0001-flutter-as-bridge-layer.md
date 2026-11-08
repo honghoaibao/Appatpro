@@ -1,7 +1,7 @@
 # ADR-0001: Flutter as thin bridge layer only
 
 **Date**: 2026-05-21
-**Status**: Accepted
+**Status**: Superseded by ADR-0004 (Flutter đã gỡ hoàn toàn)
 
 ## Context
 

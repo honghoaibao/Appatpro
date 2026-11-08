@@ -215,12 +215,27 @@ object NodeTraverser {
     ): NodeResult? {
         root ?: return null
         val query = if (ignoreCase) text.lowercase() else text
+        // v1.11.0: tìm kiểu "chứa" (vd "x", "no", "ok") KHÔNG ĐƯỢC chọn nút Đăng xuất — "Đăng xuất" chứa chữ "x",
+        // từng bị coi là nút đóng hộp thoại và bị bấm nhầm khi chuyển tài khoản.
+        val queryIsLogout = isLogoutLabel(query)
 
         return traverseAll(root).firstOrNull { node ->
             val nodeText = node.text?.toString() ?: node.contentDescription?.toString() ?: return@firstOrNull false
             val t = if (ignoreCase) nodeText.lowercase() else nodeText
-            if (exact) t == query else t.contains(query)
+            if (exact) t == query
+            else t.contains(query) && (queryIsLogout || !isLogoutLabel(t))
         }?.toResult()
+    }
+
+    // ── Đăng xuất: không bao giờ được bấm nhầm [v1.11.0] ─────────────────────
+
+    private val LOGOUT_LABELS = listOf("đăng xuất", "log out", "logout", "sign out", "đăng xuất khỏi")
+
+    /** Chuỗi (text/mô tả) có phải nhãn "Đăng xuất" không (chứa, không phân biệt hoa thường). */
+    fun isLogoutLabel(s: String?): Boolean {
+        if (s == null) return false
+        val t = s.trim().lowercase()
+        return t.isNotEmpty() && LOGOUT_LABELS.any { it in t }
     }
 
     /**
@@ -238,7 +253,7 @@ object NodeTraverser {
         return traverseAll(root).firstOrNull { node ->
             val cd = node.contentDescription?.toString() ?: return@firstOrNull false
             val d = if (ignoreCase) cd.lowercase() else cd
-            d.contains(query)
+            d.contains(query) && (isLogoutLabel(query) || !isLogoutLabel(d))
         }?.toResult()
     }
 
@@ -396,7 +411,9 @@ object NodeTraverser {
             val t = node.text?.toString() ?: return@filter false
             t.startsWith("@") && t.length > 2
         }
-        if (usernameNodes.size >= 2) {
+        // v1.11.0: >= 1 (trước là >= 2). Máy chỉ đọc được 1 acc trong danh sách (acc còn lại hiện bằng tên hiển thị)
+        // bị coi là "popup chung" rồi bấm nhầm nút đóng/Đăng xuất. Điều kiện hasSwitchContainer + !onFeed vẫn bảo vệ.
+        if (usernameNodes.isNotEmpty()) {
             val hasSwitchContainer =
                 findByResourceId(root, "switch_account") != null
                     || findByResourceId(root, "account_list") != null
@@ -692,6 +709,81 @@ object NodeTraverser {
 
         return false
     }
+
+    private val BACK_LABELS = setOf("quay lại", "back", "navigate up", "go back", "trở lại")
+    private val BACK_ID_TAILS = listOf("back_btn", "btn_back", "iv_back", "nav_back", "back_arrow", "back_icon", "back_button")
+
+    /**
+     * v1.10.0 — Có nút Quay lại (mũi tên) ở góc trên trái? Trang video/hồ sơ mở từ link luôn có; feed thật thì không.
+     */
+    fun hasBackButton(root: AccessibilityNodeInfo?): Boolean {
+        root ?: return false
+        val nodes = traverseAll(root)
+        val rb = Rect(); root.getBoundsInScreen(rb)
+        val w = if (rb.right > rb.left) rb.right - rb.left else 1080
+        val h = if (rb.bottom > rb.top) rb.bottom - rb.top else 2400
+        for (n in nodes) {
+            val tail = n.viewIdResourceName?.lowercase()?.substringAfter(":id/")
+            val byId = tail != null && (tail == "back" || BACK_ID_TAILS.any { tail.endsWith(it) })
+            val byLabel = normalizeLabel(n.contentDescription).let { it.isNotEmpty() && it in BACK_LABELS } ||
+                normalizeLabel(n.text).let { it.isNotEmpty() && it in BACK_LABELS }
+            if (!byId && !byLabel) continue
+            val b = Rect(); n.getBoundsInScreen(b)
+            if (b.right > b.left && b.bottom > b.top && b.left < w / 4 && b.top < h / 5) return true
+        }
+        return false
+    }
+
+    /** v1.10.0 — Loại trang hiện tại, theo thanh điều hướng dưới cùng. */
+    enum class FeedKind {
+        /** Tab Trang chủ của thanh điều hướng đang được chọn — feed chính. */
+        REAL_FEED,
+        /** Có nút Quay lại, hoặc tab khác đang được chọn, hoặc không phải feed — không phải feed chính. */
+        OTHER_PAGE,
+        /** Không thấy thanh điều hướng nào (trang video/hồ sơ mở từ link, HOẶC máy không lộ nhãn tab). */
+        NO_NAV,
+    }
+
+    private val NAV_HOME_LABELS = setOf("trang chủ", "home")
+    private val NAV_OTHER_LABELS = setOf(
+        "bạn bè", "friends", "hộp thư", "inbox", "hồ sơ", "profile", "me", "cộng đồng", "khám phá", "discover",
+    )
+
+    /**
+     * v1.10.0 — Phân loại trang bằng THANH ĐIỀU HƯỚNG DƯỚI CÙNG (nút/tab nằm trong 18% dưới của màn hình).
+     *
+     * [isOnFeedTab] một mình KHÔNG đủ để biết đã về feed: chiến lược dự phòng của nó coi cả trang video mở từ link
+     * (có Thích/Bình luận) và trang hồ sơ (có nhãn thống kê "Đã follow") là feed → sau khi báo cáo job, engine không
+     * Back và nuôi acc ngay trên trang job. Trang mở từ link không có thanh điều hướng dưới cùng.
+     */
+    fun classifyFeed(root: AccessibilityNodeInfo?): FeedKind {
+        root ?: return FeedKind.NO_NAV
+        if (hasBackButton(root)) return FeedKind.OTHER_PAGE
+        val nodes = traverseAll(root)
+        val rb = Rect(); root.getBoundsInScreen(rb)
+        val h = if (rb.bottom > rb.top) rb.bottom - rb.top else 2400
+        var homeSelected = false; var otherSelected = false; var navCount = 0
+        for (n in nodes) {
+            val label = normalizeLabel(n.contentDescription).ifEmpty { normalizeLabel(n.text) }
+            val isHome = label in NAV_HOME_LABELS
+            if (!isHome && label !in NAV_OTHER_LABELS) continue
+            val b = Rect(); n.getBoundsInScreen(b)
+            if (b.bottom <= b.top || b.top < h * 82 / 100) continue   // chỉ tính tab nằm dưới đáy màn hình
+            if (!n.isVisibleToUser) continue
+            navCount++
+            if (n.isSelected || n.isChecked) { if (isHome) homeSelected = true else otherSelected = true }
+        }
+        return when {
+            navCount == 0     -> FeedKind.NO_NAV
+            homeSelected      -> FeedKind.REAL_FEED
+            otherSelected     -> FeedKind.OTHER_PAGE
+            // Có thanh điều hướng nhưng không đọc được tab nào đang chọn → dựa vào chiến lược cũ.
+            else              -> if (isOnFeedTab(root)) FeedKind.REAL_FEED else FeedKind.OTHER_PAGE
+        }
+    }
+
+    /** true khi [classifyFeed] == REAL_FEED. */
+    fun isRealFeed(root: AccessibilityNodeInfo?): Boolean = classifyFeed(root) == FeedKind.REAL_FEED
 
     /**
      * Phát hiện thẻ Live TOÀN MÀN HÌNH trong feed (preview trước khi vào live room).
@@ -1218,48 +1310,7 @@ object NodeTraverser {
 
     // ── Tim theo nội dung [v1.2.0] ───────────────────────────────────────
 
-    /**
-     * Trích xuất text caption của video hiện tại trên feed.
-     *
-     * Pass 1: resource-id chứa "caption" / "desc" / "description".
-     * Pass 2: node text dài nhất không phải số thống kê (≥15 ký tự).
-     */
-    fun extractVideoCaption(root: AccessibilityNodeInfo?): String {
-        root ?: return ""
-        val CAPTION_IDS = listOf(
-            "caption", "desc", "description", "video_desc",
-            "text_content", "video_caption", "caption_text",
-        )
-        for (id in CAPTION_IDS) {
-            val node = findByResourceId(root, id) ?: continue
-            val text = node.text?.toString()?.trim() ?: continue
-            if (text.length >= 5) return text
-        }
-        // Fallback: node text dài nhất, loại số thuần và UI labels ngắn
-        val STAT_RE = Regex("^[0-9.,KMBkmb%\\s]+$")
-        return traverseAll(root)
-            .mapNotNull { it.text?.toString()?.trim()?.takeIf { t -> t.length >= 15 && !STAT_RE.matches(t) } }
-            .maxByOrNull { it.length }
-            ?: ""
-    }
-
-    /**
-     * Trích xuất danh sách hashtag từ video hiện tại.
-     *
-     * Pass 1: Regex #word trong caption text.
-     * Pass 2: Quét node bắt đầu bằng "#" (TikTok render hashtag thành node riêng).
-     */
-    fun extractVideoHashtags(root: AccessibilityNodeInfo?): List<String> {
-        root ?: return emptyList()
-        val HASHTAG_RE = Regex("#([\\w\u00C0-\u024F\u1E00-\u1EFF]+)")
-        val caption = extractVideoCaption(root)
-        val fromCaption = HASHTAG_RE.findAll(caption).map { it.groupValues[1].lowercase() }.toList()
-        val fromNodes = traverseAll(root).mapNotNull { node ->
-            val t = (node.text?.toString() ?: node.contentDescription?.toString()) ?: return@mapNotNull null
-            if (t.startsWith("#") && t.length > 2) t.removePrefix("#").lowercase() else null
-        }
-        return (fromCaption + fromNodes).distinct()
-    }
+    // v1.11.0: extractVideoCaption()/extractVideoHashtags() được thay bằng [readVideoInfo] (VideoScanner).
 
     // ── Tìm kiếm theo từ khoá [v1.2.0] ──────────────────────────────────
 
@@ -1344,57 +1395,266 @@ object NodeTraverser {
             .distinct()
     }
 
-    // ── Profile page helpers [v1.2.1] ──────────────────────────────────────
+    // ── Profile page helpers [v1.2.1 → v1.9.0] ───────────────────────────────
+    //
+    // v1.9.0 — VIẾT LẠI bộ dò nút Follow (lỗi "không tìm thấy nút Follow" trên mọi loại hồ sơ:
+    // người nổi tiếng, cửa hàng, người dùng thường).
+    //
+    // Nguyên nhân bản cũ:
+    //   1. Chỉ nhận node `isClickable == true` có nhãn "follow". Trên TikTok mới, chữ "Follow"
+    //      nằm ở TextView con KHÔNG clickable (cha mới clickable) hoặc chỉ có contentDescription
+    //      → không bao giờ khớp.
+    //   2. Khớp `contains("follow")` + độ dài < 30 → dính nhãn thống kê "Đã follow" / "Follower"
+    //      và nút trạng thái "Đang follow" (không có trong danh sách "đã follow") → nhận nhầm.
+    //   3. `isFollowConfirmed` dùng `contains("following")` → UI tiếng Anh luôn có nhãn thống kê
+    //      "Following" nên luôn "xác nhận" dù chưa bấm được.
+    //   4. Chỉ đọc cây một lần, không chờ hồ sơ tải xong.
+    //
+    // Cách mới: chuẩn hoá nhãn → khớp CHÍNH XÁC → chỉ xét node nằm trong HÀNG NÚT (neo theo nút
+    // "Nhắn tin" / nhãn "Follower"), → tìm cha clickable để bấm. Có dự phòng theo hình học.
+
+    /** v1.9.0 — Trạng thái nút theo dõi trên trang hồ sơ. */
+    enum class FollowState { CAN_FOLLOW, FOLLOWING, REQUESTED, FRIENDS, NOT_FOUND }
 
     /**
-     * v1.2.1: Tìm nút Follow trên trang hồ sơ người dùng.
+     * v1.9.0 — Kết quả dò nút theo dõi.
      *
-     * Khác với doFollowWithRoot() trong AutomationEngine (tìm trên feed):
-     * Trang hồ sơ có nút Follow nổi bật hơn, thường có resource-id chuyên biệt.
-     * Trả null nếu không tìm thấy (đã follow / profile bị khoá / không có nút).
+     * @param button node ĐỂ BẤM (chính nút hoặc cha clickable gần nhất); null nếu NOT_FOUND
+     * @param label  nhãn đã chuẩn hoá (dùng để log)
+     * @param how    cách tìm thấy: "id" | "nhãn:<vùng>" | "hình học" (dùng để log / chẩn đoán)
      */
-    fun findFollowButtonOnProfile(root: AccessibilityNodeInfo?): NodeResult? {
-        root ?: return null
+    data class FollowProbe(
+        val state:  FollowState,
+        val button: NodeResult? = null,
+        val label:  String      = "",
+        val how:    String      = "",
+    ) {
+        /** Đã theo dõi / đã gửi yêu cầu / đã là bạn bè — không cần bấm nữa. */
+        val isDone: Boolean
+            get() = state == FollowState.FOLLOWING ||
+                state == FollowState.REQUESTED ||
+                state == FollowState.FRIENDS
 
-        // Resource-id ưu tiên cao nhất
-        val PROFILE_FOLLOW_IDS = listOf(
-            "btn_follow", "follow_btn", "follow_button",
-            "user_follow_btn", "profile_follow", "btn_user_follow",
-            "follow_action_btn",
-        )
-        PROFILE_FOLLOW_IDS.forEach { id ->
-            findByResourceId(root, id)?.let { return it }
+        companion object {
+            val NOT_FOUND = FollowProbe(FollowState.NOT_FOUND)
         }
-
-        // Tìm node clickable có text khớp từ khoá follow (chưa follow)
-        val FOLLOW_LABELS = listOf("follow", "theo dõi", "đăng ký")
-        val ALREADY_FOLLOWING_LABELS = listOf(
-            "following", "đang theo dõi", "đã theo dõi", "friends", "bạn bè",
-        )
-        return traverseAll(root).firstOrNull { node ->
-            if (!node.isClickable) return@firstOrNull false
-            val label = (node.text?.toString() ?: node.contentDescription?.toString())
-                ?.lowercase() ?: return@firstOrNull false
-            // Khớp follow nhưng KHÔNG phải "following"
-            val isFollow = FOLLOW_LABELS.any { label == it || (label.contains(it) && label.length < 30) }
-            val isAlready = ALREADY_FOLLOWING_LABELS.any { label.contains(it) }
-            isFollow && !isAlready
-        }?.toResult()
     }
 
-    /**
-     * v1.2.1: Kiểm tra trang hồ sơ có bị khoá / hạn chế không.
-     *
-     * Phát hiện:
-     *   - Tài khoản bị khoá / đình chỉ
-     *   - Trang chế độ riêng tư (private account — không follow được)
-     *   - Trang không tồn tại / không khả dụng
-     */
-    fun detectBlockedProfile(root: AccessibilityNodeInfo?): Boolean {
-        root ?: return false
-        val allText = traverseAll(root)
-            .mapNotNull { (it.text?.toString() ?: it.contentDescription?.toString())?.lowercase() }
+    /** v1.9.0 — Quét một lần: hồ sơ có bị khoá không + trạng thái nút theo dõi. */
+    data class ProfileScan(val blocked: Boolean, val probe: FollowProbe)
 
+    private val FOLLOW_ID_PARTS = listOf(
+        "btn_follow", "follow_btn", "follow_button",
+        "user_follow_btn", "profile_follow", "btn_user_follow",
+        "follow_action_btn",
+    )
+    // "Follow", "Theo dõi", "Follow lại", "Follow back", "Follow @user" (không khớp "Following"/"Follower").
+    private val FOLLOW_LABEL_RE = Regex("^(follow|theo dõi)( lại| back)?( @[\\w.]+)?$")
+    // Nhãn nút đã theo dõi. "đã follow"/"following" cũng là nhãn THỐNG KÊ → chỉ tin khi nằm trong hàng nút.
+    private val FOLLOWING_LABELS = setOf(
+        "following", "followed", "đang follow", "đang theo dõi", "đã follow", "đã theo dõi",
+    )
+    private val REQUESTED_LABELS = setOf("requested", "đã yêu cầu", "đã gửi yêu cầu", "đang chờ duyệt")
+    private val FRIENDS_LABELS   = setOf("friends", "bạn bè")
+    private val MESSAGE_LABELS   = setOf("message", "nhắn tin", "gửi tin nhắn", "tin nhắn")
+    private val OWN_PROFILE_LABELS = setOf(
+        "edit profile", "sửa hồ sơ", "chỉnh sửa hồ sơ", "share profile", "chia sẻ hồ sơ",
+    )
+    private val FOLLOWERS_RE = Regex("(^|\\s)(followers?|người theo dõi|người follow)$")
+
+    /** Chuẩn hoá nhãn: NFC, chữ thường, bỏ ký tự vô hình / NBSP, gộp khoảng trắng. */
+    internal fun normalizeLabel(raw: CharSequence?): String {
+        if (raw.isNullOrBlank()) return ""
+        return java.text.Normalizer.normalize(raw.toString(), java.text.Normalizer.Form.NFC)
+            .lowercase()
+            .replace('\u00A0', ' ')
+            .replace(Regex("[\\u200B-\\u200F\\u2060\\uFEFF]"), "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
+    private val Rect.w: Int get() = right - left
+    private val Rect.h: Int get() = bottom - top
+
+    private class Cand(
+        val node:      AccessibilityNodeInfo,
+        val b:         Rect,
+        val text:      String,
+        val desc:      String,
+        val clickable: Boolean,
+        val visible:   Boolean,
+    ) {
+        val hasSize: Boolean get() = b.right > b.left && b.bottom > b.top
+    }
+
+    private val NUMERIC_RE = Regex("^[\\d.,]+\\s?[kmb]?$")
+
+    /** Nhãn thống kê ("Đã follow", "Following"...) luôn có node anh em là con số ("35", "1.748", "2,5M"). */
+    private fun looksLikeStatLabel(c: Cand): Boolean {
+        val p = c.node.parent ?: return false
+        for (i in 0 until p.childCount) {
+            val sib = p.getChild(i) ?: continue
+            if (NUMERIC_RE.matches(normalizeLabel(sib.text))) return true
+        }
+        return false
+    }
+
+    private class Region(val name: String, val top: Int, val bottom: Int, val strict: Boolean)
+
+    private class Hit(val c: Cand, val state: FollowState, val label: String)
+
+    /** Trả (trạng thái, mơ hồ?) nếu nhãn là nhãn nút theo dõi; null nếu không phải. */
+    private fun classifyFollowLabel(label: String, clickable: Boolean): Pair<FollowState, Boolean>? {
+        if (label.isEmpty() || label.length > 40) return null
+        if (FOLLOW_LABEL_RE.matches(label)) return FollowState.CAN_FOLLOW to false
+        // contentDescription dạng "Follow <tên>" — chỉ nhận khi bấm được, loại nhãn thống kê.
+        if (clickable && (label.startsWith("follow ") || label.startsWith("theo dõi ")) &&
+            !label.contains("follower") && !label.contains("following")) {
+            return FollowState.CAN_FOLLOW to false
+        }
+        if (label in FOLLOWING_LABELS) return FollowState.FOLLOWING to true
+        if (label in REQUESTED_LABELS) return FollowState.REQUESTED to false
+        if (label in FRIENDS_LABELS)   return FollowState.FRIENDS to false
+        return null
+    }
+
+    /** Node bấm được: chính nó, hoặc cha clickable gần nhất không quá to; nếu không → chính nó (chạm theo toạ độ). */
+    private fun clickTargetOf(node: AccessibilityNodeInfo, b: Rect, screenW: Int, screenH: Int): NodeResult {
+        if (node.isClickable) return node.toResult()
+        var p: AccessibilityNodeInfo? = node.parent
+        var depth = 0
+        while (p != null && depth < 4) {
+            if (p.isClickable) {
+                val pb = Rect(); p.getBoundsInScreen(pb)
+                val okW = pb.w in 1..(screenW * 3 / 4)
+                val okH = pb.h in 1..maxOf(b.h * 3, screenH * 12 / 100)
+                if (okW && okH) return p.toResult()
+                break
+            }
+            p = p.parent
+            depth++
+        }
+        return node.toResult()
+    }
+
+    private fun probeNodes(nodes: List<AccessibilityNodeInfo>): FollowProbe {
+        if (nodes.isEmpty()) return FollowProbe.NOT_FOUND
+
+        var maxBottom = 0; var maxRight = 0
+        val cands = ArrayList<Cand>(nodes.size)
+        val blankClickables = ArrayList<Cand>()   // nút bấm được nhưng không lộ nhãn nào (dùng cho chiến lược hình học)
+        for (n in nodes) {
+            val b = Rect(); n.getBoundsInScreen(b)
+            if (b.bottom > maxBottom) maxBottom = b.bottom
+            if (b.right  > maxRight)  maxRight  = b.right
+            val t = normalizeLabel(n.text)
+            val d = normalizeLabel(n.contentDescription)
+            if (t.isEmpty() && d.isEmpty() && n.viewIdResourceName == null) {
+                if (n.isClickable) blankClickables += Cand(n, b, t, d, true, n.isVisibleToUser)
+                continue
+            }
+            cands += Cand(n, b, t, d, n.isClickable, n.isVisibleToUser)
+        }
+        val rootB = Rect(); nodes[0].getBoundsInScreen(rootB)
+        val screenH = if (rootB.h > 0) rootB.h else maxBottom.coerceAtLeast(1)
+        val screenW = if (rootB.w > 0) rootB.w else maxRight.coerceAtLeast(1)
+
+        // Ưu tiên node đang hiển thị; nếu không có node nào hiển thị (cờ isVisibleToUser không tin cậy) thì dùng tất cả.
+        val pool = cands.filter { it.visible }.ifEmpty { cands }.filter { it.hasSize }
+        fun labelsOf(c: Cand) = listOf(c.text, c.desc)
+
+        // Hồ sơ của chính mình → không có nút theo dõi.
+        if (pool.any { c -> c.b.top < screenH / 2 && labelsOf(c).any { it in OWN_PROFILE_LABELS } }) {
+            return FollowProbe.NOT_FOUND
+        }
+
+        // ── Neo bố cục ──
+        val anchorFollowers = pool
+            .filter { c -> c.b.top < screenH * 55 / 100 && labelsOf(c).any { it.isNotEmpty() && FOLLOWERS_RE.containsMatchIn(it) } }
+            .minByOrNull { it.b.top }
+        val anchorMessage = pool
+            .filter { c -> c.b.top < screenH * 60 / 100 && labelsOf(c).any { it in MESSAGE_LABELS } }
+            .minByOrNull { it.b.top }
+
+        // ── Chiến lược 1: resource-id đặc thù (khớp đuôi id, nửa trên màn hình) ──
+        pool.filter { c ->
+            val tail = c.node.viewIdResourceName?.lowercase()?.substringAfter(":id/") ?: return@filter false
+            c.b.top < screenH / 2 && FOLLOW_ID_PARTS.any { tail.endsWith(it) }
+        }.minWithOrNull(compareBy({ it.b.top }, { it.b.left }))?.let { c ->
+            val lab = c.text.ifEmpty { c.desc }
+            val cl  = classifyFollowLabel(lab, c.clickable)
+            val state = when {
+                cl != null     -> cl.first
+                lab.isEmpty()  -> FollowState.CAN_FOLLOW
+                else           -> null
+            }
+            if (state != null) {
+                return FollowProbe(state, clickTargetOf(c.node, c.b, screenW, screenH), lab, "id")
+            }
+        }
+
+        // ── Chiến lược 2: khớp nhãn theo vùng (hàng nút → dưới thống kê → nửa trên) ──
+        val regions = ArrayList<Region>(3)
+        anchorMessage?.let { m ->
+            val h = m.b.h.coerceAtLeast(1)
+            // Nới lên ~nửa chiều cao nút (nút Nhắn tin có thể là container lớn hoặc chữ nhỏ bên trong);
+            // nhãn thống kê phía trên đã bị loại riêng bằng looksLikeStatLabel().
+            regions += Region("hàng-nút", m.b.top - h / 2 - 20, m.b.bottom + h / 2, true)
+        }
+        anchorFollowers?.let { f ->
+            regions += Region("dưới-thống-kê", f.b.bottom - 2, f.b.bottom + screenH * 22 / 100, true)
+        }
+        regions += Region("nửa-trên", screenH * 6 / 100, screenH * 45 / 100, false)
+
+        for (r in regions) {
+            val hits = ArrayList<Hit>()
+            for (c in pool) {
+                if (c.b.top < r.top || c.b.top > r.bottom) continue
+                for (lab in labelsOf(c)) {
+                    val (st, ambiguous) = classifyFollowLabel(lab, c.clickable) ?: continue
+                    if (ambiguous && !r.strict) continue   // "Đã follow"/"Following" ngoài hàng nút có thể là nhãn thống kê
+                    if (ambiguous && looksLikeStatLabel(c)) continue   // nhãn thống kê luôn đi kèm số ("35" + "Đã follow")
+                    hits += Hit(c, st, lab); break
+                }
+            }
+            val best = hits.minWithOrNull(compareBy({ it.c.b.top }, { it.c.b.left })) ?: continue
+            return FollowProbe(
+                best.state,
+                clickTargetOf(best.c.node, best.c.b, screenW, screenH),
+                best.label,
+                "nhãn:${r.name}",
+            )
+        }
+
+        // ── Chiến lược 3: hình học — nút bên TRÁI "Nhắn tin" trong cùng hàng, hoàn toàn không có nhãn ──
+        anchorMessage?.let { m ->
+            val h = m.b.h.coerceAtLeast(1)
+            val rowTop = m.b.top - h / 2
+            val rowBottom = m.b.bottom + h / 2
+            val blankPool = blankClickables.filter { it.visible }.ifEmpty { blankClickables }.filter { it.hasSize }
+            val left = blankPool
+                .filter { c ->
+                    c.b.top in rowTop..rowBottom && c.b.right <= m.b.left + 8 &&
+                        c.b.w >= screenW * 15 / 100
+                }
+                .minByOrNull { it.b.left }
+            if (left != null) {
+                val anyLabel = traverseAll(left.node).any { n ->
+                    normalizeLabel(n.text).isNotEmpty() || normalizeLabel(n.contentDescription).isNotEmpty()
+                }
+                if (!anyLabel) {
+                    return FollowProbe(FollowState.CAN_FOLLOW, left.node.toResult(), "", "hình học")
+                }
+            }
+        }
+
+        return FollowProbe.NOT_FOUND
+    }
+
+    private fun detectBlocked(nodes: List<AccessibilityNodeInfo>): Boolean {
+        val allText = nodes.mapNotNull {
+            (it.text?.toString() ?: it.contentDescription?.toString())?.lowercase()
+        }
         val BLOCKED_KEYWORDS = listOf(
             // Khoá / đình chỉ
             "account suspended", "tài khoản bị khóa", "tài khoản bị đình chỉ",
@@ -1411,26 +1671,227 @@ object NodeTraverser {
         return BLOCKED_KEYWORDS.any { kw -> allText.any { it.contains(kw) } }
     }
 
+    /** v1.9.0: quét hồ sơ MỘT lần (một lần duyệt cây) — khoá/riêng tư + trạng thái nút theo dõi. */
+    fun scanProfile(root: AccessibilityNodeInfo?): ProfileScan {
+        root ?: return ProfileScan(false, FollowProbe.NOT_FOUND)
+        val nodes = traverseAll(root)
+        return ProfileScan(detectBlocked(nodes), probeNodes(nodes))
+    }
+
+    /** v1.9.0: dò nút theo dõi (xem [FollowProbe]). */
+    fun probeFollow(root: AccessibilityNodeInfo?): FollowProbe {
+        root ?: return FollowProbe.NOT_FOUND
+        return probeNodes(traverseAll(root))
+    }
+
     /**
-     * v1.2.1: Kiểm tra nút Follow đã thành công chưa sau khi click.
-     *
-     * Trả true nếu nút đã chuyển sang "Following" / "Đang theo dõi".
-     * Dùng để xác nhận follow thành công trước khi báo cáo nhiệm vụ lên nhà cung cấp.
+     * v1.2.1 → v1.9.0: nút Follow CHƯA bấm trên hồ sơ (null nếu đã theo dõi / không thấy).
+     * Giữ chữ ký cũ cho nơi gọi cũ; luồng mới dùng [probeFollow] / [scanProfile].
      */
-    fun isFollowConfirmed(root: AccessibilityNodeInfo?): Boolean {
+    fun findFollowButtonOnProfile(root: AccessibilityNodeInfo?): NodeResult? =
+        probeFollow(root).takeIf { it.state == FollowState.CAN_FOLLOW }?.button
+
+    /**
+     * v1.2.1: Kiểm tra trang hồ sơ có bị khoá / hạn chế không.
+     *
+     * Phát hiện:
+     *   - Tài khoản bị khoá / đình chỉ
+     *   - Trang chế độ riêng tư (private account — không follow được)
+     *   - Trang không tồn tại / không khả dụng
+     */
+    fun detectBlockedProfile(root: AccessibilityNodeInfo?): Boolean {
         root ?: return false
-        val CONFIRMED_LABELS = listOf(
-            "following", "đang theo dõi", "đã theo dõi", "friends", "bạn bè",
-        )
-        return traverseAll(root).any { node ->
-            val label = (node.text?.toString() ?: node.contentDescription?.toString())
-                ?.lowercase() ?: return@any false
-            CONFIRMED_LABELS.any { label.contains(it) }
+        return detectBlocked(traverseAll(root))
+    }
+
+    /**
+     * v1.2.1 → v1.9.0: nút đã chuyển sang "Đang follow" / "Bạn bè" / "Đã yêu cầu" chưa.
+     * Chỉ tính nhãn nằm TRONG HÀNG NÚT (không tính nhãn thống kê "Following").
+     */
+    fun isFollowConfirmed(root: AccessibilityNodeInfo?): Boolean =
+        probeFollow(root).isDone
+
+    /**
+     * v1.9.0 — Chẩn đoán: liệt kê nhãn + toạ độ các node nửa trên màn hình ("nhãn@trái,trên", dấu * = clickable).
+     * Dùng khi không tìm thấy nút Follow để gửi log lại phân tích — KHÔNG ảnh hưởng luồng chạy.
+     */
+    fun dumpProfileNodes(root: AccessibilityNodeInfo?, limit: Int = 30): List<String> {
+        root ?: return emptyList()
+        val nodes = traverseAll(root)
+        val rootB = Rect(); root.getBoundsInScreen(rootB)
+        val out = ArrayList<String>()
+        out += "nodes=${nodes.size}"
+        for (n in nodes) {
+            if (out.size > limit) break
+            val t = normalizeLabel(n.text).ifEmpty { normalizeLabel(n.contentDescription) }
+            if (t.isEmpty()) continue
+            val b = Rect(); n.getBoundsInScreen(b)
+            if (rootB.h > 0 && b.top > rootB.h * 60 / 100) continue
+            out += "${t.take(22)}@${b.left},${b.top}${if (n.isClickable) "*" else ""}"
+        }
+        return out
+    }
+
+    // ── Hàng "Chuyển đổi tài khoản" trong Cài đặt TikTok [v1.11.0] ──────────────
+
+    private val SWITCH_LABELS = listOf(
+        "chuyển đổi tài khoản", "chuyển tài khoản", "switch account", "switch accounts", "manage accounts",
+    )
+
+    /**
+     * Hàng "Chuyển đổi tài khoản" tìm được: [label] là node chữ, [tapNode] là node nên BẤM (hàng bấm được
+     * chứa chữ đó; null = hàng không bấm được → bấm theo toạ độ [label]).
+     */
+    data class SwitchRow(
+        val label:   NodeResult,
+        val tapNode: AccessibilityNodeInfo?,
+    ) {
+        val bounds: Rect get() = label.bounds
+    }
+
+    /**
+     * Tìm hàng "Chuyển đổi tài khoản" một cách THẬN TRỌNG (thay cho `findByText(…, "chuyển đổi tài khoản")`):
+     *  • chỉ nhận node có chữ gần như đúng nhãn (không nhận khung/nhóm có mô tả dài chứa nhãn — bấm vào tâm
+     *    khung đó có thể rơi trúng hàng "Đăng xuất" bên dưới);
+     *  • loại node cao quá [maxHeightFraction] chiều cao màn hình;
+     *  • bấm node cha khi cha là hàng bấm được, KHÔNG chứa nhãn Đăng xuất và không quá cao.
+     */
+    fun findSwitchAccountRow(
+        root: AccessibilityNodeInfo?,
+        screenHeight: Int,
+        maxHeightFraction: Float = 0.2f,
+    ): SwitchRow? {
+        root ?: return null
+        val maxH = (screenHeight * maxHeightFraction).toInt().coerceAtLeast(1)
+        val nodes = traverseAll(root)
+
+        val best = nodes.asSequence()
+            .mapNotNull { n ->
+                val raw = n.text?.toString() ?: n.contentDescription?.toString() ?: return@mapNotNull null
+                val t = raw.trim().lowercase()
+                if (isLogoutLabel(t)) return@mapNotNull null
+                val hit = SWITCH_LABELS.any { lbl -> t == lbl || (t.contains(lbl) && t.length <= lbl.length + 16) }
+                if (!hit) return@mapNotNull null
+                val r = Rect(); n.getBoundsInScreen(r)
+                if (r.isEmpty || r.height() > maxH) return@mapNotNull null
+                n to r
+            }
+            .minByOrNull { (_, r) -> r.width().toLong() * r.height() }
+            ?: return null
+
+        val (node, rect) = best
+        val label = node.toResult()
+
+        var tap: AccessibilityNodeInfo? = if (node.isClickable) node else null
+        if (tap == null) {
+            var p = node.parent
+            var depth = 0
+            while (p != null && depth < 4) {
+                val pr = Rect(); p.getBoundsInScreen(pr)
+                if (pr.height() > maxH) break
+                if (p.isClickable && pr.contains(rect.centerX(), rect.centerY()) && !subtreeHasLogout(p)) { tap = p; break }
+                p = p.parent; depth++
+            }
+        }
+        return SwitchRow(label, tap)
+    }
+
+    /** Cây con (tối đa 40 node) của [n] có chứa nhãn Đăng xuất không. */
+    private fun subtreeHasLogout(n: AccessibilityNodeInfo): Boolean {
+        val q = ArrayDeque<AccessibilityNodeInfo>(); q.add(n)
+        var seen = 0
+        while (q.isNotEmpty() && seen < 40) {
+            val x = q.removeFirst(); seen++
+            if (isLogoutLabel(x.text?.toString()) || isLogoutLabel(x.contentDescription?.toString())) return true
+            for (i in 0 until x.childCount) x.getChild(i)?.let { q.add(it) }
+        }
+        return false
+    }
+
+    /** Các node chữ "Đăng xuất" (nhãn ngắn — không tính khung/nhóm có mô tả dài). */
+    private fun logoutNodes(root: AccessibilityNodeInfo): List<AccessibilityNodeInfo> =
+        traverseAll(root).filter { n ->
+            val t = n.text?.toString() ?: n.contentDescription?.toString()
+            t != null && t.length <= 24 && isLogoutLabel(t)
+        }
+
+    /** Điểm (x, y) có nằm trong khung của một nhãn Đăng xuất không — dùng để chặn cú chạm nhầm trước khi bấm. */
+    fun pointHitsLogout(root: AccessibilityNodeInfo?, x: Int, y: Int): Boolean {
+        root ?: return false
+        return logoutNodes(root).any { n ->
+            val r = Rect(); n.getBoundsInScreen(r); r.contains(x, y)
         }
     }
 
+    /** Đang hiện hộp xác nhận đăng xuất ("Bạn có muốn đăng xuất?" + Hủy). */
+    fun detectLogoutPrompt(root: AccessibilityNodeInfo?): Boolean {
+        root ?: return false
+        val nodes = traverseAll(root)
+        val texts = nodes.mapNotNull { (it.text?.toString() ?: it.contentDescription?.toString())?.trim()?.lowercase() }
+        val hasLogout = texts.any { isLogoutLabel(it) }
+        if (!hasLogout) return false
+        val hasCancel = texts.any { it == "hủy" || it == "huỷ" || it == "cancel" }
+        val hasQuestion = texts.any {
+            it.contains("bạn có chắc") || it.contains("muốn đăng xuất") || it.contains("are you sure") || it.contains("log out of")
+        }
+        return hasCancel || hasQuestion
+    }
+
+    /** Nút "Hủy" của hộp xác nhận (khớp nguyên chữ). */
+    fun findLogoutCancel(root: AccessibilityNodeInfo?): NodeResult? {
+        root ?: return null
+        return traverseAll(root).firstOrNull { n ->
+            val t = (n.text?.toString() ?: n.contentDescription?.toString())?.trim()?.lowercase()
+            t == "hủy" || t == "huỷ" || t == "cancel"
+        }?.toResult()
+    }
+
+    // ── Đọc dữ liệu video đang hiện [v1.11.0] ────────────────────────────────
+
+    /**
+     * Số tim, tác giả, chú thích, hashtag của video đang hiện trên feed (xem [VideoScanner]).
+     * Gom text + khung toạ độ của mọi node rồi để bộ quét thuần Kotlin quyết định theo vị trí trên màn hình.
+     */
+    fun readVideoInfo(root: AccessibilityNodeInfo?, screenWidth: Int, screenHeight: Int): VideoInfo {
+        root ?: return VideoInfo()
+        val boxes = ArrayList<TextBox>(64)
+        val likeDescs = ArrayList<String>(2)
+        val r = Rect()
+        for (n in traverseAll(root)) {
+            val text = n.text?.toString()?.trim()
+            val desc = n.contentDescription?.toString()?.trim()
+            if (text.isNullOrEmpty() && desc.isNullOrEmpty()) continue
+            n.getBoundsInScreen(r)
+            if (!text.isNullOrEmpty()) boxes.add(TextBox(text, r.left, r.top, r.right, r.bottom))
+            if (!desc.isNullOrEmpty() && desc.length <= 80) {
+                val low = desc.lowercase()
+                // nút tim: có "thích"/"like" kèm số, nằm ở cột phải
+                if ((low.contains("thích") || low.contains("like")) && desc.any { it.isDigit() } && r.left > screenWidth * 0.6f)
+                    likeDescs.add(desc)
+            }
+        }
+        return VideoScanner.scan(boxes, screenWidth, screenHeight, likeDescs)
+    }
+
+    /** v1.10.0 — bản chụp duyệt cây gần nhất (xem [traverseAll]). */
+    private class TreeSnap(val root: AccessibilityNodeInfo, val atNanos: Long, val nodes: List<AccessibilityNodeInfo>)
+    @Volatile private var snap: TreeSnap? = null
+    private const val SNAP_TTL_NANOS = 250_000_000L   // 250ms
+
+    /**
+     * Duyệt BFS toàn cây. v1.10.0: nhớ kết quả cho CÙNG một node gốc trong 250ms.
+     *
+     * Trước đây mỗi `findByResourceId()`/`hasNavBar()`/`isOnFeedTab()` tự duyệt lại toàn cây — một lần gọi
+     * `isOnFeedTab()` duyệt hơn 20 lần (mỗi resource-id một lần), và từ v1.9.0 cây còn lớn hơn
+     * (`flagIncludeNotImportantViews`) → tốn CPU/pin. Gốc mới (mỗi lần `getRootNode()`) luôn duyệt mới,
+     * nên không bao giờ dùng lại dữ liệu của màn hình cũ.
+     */
     fun traverseAll(root: AccessibilityNodeInfo): List<AccessibilityNodeInfo> {
-        val result = mutableListOf<AccessibilityNodeInfo>()
+        val now = System.nanoTime()
+        val c = snap
+        if (c != null && c.root === root && now - c.atNanos < SNAP_TTL_NANOS) return c.nodes
+
+        val result = ArrayList<AccessibilityNodeInfo>(128)
         val queue  = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
         while (queue.isNotEmpty()) {
@@ -1440,6 +1901,7 @@ object NodeTraverser {
                 node.getChild(i)?.let { queue.add(it) }
             }
         }
+        snap = TreeSnap(root, now, result)
         return result
     }
 
@@ -1465,11 +1927,14 @@ object NodeTraverser {
             .joinToString(" ")
 
     private fun findCloseButton(root: AccessibilityNodeInfo): NodeResult? {
-        val CLOSE_TEXTS = listOf("x", "close", "đóng", "not now", "để sau", "cancel", "hủy", "skip", "bỏ qua")
+        val CLOSE_TEXTS = listOf("close", "đóng", "not now", "để sau", "cancel", "hủy", "skip", "bỏ qua")
         return traverseAll(root).firstOrNull { node ->
             val t = (node.text?.toString() ?: node.contentDescription?.toString())?.lowercase()
                 ?: return@firstOrNull false
-            CLOSE_TEXTS.any { t == it || t.contains(it) }
+            // v1.11.0: "x" (nút ✕) chỉ khớp NGUYÊN chữ — trước đây `contains("x")` trúng "Đăng xuất"/"Xem thêm"…;
+            // nhãn Đăng xuất bị loại hẳn.
+            if (isLogoutLabel(t)) return@firstOrNull false
+            t == "x" || t == "✕" || CLOSE_TEXTS.any { t == it || t.contains(it) }
         }?.toResult()
     }
 

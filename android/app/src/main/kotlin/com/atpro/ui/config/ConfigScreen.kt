@@ -1,7 +1,23 @@
 package com.atpro.ui.config
 
 import androidx.compose.animation.*
+import com.atpro.ui.theme.AtButton
+import com.atpro.ui.theme.AtButtonStyle
+import com.atpro.accessibility.CountParser
+import com.atpro.tasks.TaskAccountMode
+import com.atpro.tasks.TaskAccountSelector
 import com.atpro.ui.theme.AtColors
+import com.atpro.ui.theme.AtRangeSliderField
+import com.atpro.ui.theme.AtSliderField
+import com.atpro.ui.theme.pressClickable
+import com.atpro.ui.theme.staggerIn
+import kotlin.math.roundToInt
+import com.atpro.ui.theme.AtTopBar
+import com.atpro.ui.theme.AtDialog
+import com.atpro.ui.theme.AtSegmented
+import com.atpro.ui.theme.AtThemeMode
+import com.atpro.ui.theme.AtThemeState
+import com.atpro.ui.theme.AtCard
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.BorderStroke
@@ -12,6 +28,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Notes
+import androidx.compose.material.icons.automirrored.rounded.ListAlt
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -31,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -45,51 +64,51 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import com.atpro.R
 import com.atpro.data.AccessibilitySettingsHelper
+import com.atpro.ui.tasks.F4fAccountCard
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 
 // ── Palette ────────────────────────────────────────────────────────────────
-private val BgDark     = AtColors.Bg
-private val BgDeeper   = AtColors.Bg
-private val BgCard     = AtColors.Surface
-private val BgCardAlt  = AtColors.SurfaceHigh
-private val BorderDark = AtColors.Hairline
-private val BorderHi   = AtColors.HairlineHi
-private val Purple     = AtColors.Accent
-private val PurpleHi   = AtColors.AccentHi
-private val Pink       = AtColors.Rose
-private val Green      = AtColors.Success
-private val Amber      = AtColors.Warning
-private val Cyan       = AtColors.Info
-private val Red        = AtColors.Danger
-private val TextPrim   = AtColors.TextPrim
-private val TextSec    = AtColors.TextSec
-private val TextMuted  = AtColors.TextMuted
-
-// ── Section definitions ────────────────────────────────────────────────────
+private val BgDark get() = AtColors.Bg
+private val BgDeeper get() = AtColors.Bg
+private val BgCard get() = AtColors.Surface
+private val BgCardAlt get() = AtColors.SurfaceHigh
+private val BorderDark get() = AtColors.Hairline
+private val BorderHi get() = AtColors.HairlineHi
+private val Purple get() = AtColors.Accent
+private val PurpleHi get() = AtColors.AccentHi
+private val Pink get() = AtColors.Rose
+private val Green get() = AtColors.Success
+private val Amber get() = AtColors.Warning
+private val Cyan get() = AtColors.Info
+private val Red get() = AtColors.Danger
+private val TextPrim get() = AtColors.TextPrim
+private val TextSec get() = AtColors.TextSec
+private val TextMuted get() = AtColors.TextMuted // ── Section definitions ────────────────────────────────────────────────────
 
 /** Một mục setting con trong tab ngang */
-private enum class Section(val label: String, val icon: ImageVector, val accent: Color) {
-    PERMISSIONS  ("Quyền",      Icons.Rounded.AdminPanelSettings,   Green),
-    NOTIFICATIONS("Thông báo",  Icons.Rounded.NotificationsNone,    Cyan),
-    LOGS         ("Nhật ký",    Icons.Rounded.EventNote,            Color(0xFF8B5CF6)),
-    TIMING       ("Thời gian",  Icons.Rounded.Timer,                Purple),
-    ACTIONS      ("Hành động",  Icons.Rounded.TouchApp,             Pink),
-    TASK_EARN    ("Nhiệm vụ",   Icons.Rounded.MonetizationOn,       Color(0xFF6C63FF)),
+private enum class Section(val label: String, val icon: ImageVector, private val accentOf: () -> Color) {
+    PERMISSIONS  ("Quyền",      Icons.Rounded.AdminPanelSettings,   { AtColors.Accent }),
+    NOTIFICATIONS("Thông báo",  Icons.Rounded.NotificationsNone,    { AtColors.Sky }),
+    TIMING       ("Thời gian",  Icons.Rounded.Timer,                { AtColors.Accent }),
+    ACTIONS      ("Hành động",  Icons.Rounded.TouchApp,             { AtColors.Sky }),
+    TASK_EARN    ("Nhiệm vụ",  Icons.Rounded.MonetizationOn,       { AtColors.Blue }),
+    // v1.11.0: cơ chế nuôi acc dùng trong lúc kiếm tiền — chỉnh riêng, không đụng cài đặt Nuôi TikTok.
+    // v1.12.0: chọn tài khoản TikTok nhận nhiệm vụ (trực tiếp từ danh sách acc đã liên kết Follow4Follow).
+    TASK_ACCOUNTS("Tài khoản", Icons.Rounded.ManageAccounts,       { AtColors.Blue }),
+    TASK_FARM    ("Nuôi acc",  Icons.Rounded.Spa,                  { AtColors.Sky }),
     // v1.2.9: Facebook lên chính thức — tách Timing/Actions giống TikTok,
     // không còn chung nhóm "Demo nuôi acc".
-    FACEBOOK_TIMING ("Thời gian", Icons.Rounded.Timer,     Color(0xFF1877F2)),
-    FACEBOOK_ACTIONS("Hành động", Icons.Rounded.TouchApp,  Color(0xFF1877F2)),
-    DEMO_X        ("X",         Icons.Rounded.Tag,       Color(0xFF000000)),
-    DEMO_INSTAGRAM("Instagram", Icons.Rounded.CameraAlt, Color(0xFFC13584)),
-    DEMO_THREADS  ("Threads",   Icons.Rounded.Forum,     Color(0xFF000000)),
-    DEMO_SNAPCHAT ("Snapchat",  Icons.Rounded.Mood,      Color(0xFFFFFC00)),
-}
+    FACEBOOK_TIMING ("Thời gian", Icons.Rounded.Timer,     { Color(0xFF1877F2) }),
+    FACEBOOK_ACTIONS("Hành động", Icons.Rounded.TouchApp,  { Color(0xFF1877F2) }),
+    DEMO_X        ("X",         Icons.Rounded.Tag,       { AtColors.TextPrim }),
+    DEMO_INSTAGRAM("Instagram", Icons.Rounded.CameraAlt, { Color(0xFFC13584) }),
+    DEMO_THREADS  ("Threads",   Icons.Rounded.Forum,     { AtColors.TextPrim }),
+    DEMO_SNAPCHAT ("Snapchat",  Icons.Rounded.Mood,      { Color(0xFFE6C700) });
 
-/** v1.2.6 — true nếu section thuộc nhóm "Demo nuôi acc" → render [PlatformBadge] thật thay vì icon Material chung.
- *  v1.2.9: Facebook không còn nằm trong nhóm demo (đã lên dịch vụ chính thức). */
-private val Section.isDemoplatform: Boolean
-    get() = this in setOf(Section.DEMO_X, Section.DEMO_INSTAGRAM, Section.DEMO_THREADS, Section.DEMO_SNAPCHAT)
+    /** v1.7.0: màu nhấn tính khi vẽ (đổi theo chế độ Sáng/Tối), không đóng băng lúc khởi tạo enum. */
+    val accent: Color get() = accentOf()
+}
 
 /**
  * Nhóm setting — mỗi nhóm có thể mở rộng / thu gọn trong sidebar.
@@ -100,38 +119,45 @@ private data class SettingsGroup(
     val id:       String,
     val label:    String,
     val icon:     ImageVector,
-    val accent:   Color,
+    private val accentOf: () -> Color,
     val sections: List<Section>,
-)
+) {
+    val accent: Color get() = accentOf()
+}
 
 private val SETTINGS_GROUPS: List<SettingsGroup> by lazy {
     buildList {
         add(SettingsGroup(
-            id = "system", label = "Hệ thống",
-            icon = Icons.Rounded.Settings, accent = Green,
-            sections = listOf(Section.PERMISSIONS, Section.NOTIFICATIONS, Section.LOGS),
+            id = "permissions", label = "Quyền & trợ năng",
+            icon = Icons.Rounded.AdminPanelSettings, accentOf = { AtColors.Accent },
+            sections = listOf(Section.PERMISSIONS),
+        ))
+        add(SettingsGroup(
+            id = "notifications", label = "Thông báo",
+            icon = Icons.Rounded.NotificationsNone, accentOf = { AtColors.Sky },
+            sections = listOf(Section.NOTIFICATIONS),
         ))
         add(SettingsGroup(
             id = "farm", label = "Nuôi TikTok",
-            icon = Icons.Rounded.AccountCircle, accent = Purple,
+            icon = Icons.Rounded.AccountCircle, accentOf = { AtColors.Sky },
             sections = listOf(Section.TIMING, Section.ACTIONS),
         ))
         // v1.2.9: Facebook lên dịch vụ chính thức — nhóm riêng giống TikTok
         add(SettingsGroup(
             id = "facebook", label = "Nuôi Facebook",
-            icon = Icons.Rounded.ThumbUp, accent = Color(0xFF1877F2),
+            icon = Icons.Rounded.ThumbUp, accentOf = { Color(0xFF1877F2) },
             sections = listOf(Section.FACEBOOK_TIMING, Section.FACEBOOK_ACTIONS),
         ))
         if (com.atpro.security.AppConstants.TASKS_ENABLED) {
             add(SettingsGroup(
                 id = "tasks", label = "Nhiệm vụ kiếm tiền",
-                icon = Icons.Rounded.MonetizationOn, accent = Color(0xFF6C63FF),
-                sections = listOf(Section.TASK_EARN),
+                icon = Icons.Rounded.MonetizationOn, accentOf = { AtColors.Blue },
+                sections = listOf(Section.TASK_EARN, Section.TASK_ACCOUNTS, Section.TASK_FARM),
             ))
         }
         add(SettingsGroup(
-            id = "demo", label = "Demo nuôi acc",
-            icon = Icons.Rounded.Apps, accent = Color(0xFF1877F2),
+            id = "demo", label = "Dịch vụ khác",
+            icon = Icons.Rounded.Apps, accentOf = { AtColors.TextSec },
             sections = listOf(
                 Section.DEMO_X, Section.DEMO_INSTAGRAM,
                 Section.DEMO_THREADS, Section.DEMO_SNAPCHAT,
@@ -146,10 +172,12 @@ private val SETTINGS_GROUPS: List<SettingsGroup> by lazy {
 
 @Composable
 fun ConfigScreen(
-    vm:     ConfigViewModel,
-    logsVm: com.atpro.ui.logs.LogsViewModel? = null,
+    vm:             ConfigViewModel,
+    /** v1.8.0: tên [Section] mở sẵn (từ tab Cài đặt) — có giá trị thì chỉ hiện các mục cùng nhóm, bỏ tầng tab nhóm. */
+    initialSection: String? = null,
 ) {
     val state   by vm.state.collectAsStateWithLifecycle()
+    val taskAccounts by vm.taskAccounts.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
 
@@ -197,7 +225,11 @@ fun ConfigScreen(
         }},
         topBar = {
             val activity = context as? Activity
-            SettingsTopBar(state.isDirty, state.isSaving, vm::save, onBack = { activity?.finish() })
+            SettingsTopBar(
+                title    = if (initialSection != null) (SETTINGS_GROUPS.firstOrNull { g -> g.sections.any { it.name == initialSection } }?.label ?: "Cài đặt") else "Cài đặt",
+                isDirty  = state.isDirty, isSaving = state.isSaving, onSave = vm::save,
+                onBack   = { activity?.finish() },
+            )
         },
     ) { padding ->
         SettingsLayout(
@@ -206,7 +238,9 @@ fun ConfigScreen(
             onOpenAccessibility = { AccessibilitySettingsHelper.openAccessibilitySettings(context) },
             onOpenOverlay       = { AccessibilitySettingsHelper.openOverlaySettings(context) },
             onOpenNotification  = { AccessibilitySettingsHelper.openAppSettings(context) },
-            logsVm              = logsVm,
+            taskAccounts        = taskAccounts,
+            onRefreshTaskAccounts = vm::refreshTaskAccounts,
+            initialSection      = initialSection,
             modifier            = Modifier.padding(padding),
         )
     }
@@ -216,72 +250,31 @@ fun ConfigScreen(
 //  Top bar
 // ─────────────────────────────────────────────────────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * v1.9.0: dùng [AtTopBar] như mọi màn hình khác (trước đây là TopAppBar Material + ô icon bánh răng riêng).
+ * Nút Lưu chỉ hiện khi có thay đổi; trạng thái "chưa lưu" là dòng phụ dưới tiêu đề.
+ */
 @Composable
-private fun SettingsTopBar(isDirty: Boolean, isSaving: Boolean, onSave: () -> Unit, onBack: () -> Unit) {
-    TopAppBar(
-        navigationIcon = {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Rounded.ArrowBackIosNew, contentDescription = "Quay lại", tint = TextPrim)
-            }
-        },
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(
-                    modifier = Modifier
-                        .size(28.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Purple.copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Rounded.Settings, null, tint = PurpleHi, modifier = Modifier.size(15.dp))
-                }
-                Column {
-                    Text("Cài đặt", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrim)
-                    AnimatedVisibility(
-                        visible = isDirty,
-                        enter   = fadeIn(tween(150)) + expandVertically(tween(180)),
-                        exit    = fadeOut(tween(100)) + shrinkVertically(tween(130)),
-                    ) {
-                        Text("Có thay đổi chưa lưu", color = Amber.copy(alpha = 0.85f), fontSize = 10.sp)
-                    }
-                }
-            }
-        },
-        colors  = TopAppBarDefaults.topAppBarColors(containerColor = BgDark),
-        actions = {
-            AnimatedContent(
-                targetState   = isDirty,
-                transitionSpec = {
-                    (fadeIn(tween(200)) + scaleIn(tween(200), 0.88f)) togetherWith
-                        (fadeOut(tween(150)) + scaleOut(tween(150)))
-                },
-                label = "save_btn",
-            ) { dirty ->
-                if (dirty) {
-                    Button(
-                        onClick  = onSave,
-                        enabled  = !isSaving,
-                        modifier = Modifier.height(34.dp).padding(end = 12.dp),
-                        shape    = RoundedCornerShape(10.dp),
-                        colors   = ButtonDefaults.buttonColors(containerColor = Purple),
-                        contentPadding = PaddingValues(horizontal = 16.dp),
-                    ) {
-                        if (isSaving) {
-                            CircularProgressIndicator(
-                                modifier    = Modifier.size(13.dp),
-                                strokeWidth = 2.dp,
-                                color       = Color.White,
-                            )
-                        } else {
-                            Icon(Icons.Rounded.Check, null, modifier = Modifier.size(13.dp))
-                            Spacer(Modifier.width(5.dp))
-                            Text("Lưu", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                } else {
-                    Spacer(Modifier.width(48.dp))
-                }
+private fun SettingsTopBar(title: String, isDirty: Boolean, isSaving: Boolean, onSave: () -> Unit, onBack: () -> Unit) {
+    AtTopBar(
+        title    = title,
+        subtitle = if (isDirty) "Có thay đổi chưa lưu" else null,
+        onBack   = onBack,
+        modifier = Modifier.statusBarsPadding(),
+        actions  = {
+            AnimatedVisibility(
+                visible = isDirty,
+                enter   = fadeIn(tween(150)),
+                exit    = fadeOut(tween(100)),
+            ) {
+                AtButton(
+                    text     = if (isSaving) "Đang lưu" else "Lưu",
+                    onClick  = onSave,
+                    enabled  = !isSaving,
+                    icon     = Icons.Rounded.Check,
+                    modifier = Modifier.padding(end = 10.dp).width(100.dp),
+                    height   = 38.dp,
+                )
             }
         },
     )
@@ -299,110 +292,31 @@ private fun SettingsLayout(
     onOpenAccessibility: () -> Unit,
     onOpenOverlay:       () -> Unit,
     onOpenNotification:  () -> Unit,
-    logsVm:              com.atpro.ui.logs.LogsViewModel? = null,
+    /** v1.12.0: danh sách tài khoản nhận nhiệm vụ + nút tải lại — do `ConfigScreen` (giữ ViewModel) truyền xuống. */
+    taskAccounts:        TaskAccountsUi,
+    onRefreshTaskAccounts: () -> Unit,
+    initialSection:      String? = null,
     modifier:            Modifier = Modifier,
 ) {
-    // Mặc định mở nhóm "Hệ thống" và chọn mục "Quyền"
-    var selectedGroupId by remember { mutableStateOf("system") }
-    var selected         by remember { mutableStateOf(Section.PERMISSIONS) }
-    val missingPerm       = !state.accessibilityGranted
-    val selectedGroup     = SETTINGS_GROUPS.first { it.id == selectedGroupId }
+    // Mở thẳng mục được chọn từ tab Cài đặt. v1.10.0: Quyền và Thông báo là hai màn hình RIÊNG (mỗi nhóm một mục).
+    val startSection = remember { Section.values().firstOrNull { it.name == initialSection } ?: Section.PERMISSIONS }
+    val group = remember { SETTINGS_GROUPS.firstOrNull { startSection in it.sections } ?: SETTINGS_GROUPS.first() }
+    var selected by remember { mutableStateOf(if (startSection in group.sections) startSection else group.sections.first()) }
 
     Column(modifier.fillMaxSize()) {
-
-        // ── Tab nhóm (Hệ thống / Nuôi TikTok / Kiếm tiền / Demo nuôi acc) ──
-        ScrollableTabRow(
-            selectedTabIndex     = SETTINGS_GROUPS.indexOfFirst { it.id == selectedGroupId },
-            containerColor       = BgCard,
-            contentColor         = TextPrim,
-            edgePadding          = 12.dp,
-            divider = { Box(Modifier.fillMaxWidth().height(0.5.dp).background(BorderDark)) },
-        ) {
-            SETTINGS_GROUPS.forEach { group ->
-                val active = group.id == selectedGroupId
-                Tab(
-                    selected = active,
-                    onClick  = {
-                        selectedGroupId = group.id
-                        selected = group.sections.first()
-                    },
-                    text = {
-                        Text(
-                            group.label, fontSize = 12.sp,
-                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                            maxLines = 1,
-                        )
-                    },
-                    icon = {
-                        Box {
-                            Icon(group.icon, null, tint = if (active) group.accent else TextMuted, modifier = Modifier.size(16.dp))
-                            if (group.id == "system" && missingPerm) {
-                                Box(
-                                    modifier = Modifier.size(6.dp).clip(CircleShape).background(Red)
-                                        .align(Alignment.TopEnd).offset(x = 2.dp, y = (-2).dp),
-                                )
-                            }
-                        }
-                    },
-                    selectedContentColor   = selectedGroup.accent,
-                    unselectedContentColor = TextMuted,
-                )
-            }
+        // Nhóm có nhiều mục (Nuôi TikTok, Nuôi Facebook, Dịch vụ khác) → bộ chọn phân đoạn; nhóm một mục → không có gì thừa.
+        if (group.sections.size > 1) {
+            AtSegmented(
+                options       = group.sections.map { it.label },
+                selectedIndex = group.sections.indexOf(selected).coerceAtLeast(0),
+                onSelect      = { selected = group.sections[it] },
+                modifier      = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            )
         }
 
-        // ── Sub-tab section trong nhóm (nếu nhóm có >1 mục) ───────────────
-        if (selectedGroup.sections.size > 1) {
-            LazyRow(
-                modifier              = Modifier.fillMaxWidth().background(BgDeeper),
-                contentPadding        = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(selectedGroup.sections) { sec ->
-                    val active = selected == sec
-                    FilterChip(
-                        selected = active,
-                        onClick  = { selected = sec },
-                        leadingIcon = {
-                            if (sec.isDemoplatform) {
-                                PlatformBadge(sec, size = 16.dp)
-                            } else {
-                                Box {
-                                    Icon(sec.icon, null, tint = if (active) sec.accent else TextSec, modifier = Modifier.size(15.dp))
-                                    if (sec == Section.PERMISSIONS && missingPerm) {
-                                        Box(
-                                            modifier = Modifier.size(5.dp).clip(CircleShape).background(Red)
-                                                .align(Alignment.TopEnd),
-                                        )
-                                    }
-                                }
-                            }
-                        },
-                        label  = { Text(sec.label, fontSize = 12.sp) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = sec.accent.copy(alpha = 0.15f),
-                            selectedLabelColor     = sec.accent,
-                            containerColor         = BgCard,
-                            labelColor             = TextSec,
-                        ),
-                        border = FilterChipDefaults.filterChipBorder(
-                            borderColor         = BorderDark,
-                            selectedBorderColor = sec.accent.copy(alpha = 0.5f),
-                            enabled = true, selected = active,
-                        ),
-                    )
-                }
-            }
-            Box(Modifier.fillMaxWidth().height(0.5.dp).background(BorderDark))
-        }
-
-        // ── Content area — full chiều ngang, nhiều khoảng trống tinh chỉnh ──
         AnimatedContent(
             targetState = selected,
-            transitionSpec = {
-                val down = targetState.ordinal > initialState.ordinal
-                (fadeIn(tween(200)) + slideInVertically(tween(240)) { if (down) it / 10 else -it / 10 }) togetherWith
-                    (fadeOut(tween(150)) + slideOutVertically(tween(200)) { if (down) -it / 10 else it / 10 })
-            },
+            transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(120)) },
             label    = "section_content",
             modifier = Modifier.weight(1f).fillMaxWidth(),
         ) { sec ->
@@ -412,13 +326,8 @@ private fun SettingsLayout(
                 Section.NOTIFICATIONS  -> NotificationsSection(state, onSet)
                 Section.PERMISSIONS    -> PermissionsSection(state, onOpenAccessibility, onOpenOverlay, onOpenNotification)
                 Section.TASK_EARN      -> TaskEarnSection(state, onSet)
-                Section.LOGS           -> if (logsVm != null) {
-                    com.atpro.ui.logs.LogsScreen(vm = logsVm, onNavigateUp = null)
-                } else {
-                    Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
-                        Text("Nhật ký không khả dụng", color = TextMuted)
-                    }
-                }
+                Section.TASK_ACCOUNTS  -> TaskAccountsSection(state, onSet, taskAccounts, onRefresh = onRefreshTaskAccounts)
+                Section.TASK_FARM      -> TaskFarmSection(state, onSet)
                 Section.FACEBOOK_TIMING  -> FacebookTimingSection(state, onSet)
                 Section.FACEBOOK_ACTIONS -> FacebookActionsSection(state, onSet)
                 Section.DEMO_X         -> XDemoSection(state, onSet)
@@ -440,72 +349,6 @@ private fun SettingsLayout(
  * Facebook / X / Instagram / Snapchat dùng drawable ic_logo_* giống ServicesScreen.
  * Threads giữ "@" text (không có ic_logo_threads trong drawable).
  */
-@Composable
-private fun PlatformBadge(section: Section, size: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) {
-    val shape = RoundedCornerShape(size * 0.28f)
-    when (section) {
-        Section.FACEBOOK_TIMING, Section.FACEBOOK_ACTIONS -> Box(
-            modifier = modifier.size(size).clip(shape).background(Color(0xFF1877F2)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Image(
-                painter            = painterResource(R.drawable.ic_logo_facebook),
-                contentDescription = "Facebook",
-                contentScale       = ContentScale.Fit,
-                modifier           = Modifier.fillMaxSize(),
-            )
-        }
-        Section.DEMO_X -> Box(
-            modifier = modifier.size(size).clip(shape).background(Color.Black),
-            contentAlignment = Alignment.Center,
-        ) {
-            Image(
-                painter            = painterResource(R.drawable.ic_logo_x),
-                contentDescription = "X",
-                contentScale       = ContentScale.Fit,
-                modifier           = Modifier.fillMaxSize(),
-            )
-        }
-        Section.DEMO_INSTAGRAM -> Box(
-            modifier = modifier.size(size).clip(shape).background(
-                Brush.linearGradient(listOf(Color(0xFFFEDA75), Color(0xFFD62976), Color(0xFF4F5BD5)))
-            ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Image(
-                painter            = painterResource(R.drawable.ic_logo_instagram),
-                contentDescription = "Instagram",
-                contentScale       = ContentScale.Fit,
-                modifier           = Modifier.fillMaxSize(),
-            )
-        }
-        Section.DEMO_THREADS -> Box(
-            // Threads: không có logo drawable → giữ "@" text như ServicesScreen
-            modifier = modifier.size(size).clip(shape).background(Color.Black),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text("@", color = Color.White, fontSize = (size.value * 0.60f).sp, fontWeight = FontWeight.Black)
-        }
-        Section.DEMO_SNAPCHAT -> Box(
-            modifier = modifier.size(size).clip(shape).background(Color(0xFFFFFC00)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Image(
-                painter            = painterResource(R.drawable.ic_logo_snapchat),
-                contentDescription = "Snapchat",
-                contentScale       = ContentScale.Fit,
-                modifier           = Modifier.fillMaxSize(),
-            )
-        }
-        else -> Box(
-            modifier = modifier.size(size).clip(shape).background(section.accent.copy(alpha = 0.15f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(section.icon, null, tint = section.accent, modifier = Modifier.size(size * 0.6f))
-        }
-    }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 //  Section: Timing
 // ─────────────────────────────────────────────────────────────────────────────
@@ -519,14 +362,10 @@ private fun TimingSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Conf
             .padding(horizontal = 14.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        SectionTitle("Thời gian farm", Icons.Rounded.Timer, Purple)
 
         // Farm duration card
         SettingCard {
-            CardLabelWithNote("Thời lượng mỗi tài khoản", Icons.Rounded.AccountCircle, Purple,
-                note = "Tổng thời gian (tính bằng phút) tool sẽ nuôi mỗi tài khoản TikTok trong một phiên. " +
-                       "Sau khi hết thời gian, tool tự động chuyển sang tài khoản tiếp theo trong danh sách. " +
-                       "Khuyến nghị: 10–30 phút mỗi tài khoản để tránh bị phát hiện.")
+            CardLabel("Thời lượng mỗi tài khoản", Icons.Rounded.AccountCircle, Purple)
             Spacer(Modifier.height(10.dp))
             CfgSlider(
                 label    = "Phút / tài khoản",
@@ -540,10 +379,7 @@ private fun TimingSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Conf
 
         // Watch time card
         SettingCard {
-            CardLabelWithNote("Thời lượng xem video", Icons.Rounded.Videocam, Cyan,
-                note = "Khoảng thời gian tool dừng lại để xem mỗi video trước khi vuốt sang video tiếp theo. " +
-                       "Giá trị Min–Max tạo thời gian ngẫu nhiên để hành vi trông tự nhiên hơn. " +
-                       "Ví dụ: Min 3s – Max 8s → mỗi video xem 3 đến 8 giây.")
+            CardLabel("Thời lượng xem video", Icons.Rounded.Videocam, Cyan)
             Spacer(Modifier.height(10.dp))
 
             val safeMin = state.watchMin.toFloat()
@@ -571,26 +407,15 @@ private fun TimingSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Conf
             )
 
             Spacer(Modifier.height(10.dp))
-            // Visual range preview
-            RangePreview(
-                min   = state.watchMin.toFloat(),
-                max   = state.watchMax.toFloat(),
-                total = 30f,
-                color = Cyan,
-            )
         }
 
         // Rest card
         SettingCard {
-            CardLabelWithNote("Nghỉ giữa tài khoản", Icons.Rounded.Coffee, Amber,
-                note = "Thời gian nghỉ (tính bằng giây) giữa mỗi lần chuyển tài khoản. " +
-                       "Tool sẽ đóng ứng dụng TikTok, chờ một khoảng thời gian ngẫu nhiên trong khoảng này " +
-                       "rồi mới mở tài khoản tiếp theo. Giúp tránh bị phát hiện là tự động hóa.")
+            CardLabel("Nghỉ giữa tài khoản", Icons.Rounded.Coffee, Amber)
             Spacer(Modifier.height(10.dp))
             CfgSwitch(
                 label    = "Bật thời gian nghỉ",
                 value    = state.enableRest,
-                accent   = Amber,
                 onChanged = { onSet { copy(enableRest = it) } },
             )
             AnimatedVisibility(
@@ -616,10 +441,7 @@ private fun TimingSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Conf
 
         // Recovery card
         SettingCard {
-            CardLabelWithNote("Khôi phục", Icons.Rounded.Refresh, Pink,
-                note = "Khi tool phát hiện TikTok đang không ở đúng trạng thái (vd: màn hình lạ, popup xuất hiện), " +
-                       "tool sẽ thực hiện các bước khôi phục: nhấn Back, về trang chủ, v.v. " +
-                       "Số lần tối đa trước khi bỏ qua tài khoản có thể cấu hình ở đây.")
+            CardLabel("Khôi phục", Icons.Rounded.Refresh, Pink)
             Spacer(Modifier.height(10.dp))
             CfgStepper(
                 label    = "Số lần nhấn Back tối đa",
@@ -627,23 +449,6 @@ private fun TimingSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Conf
                 range    = 1..20,
                 accent   = Pink,
                 onChanged = { onSet { copy(maxBackAttempts = it) } },
-            )
-        }
-
-        // v1.3.0: Thông báo Discord
-        SettingCard {
-            CardLabelWithNote("Thông báo Discord", Icons.Rounded.Notifications, Green,
-                note = "Dán Discord Webhook URL để nhận thông báo khi bắt đầu nuôi, hoàn thành/dừng " +
-                       "phiên, hoặc gặp lỗi nghiêm trọng. Tạo webhook tại: Server Settings → " +
-                       "Integrations → Webhooks → New Webhook → Copy Webhook URL. Để trống nếu " +
-                       "không muốn nhận thông báo.")
-            Spacer(Modifier.height(10.dp))
-            CfgTextField(
-                label     = "Webhook URL",
-                value     = state.discordWebhookUrl,
-                hint      = "https://discord.com/api/webhooks/...",
-                isLast    = true,
-                onChanged = { onSet { copy(discordWebhookUrl = it) } },
             )
         }
 
@@ -660,24 +465,16 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
             .padding(horizontal = 14.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        SectionTitle("Hành động tự động", Icons.Rounded.TouchApp, Pink)
 
         // Interaction rates card
         SettingCard {
-            CardLabelWithNote("Tỉ lệ tương tác", Icons.Rounded.Favorite, Pink,
-                note = "Xác suất (%) tool sẽ thực hiện hành động tương tác (tim, follow) trên mỗi video.")
+            CardLabel("Tỉ lệ tương tác", Icons.Rounded.Favorite, Pink)
             Spacer(Modifier.height(10.dp))
 
             // v1.3.0: Bỏ khoá — luôn chỉnh tay được, không còn Experiment Mode.
-            RateRow(
-                icon    = Icons.Rounded.Favorite,
-                label   = "Tỉ lệ thích",
-                value   = state.likeRate,
-                color   = Pink,
-            )
-            Spacer(Modifier.height(6.dp))
+
             CfgSlider(
-                label    = "",
+                label    = "Tỉ lệ thích",
                 display  = "${(state.likeRate * 100).toInt()}%",
                 value    = state.likeRate,
                 range    = 0f..1f, steps = 99,
@@ -685,21 +482,24 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
                 onChanged = { onSet { copy(likeRate = it) } },
             )
 
+            // v1.11.0: chỉ tim video có số tim >= ngưỡng (0 = tắt)
+            Spacer(Modifier.height(8.dp))
+            MinLikesSlider(
+                label    = "Chỉ tim video có từ",
+                value    = state.minLikesToLike,
+                hint     = "Video ít tim hơn mức này sẽ không được tim, kể cả khi khớp hashtag.",
+                onChange = { v -> onSet { copy(minLikesToLike = v) } },
+            )
+
             Spacer(Modifier.height(12.dp))
             ThinDivider()
             Spacer(Modifier.height(12.dp))
 
-            RateRow(
-                icon    = Icons.Rounded.PersonAdd,
-                label   = "Tỉ lệ theo dõi",
-                value   = state.followRate,
-                color   = Green,
-            )
-            Spacer(Modifier.height(6.dp))
+
             // v1.2.9: dùng range hẹp (0–5%) với step 0.1% — đủ độ chính xác để
             // đạt chuẩn 0.2% mà slider 0–100% (step 1%) trước đây không làm được.
             CfgSlider(
-                label    = "",
+                label    = "Tỉ lệ theo dõi",
                 display  = "${"%.1f".format(state.followRate * 100)}%",
                 value    = state.followRate,
                 range    = 0f..0.05f, steps = 49,
@@ -710,24 +510,12 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
 
         // ── v1.2.9: Comment ngẫu nhiên ────────────────────────────────────
         SettingCard {
-            CardLabelWithNote("Comment ngẫu nhiên", Icons.Rounded.ChatBubbleOutline, Cyan,
-                note = "Tool sẽ để lại bình luận ngẫu nhiên trên video theo tỉ lệ đã đặt. " +
-                       "Mỗi lần chọn ngẫu nhiên 1 câu từ danh sách bên dưới — tránh dùng câu " +
-                       "giống hệt nhau liên tục vì đây là tín hiệu bot rõ nhất, dễ bị TikTok " +
-                       "flag \"spam behavior\" dẫn tới shadow-ban.\n\n" +
-                       "Tool tự động bỏ qua video Live/Quảng cáo và giới hạn số comment/giờ " +
-                       "để hành vi trông tự nhiên.")
+            CardLabel("Comment ngẫu nhiên", Icons.Rounded.ChatBubbleOutline, Cyan)
             Spacer(Modifier.height(10.dp))
 
-            RateRow(
-                icon  = Icons.Rounded.ChatBubbleOutline,
-                label = "Tỉ lệ comment",
-                value = state.commentRate,
-                color = Cyan,
-            )
-            Spacer(Modifier.height(6.dp))
+
             CfgSlider(
-                label    = "",
+                label    = "Tỉ lệ comment",
                 display  = "${(state.commentRate * 100).toInt()}%",
                 value    = state.commentRate,
                 range    = 0f..1f, steps = 99,
@@ -764,22 +552,12 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
 
         // ── v1.2.9: Xem bình luận (thụ động — chỉ mở lên xem, không gõ gì) ──
         SettingCard {
-            CardLabelWithNote("Xem bình luận", Icons.Rounded.Visibility, Cyan,
-                note = "Tool sẽ thỉnh thoảng mở phần bình luận của video lên XEM (không gõ hay " +
-                       "gửi gì cả), cuộn xuống xem vài bình luận rồi đóng lại — mô phỏng hành vi " +
-                       "tò mò tự nhiên của người dùng thật. Khác với \"Comment ngẫu nhiên\" ở trên " +
-                       "(tính năng đó GÕ và GỬI bình luận thật).")
+            CardLabel("Xem bình luận", Icons.Rounded.Visibility, Cyan)
             Spacer(Modifier.height(10.dp))
 
-            RateRow(
-                icon  = Icons.Rounded.Visibility,
-                label = "Tỉ lệ xem bình luận",
-                value = state.commentViewRate,
-                color = Cyan,
-            )
-            Spacer(Modifier.height(6.dp))
+
             CfgSlider(
-                label    = "",
+                label    = "Tỉ lệ xem bình luận",
                 display  = "${(state.commentViewRate * 100).toInt()}%",
                 value    = state.commentViewRate,
                 range    = 0f..0.5f, steps = 49,
@@ -806,14 +584,12 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
 
         // Behavior card
         SettingCard {
-            CardLabelWithNote("Hành vi", Icons.Rounded.SmartToy, Purple,
-                note = "Bỏ qua Live/Quảng cáo — bật để tool tự động vuốt qua khi gặp.")
+            CardLabel("Hành vi", Icons.Rounded.SmartToy, Purple)
             Spacer(Modifier.height(10.dp))
             CfgSwitch(
                 label    = "Bỏ qua video trực tiếp",
-                subtitle = "Tự động vuốt qua khi gặp livestream",
+                subtitle = "Vuốt qua livestream",
                 value    = state.skipLive,
-                accent   = Purple,
                 onChanged = { onSet { copy(skipLive = it) } },
             )
             Spacer(Modifier.height(4.dp))
@@ -821,9 +597,8 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
             Spacer(Modifier.height(4.dp))
             CfgSwitch(
                 label    = "Bỏ qua quảng cáo",
-                subtitle = "Tự động vuốt qua khi gặp quảng cáo TikTok",
+                subtitle = "Vuốt qua quảng cáo",
                 value    = state.skipAds,
-                accent   = Amber,
                 onChanged = { onSet { copy(skipAds = it) } },
             )
             Spacer(Modifier.height(4.dp))
@@ -832,12 +607,8 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
             // [v1.1.8] Like quảng cáo — chỉ có tác dụng khi skipAds = false
             CfgSwitch(
                 label    = "Like quảng cáo",
-                subtitle = if (state.skipAds)
-                    "Tắt «Bỏ qua quảng cáo» để kích hoạt tuỳ chọn này"
-                else
-                    "Cho phép like quảng cáo TikTok khi dừng lại xem",
+                subtitle = if (state.skipAds) "Cần tắt «Bỏ qua quảng cáo»" else "Thích quảng cáo khi dừng xem",
                 value    = state.likeAds && !state.skipAds,
-                accent   = Amber,
                 onChanged = { onSet { copy(likeAds = it) } },
                 enabled  = !state.skipAds,
             )
@@ -846,9 +617,8 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
             Spacer(Modifier.height(4.dp))
             CfgSwitch(
                 label    = "Xác nhận sau khi chuyển",
-                subtitle = "Vào profile kiểm tra đúng tài khoản",
+                subtitle = "Kiểm tra đúng tài khoản",
                 value    = state.verifyAccount,
-                accent   = Purple,
                 onChanged = { onSet { copy(verifyAccount = it) } },
             )
             Spacer(Modifier.height(4.dp))
@@ -857,12 +627,8 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
             // v1.2.6 — Toggle chuẩn hoá ID acc
             CfgSwitch(
                 label    = "Chuẩn hoá ID tài khoản",
-                subtitle = if (state.normalizeEnabled)
-                    "Tự động chuẩn hoá display name / ID số thành @username khi bắt đầu farm"
-                else
-                    "Tắt — bỏ qua bước chuẩn hoá, bắt đầu farm nhanh hơn (chỉ nên tắt khi acc list đã ổn định)",
+                subtitle = if (state.normalizeEnabled) "Đổi tên hiển thị thành @username" else "Bỏ qua bước chuẩn hoá",
                 value    = state.normalizeEnabled,
-                accent   = Cyan,
                 onChanged = { onSet { copy(normalizeEnabled = it) } },
             )
         }
@@ -870,30 +636,13 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
         // ── [v1.1.9+] Ghé qua tab khác ──────────────────────────────────
         Spacer(Modifier.height(16.dp))
         SettingCard {
-            CardLabelWithNote("Ghé qua tab khác", Icons.Rounded.Explore, Cyan,
-                note = "Đôi khi tool sẽ ghé sang các tab khác của TikTok (Discover, Following, ...) " +
-                       "trong một thời gian ngắn trước khi quay lại For You. " +
-                       "Giúp profile hoạt động trông tự nhiên và đa dạng hơn. " +
-                       "Tắt nếu muốn tool chỉ tập trung vào tab For You.")
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "Thỉnh thoảng ghé Hộp thư / Cửa hàng sau khi xem video — tăng tính tự nhiên",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 4.dp),
-            )
+            CardLabel("Ghé qua tab khác", Icons.Rounded.Explore, Cyan)
             Spacer(Modifier.height(10.dp))
 
             // Hộp thư
-            RateRow(
-                icon  = Icons.Rounded.Inbox,
-                label = "Tỉ lệ ghé Hộp thư",
-                value = state.inboxViewRate,
-                color = Cyan,
-            )
-            Spacer(Modifier.height(6.dp))
+
             CfgSlider(
-                label    = "",
+                label    = "Tỉ lệ ghé Hộp thư",
                 display  = if (state.inboxViewRate <= 0f) "Tắt"
                            else "${(state.inboxViewRate * 100).toInt()}%",
                 value    = state.inboxViewRate,
@@ -917,15 +666,9 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
             Spacer(Modifier.height(10.dp))
 
             // Cửa hàng
-            RateRow(
-                icon  = Icons.Rounded.ShoppingBag,
-                label = "Tỉ lệ ghé Cửa hàng",
-                value = state.shopViewRate,
-                color = Amber,
-            )
-            Spacer(Modifier.height(6.dp))
+
             CfgSlider(
-                label    = "",
+                label    = "Tỉ lệ ghé Cửa hàng",
                 display  = if (state.shopViewRate <= 0f) "Tắt"
                            else "${(state.shopViewRate * 100).toInt()}%",
                 value    = state.shopViewRate,
@@ -949,32 +692,21 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
         // ── [v1.2.0] Tim video theo nội dung ─────────────────────────────────
         Spacer(Modifier.height(16.dp))
         SettingCard {
-            CardLabelWithNote("Tim theo nội dung", Icons.Rounded.Favorite, Pink,
-                note = "Khi bật, tool chỉ tim video nếu nội dung phù hợp với danh sách từ khoá bạn thiết lập. " +
-                       "Ví dụ: chỉ tim video về 'ẩm thực', 'du lịch'. " +
-                       "Khi tắt, tool tim ngẫu nhiên theo tỉ lệ đã cài ở mục Tỉ lệ tương tác.")
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "Like video khớp từ khoá caption hoặc hashtag — bỏ qua likeRate cho video khớp",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 4.dp),
-            )
+            CardLabel("Tim theo nội dung", Icons.Rounded.Favorite, Pink)
             Spacer(Modifier.height(10.dp))
 
             // Caption keywords
             CfgSwitch(
                 label    = "Like theo caption",
-                subtitle = "Like video khi caption chứa từ khoá đã cài",
+                subtitle = "Thích khi caption có từ khoá",
                 value    = state.likeByCaption,
-                accent   = Pink,
                 onChanged = { onSet { copy(likeByCaption = it) } },
             )
             Spacer(Modifier.height(6.dp))
             CfgTextField(
                 label     = "Từ khoá caption (cách nhau bằng dấu phẩy)",
                 value     = state.captionKeywords,
-                hint      = "review, unboxing, trending, hot...",
+                hint      = "review, unboxing, hot — không phân biệt hoa/thường, có dấu hay không",
                 onChanged = { onSet { copy(captionKeywords = it) } },
             )
 
@@ -985,16 +717,15 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
             // Hashtag keywords
             CfgSwitch(
                 label    = "Like theo hashtag",
-                subtitle = "Like video khi có hashtag khớp danh sách",
+                subtitle = "Thích khi có hashtag",
                 value    = state.likeByHashtag,
-                accent   = Pink,
                 onChanged = { onSet { copy(likeByHashtag = it) } },
             )
             Spacer(Modifier.height(6.dp))
             CfgTextField(
-                label     = "Hashtag (không cần #, cách nhau bằng dấu phẩy)",
+                label     = "Hashtag (cách nhau dấu phẩy)",
                 value     = state.hashtagKeywords,
-                hint      = "xuhuong, trending, viral, fyp...",
+                hint      = "xuhuong, fyp, viral — không cần dấu #",
                 onChanged = { onSet { copy(hashtagKeywords = it) } },
             )
         }
@@ -1002,30 +733,18 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
         // ── [v1.2.0] Tìm kiếm theo từ khoá ──────────────────────────────────
         Spacer(Modifier.height(16.dp))
         SettingCard {
-            CardLabelWithNote("Tìm kiếm từ khoá", Icons.Rounded.Search, Purple,
-                note = "Danh sách từ khoá tool sẽ dùng để ghé qua tab Tìm kiếm và lướt kết quả. " +
-                       "Mỗi từ khoá trên một dòng. " +
-                       "Tool sẽ chọn ngẫu nhiên một từ khoá, tìm kiếm và lướt kết quả trong thời gian ngắn " +
-                       "trước khi quay về For You. Để trống nếu không muốn dùng tính năng này.")
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "Định kỳ tìm kiếm từ khoá, xem vài video rồi về feed — tăng tính tự nhiên",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 4.dp),
-            )
+            CardLabel("Tìm kiếm từ khoá", Icons.Rounded.Search, Purple)
             Spacer(Modifier.height(10.dp))
 
             CfgSwitch(
                 label    = "Bật tìm kiếm",
-                subtitle = "Thỉnh thoảng tự động tìm kiếm theo từ khoá",
+                subtitle = "Thỉnh thoảng tìm theo từ khoá",
                 value    = state.searchEnabled,
-                accent   = Purple,
                 onChanged = { onSet { copy(searchEnabled = it) } },
             )
             Spacer(Modifier.height(6.dp))
             CfgTextField(
-                label     = "Từ khoá tìm kiếm (cách nhau bằng dấu phẩy)",
+                label     = "Từ khoá (cách nhau dấu phẩy)",
                 value     = state.searchKeywords,
                 hint      = "dance, cooking, travel, funny...",
                 onChanged = { onSet { copy(searchKeywords = it) } },
@@ -1041,15 +760,9 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
                 onChanged = { onSet { copy(searchVideosPerSession = it.toInt()) } },
             )
             Spacer(Modifier.height(4.dp))
-            RateRow(
-                icon  = Icons.Rounded.Search,
-                label = "Tỉ lệ tìm kiếm",
-                value = state.searchRate,
-                color = Purple,
-            )
-            Spacer(Modifier.height(6.dp))
+
             CfgSlider(
-                label    = "",
+                label    = "Tỉ lệ tìm kiếm",
                 display  = if (state.searchRate <= 0f) "Tắt"
                            else "${(state.searchRate * 100).toInt()}%",
                 value    = state.searchRate,
@@ -1065,12 +778,17 @@ private fun ActionsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Con
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  Section: Giao diện (v1.7.0) — chuyển Sáng / Tối, áp dụng ngay
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  Section: Notifications
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 private fun NotificationsSection(state: ConfigUiState, onSet: (ConfigUiState.() -> ConfigUiState) -> Unit) {
     val context = LocalContext.current
+    val accent = Green
     Column(
         Modifier
             .fillMaxSize()
@@ -1078,84 +796,99 @@ private fun NotificationsSection(state: ConfigUiState, onSet: (ConfigUiState.() 
             .padding(horizontal = 14.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        SectionTitle("Thông báo", Icons.Rounded.NotificationsNone, Cyan)
+        SettingCard(index = 0) {
+            CfgSwitch(
+                label     = "Thông báo hệ thống",
+                subtitle  = "Bắt đầu, kết thúc, kết quả nhiệm vụ, sự cố",
+                value     = state.enableSystemNotifications,
+                onChanged = { onSet { copy(enableSystemNotifications = it) } },
+            )
+            if (state.enableSystemNotifications && !state.notificationGranted) {
+                Spacer(Modifier.height(10.dp))
+                AtButton(
+                    text     = "Cấp quyền thông báo",
+                    onClick  = { com.atpro.data.AccessibilitySettingsHelper.openAppSettings(context) },
+                    style    = AtButtonStyle.Tonal,
+                    height   = 44.dp,
+                )
+            }
+            if (state.enableSystemNotifications && state.notificationGranted) {
+                Spacer(Modifier.height(10.dp))
+                AtButton(
+                    text     = "Gửi thông báo thử",
+                    onClick  = {
+                        val ok = com.atpro.notification.AtProNotificationManager.sendTest(context)
+                        android.widget.Toast.makeText(
+                            context,
+                            if (ok) "Đã gửi — xem ở thanh thông báo" else "Hệ thống đang chặn thông báo của AT PRO (kiểm tra quyền/kênh)",
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                    },
+                    style    = AtButtonStyle.Tonal,
+                    height   = 44.dp,
+                )
+            }
+        }
 
-        // System notification toggle card
-        SettingCard {
-            CardLabel("Thông báo hệ thống", Icons.Rounded.NotificationsNone, Cyan)
-            Spacer(Modifier.height(12.dp))
-
-            // Toggle row
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(BgDeeper)
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text       = "Bật thông báo",
-                        color      = TextPrim,
-                        fontSize   = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    Text(
-                        text     = "Nhận thông báo khi bắt đầu, kết thúc hoặc có sự cố",
-                        color    = TextSec,
-                        fontSize = 11.sp,
-                    )
-                }
-                Switch(
-                    checked         = state.enableSystemNotifications,
-                    onCheckedChange = { onSet { copy(enableSystemNotifications = it) } },
-                    colors          = SwitchDefaults.colors(
-                        checkedThumbColor       = Color.White,
-                        checkedTrackColor       = Cyan,
-                        uncheckedThumbColor     = TextMuted,
-                        uncheckedTrackColor     = BgCard,
-                        uncheckedBorderColor    = BorderDark,
-                    ),
+        if (state.enableSystemNotifications) {
+            SettingCard(index = 1) {
+                CardLabel("Loại thông báo", Icons.Rounded.Notifications, accent)
+                Spacer(Modifier.height(6.dp))
+                CfgSwitch(
+                    label = "Cảnh báo quan trọng",
+                    subtitle = "Checkpoint, tài khoản bị khoá, Follow4Follow hết phiên, đạt giới hạn ngày, lỗi",
+                    value = state.notifAlerts,
+                    onChanged = { onSet { copy(notifAlerts = it) } },
+                )
+                CfgSwitch(
+                    label = "Kết quả phiên nuôi",
+                    subtitle = "Bắt đầu và hoàn thành cả phiên",
+                    value = state.notifSessions,
+                    onChanged = { onSet { copy(notifSessions = it) } },
+                )
+                CfgSwitch(
+                    label = "Từng tài khoản nuôi xong",
+                    subtitle = "Một thông báo nhỏ, không phát âm, cho mỗi tài khoản",
+                    value = state.notifAccounts,
+                    onChanged = { onSet { copy(notifAccounts = it) } },
+                )
+                CfgSwitch(
+                    label = "Nhiệm vụ kiếm tiền",
+                    subtitle = "Bắt đầu, từng tài khoản (job, xu) và tổng kết có số dư",
+                    value = state.notifTasks,
+                    onChanged = { onSet { copy(notifTasks = it) } },
                 )
             }
 
-            // Open notification settings button — chỉ hiện khi bật
-            AnimatedVisibility(
-                visible = state.enableSystemNotifications,
-                enter   = fadeIn(tween(200)) + expandVertically(tween(220)),
-                exit    = fadeOut(tween(150)) + shrinkVertically(tween(170)),
-            ) {
-                Column {
+            SettingCard(index = 2) {
+                CardLabel("Giờ yên tĩnh", Icons.Rounded.Timer, accent)
+                Spacer(Modifier.height(6.dp))
+                CfgSwitch(
+                    label = "Không phát âm/rung trong khung giờ",
+                    subtitle = "Thông báo vẫn hiện, chỉ im lặng",
+                    value = state.notifQuietEnabled,
+                    onChanged = { onSet { copy(notifQuietEnabled = it) } },
+                )
+                if (state.notifQuietEnabled) {
                     Spacer(Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = { com.atpro.data.AccessibilitySettingsHelper.openAppSettings(context) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape    = RoundedCornerShape(12.dp),
-                        border   = BorderStroke(1.dp, Cyan.copy(alpha = 0.4f)),
-                        colors   = ButtonDefaults.outlinedButtonColors(contentColor = Cyan),
-                    ) {
-                        Icon(Icons.Rounded.NotificationsActive, null, modifier = Modifier.size(15.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Cài đặt thông báo", fontSize = 13.sp)
-                    }
+                    SettingSliderInt("Từ", state.notifQuietStart, 0, 23, 1, unit = ":00") { onSet { copy(notifQuietStart = it) } }
+                    SettingSliderInt("Đến", state.notifQuietEnd, 0, 23, 1, unit = ":00") { onSet { copy(notifQuietEnd = it) } }
                 }
             }
         }
 
-        // Status banner: cảnh báo nếu quyền thông báo chưa cấp
-        if (!state.notificationGranted) {
-            InfoBanner(
-                text  = "Chưa cấp quyền thông báo. Bấm \"Cài đặt thông báo\" để cấp quyền.",
-                color = Amber,
-            )
-        } else {
-            InfoBanner(
-                text  = "Thông báo được gửi khi bắt đầu farm, hoàn thành phiên, hoặc phát hiện checkpoint.",
-                color = Cyan,
+        SettingCard(index = 3) {
+            CardLabel("Thông báo Discord", Icons.Rounded.Notifications, Green)
+            Spacer(Modifier.height(10.dp))
+            CfgTextField(
+                label     = "Webhook URL",
+                value     = state.discordWebhookUrl,
+                hint      = "https://discord.com/api/webhooks/...",
+                isLast    = true,
+                onChanged = { onSet { copy(discordWebhookUrl = it) } },
             )
         }
+
 
         Spacer(Modifier.height(24.dp))
     }
@@ -1177,203 +910,116 @@ private fun PermissionsSection(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 14.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        SectionTitle("Quyền hệ thống", Icons.Rounded.AdminPanelSettings, Green)
-
-        // Status summary banner at top
-        val allOk = state.accessibilityGranted
-        AnimatedContent(
-            targetState   = allOk,
-            transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(200)) },
-            label = "perm_banner",
-        ) { ok ->
-            if (ok) {
-                InfoBanner("Quyền bắt buộc đã cấp — sẵn sàng farm.", Green)
-            } else {
-                InfoBanner("Cần cấp Accessibility Service để farm.", Red)
-            }
-        }
-
-        // Permission items
         PermissionCard(
-            icon        = Icons.Rounded.Accessibility,
-            iconColor   = Purple,
-            title       = "Accessibility Service",
-            description = "Bắt buộc. Điều khiển TikTok tự động.",
-            granted     = state.accessibilityGranted,
-            required    = true,
-            onAction    = onOpenAccessibility,
+            icon      = Icons.Rounded.Accessibility,
+            iconColor = Purple,
+            title     = "Trợ năng",
+            hint      = "Bắt buộc",
+            granted   = state.accessibilityGranted,
+            required  = true,
+            onAction  = onOpenAccessibility,
         )
-
         PermissionCard(
-            icon        = Icons.Rounded.Layers,
-            iconColor   = Amber,
-            title       = "Hiển thị trên ứng dụng khác",
-            description = "Hiện popup theo dõi farm khi TikTok đang chạy.",
-            granted     = state.overlayGranted,
-            required    = false,
-            onAction    = onOpenOverlay,
+            icon      = Icons.Rounded.Layers,
+            iconColor = Amber,
+            title     = "Hiển thị trên ứng dụng khác",
+            hint      = "Popup theo dõi",
+            granted   = state.overlayGranted,
+            required  = false,
+            onAction  = onOpenOverlay,
         )
-
         PermissionCard(
-            icon        = Icons.Rounded.NotificationsActive,
-            iconColor   = Cyan,
-            title       = "Thông báo",
-            description = "Nhận thông báo khi farm xong hoặc có lỗi.",
-            granted     = state.notificationGranted,
-            required    = false,
-            onAction    = onOpenNotification,
+            icon      = Icons.Rounded.NotificationsActive,
+            iconColor = Cyan,
+            title     = "Thông báo",
+            hint      = "Báo khi xong hoặc lỗi",
+            granted   = state.notificationGranted,
+            required  = false,
+            onAction  = onOpenNotification,
         )
-
         Spacer(Modifier.height(24.dp))
     }
 }
 
 // Each permission is now its own card instead of being rows in one shared card
+/**
+ * v1.10.0 — bố cục DỌC (hàng trên: biểu tượng + tên + dấu ✓; nút "Cấp quyền" nằm dưới, full chiều ngang).
+ * Bản cũ để nút trong một ô cố định 34dp ngay trong hàng: máy có cỡ chữ lớn / màn hình hẹp thì chữ có dấu bị cắt và
+ * tên quyền bị ép ra ngoài thẻ ("vỡ UI, phông chữ" khi chưa cấp quyền). Mọi kích thước dùng min/wrap, không cố định cao.
+ */
 @Composable
 private fun PermissionCard(
-    icon:        ImageVector,
-    iconColor:   Color,
-    title:       String,
-    description: String,
-    granted:     Boolean,
-    required:    Boolean,
-    onAction:    () -> Unit,
+    icon:      ImageVector,
+    iconColor: Color,
+    title:     String,
+    hint:      String,
+    granted:   Boolean,
+    required:  Boolean,
+    onAction:  () -> Unit,
 ) {
     val borderColor by animateColorAsState(
         targetValue   = if (granted) iconColor.copy(alpha = 0.30f) else BorderDark,
-        animationSpec = tween(400), label = "pc_border_$title",
+        animationSpec = tween(400), label = "pc_border",
     )
     val bgColor by animateColorAsState(
         targetValue   = if (granted) iconColor.copy(alpha = 0.05f) else BgCard,
-        animationSpec = tween(400), label = "pc_bg_$title",
+        animationSpec = tween(400), label = "pc_bg",
     )
 
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(bgColor)
             .border(1.dp, borderColor, RoundedCornerShape(14.dp))
             .padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .size(42.dp)
-                .clip(RoundedCornerShape(13.dp))
-                .background(iconColor.copy(alpha = 0.12f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, null, tint = iconColor, modifier = Modifier.size(20.dp))
-        }
-
-        Spacer(Modifier.width(12.dp))
-
-        Column(Modifier.weight(1f)) {
-            Row(
-                verticalAlignment     = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(iconColor.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center,
             ) {
-                Text(title, color = TextPrim, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                if (required) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Red.copy(alpha = 0.14f))
-                            .padding(horizontal = 5.dp, vertical = 2.dp),
-                    ) {
-                        Text("Bắt buộc", color = Red, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                }
+                Icon(icon, null, tint = iconColor, modifier = Modifier.size(20.dp))
             }
-            Spacer(Modifier.height(3.dp))
-            Text(description, color = TextMuted, fontSize = 11.sp, lineHeight = 16.sp)
-        }
-
-        Spacer(Modifier.width(12.dp))
-
-        AnimatedContent(
-            targetState  = granted,
-            transitionSpec = {
-                (fadeIn(tween(200)) + scaleIn(tween(200))) togetherWith
-                    (fadeOut(tween(150)) + scaleOut(tween(150)))
-            },
-            label = "pc_action_$title",
-        ) { isGranted ->
-            if (isGranted) {
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title, color = TextPrim, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    hint,
+                    color    = if (required && !granted) Red else TextMuted,
+                    fontSize = 12.sp,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (granted) {
+                Spacer(Modifier.width(10.dp))
                 Box(
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(Green.copy(alpha = 0.15f)),
+                    modifier = Modifier.size(32.dp).clip(CircleShape).background(Green.copy(alpha = 0.15f)),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.Rounded.Check, null, tint = Green, modifier = Modifier.size(18.dp))
                 }
-            } else {
-                OutlinedButton(
-                    onClick  = onAction,
-                    shape    = RoundedCornerShape(9.dp),
-                    // v1.2.9: widthIn phòng tràn màn hình nhỏ
-                    modifier = Modifier.height(34.dp).widthIn(min = 76.dp, max = 100.dp),
-                    colors   = ButtonDefaults.outlinedButtonColors(contentColor = iconColor),
-                    border   = BorderStroke(1.dp, SolidColor(iconColor.copy(alpha = 0.45f))),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                ) {
-                    Text(
-                        "Cấp quyền",
-                        fontSize  = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines  = 1,
-                        softWrap  = false,
-                    )
-                }
             }
         }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Shared widget: QuickAction
-// ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun QuickAction(icon: ImageVector, label: String, scheme: String, color: Color, onClick: () -> Unit) {
-    var pressed by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue   = if (pressed) 0.97f else 1f,
-        animationSpec = tween(80), label = "qa_scale",
-    )
-    LaunchedEffect(pressed) { if (pressed) { delay(140); pressed = false } }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .scale(scale)
-            .clip(RoundedCornerShape(12.dp))
-            .background(color.copy(alpha = 0.06f))
-            .border(1.dp, color.copy(alpha = 0.16f), RoundedCornerShape(12.dp))
-            .clickable { pressed = true; onClick() }
-            .padding(horizontal = 12.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(color.copy(alpha = 0.13f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, null, tint = color, modifier = Modifier.size(18.dp))
+        AnimatedVisibility(visible = !granted) {
+            Column {
+                Spacer(Modifier.height(12.dp))
+                AtButton(
+                    text     = "Cấp quyền",
+                    onClick  = onAction,
+                    style    = if (required) AtButtonStyle.Primary else AtButtonStyle.Tonal,
+                    height   = 44.dp,
+                )
+            }
         }
-        Column(Modifier.weight(1f)) {
-            Text(label, color = TextPrim, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Text(scheme, color = TextMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-        }
-        Icon(Icons.Rounded.ChevronRight, null, tint = color.copy(alpha = 0.45f), modifier = Modifier.size(17.dp))
     }
 }
 
@@ -1382,32 +1028,13 @@ private fun QuickAction(icon: ImageVector, label: String, scheme: String, color:
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun SectionTitle(text: String, icon: ImageVector, accent: Color) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(accent.copy(alpha = 0.12f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, null, tint = accent, modifier = Modifier.size(16.dp))
-        }
-        Text(text, color = TextPrim, fontSize = 15.5.sp, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-private fun SettingCard(content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            // v1.4.0: thẻ phẳng — nền đặc + viền mảnh (bỏ bóng và gradient)
-            .clip(RoundedCornerShape(16.dp))
-            .background(BgCard)
-            .border(1.dp, BorderDark, RoundedCornerShape(16.dp))
-            .padding(horizontal = 15.dp, vertical = 15.dp),
-        content = content,
+private fun SettingCard(index: Int = 0, content: @Composable ColumnScope.() -> Unit) {
+    // v1.7.0: dùng AtCard chung (viền mảnh + bóng xanh nhẹ ở chế độ Sáng).
+    // v1.11.0: thẻ hiện dần lần lượt theo [index] khi mở mục.
+    AtCard(
+        modifier       = Modifier.fillMaxWidth().staggerIn(index, stepMs = 55),
+        contentPadding = PaddingValues(15.dp),
+        content        = content,
     )
 }
 
@@ -1419,132 +1046,9 @@ private fun CardLabel(text: String, icon: ImageVector, accent: Color) {
     }
 }
 
-/** v1.2.9: CardLabel có biểu tượng ghi chú — bấm để xem giải thích chi tiết. */
-@Composable
-private fun CardLabelWithNote(text: String, icon: ImageVector, accent: Color, note: String) {
-    var showNote by remember { mutableStateOf(false) }
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Icon(icon, null, tint = accent.copy(alpha = 0.75f), modifier = Modifier.size(13.dp))
-        Text(text, color = accent.copy(alpha = 0.85f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f, fill = false))
-        IconButton(
-            onClick  = { showNote = true },
-            modifier = Modifier.size(22.dp),
-        ) {
-            Icon(
-                Icons.Rounded.Notes,
-                contentDescription = "Ghi chú",
-                tint     = accent.copy(alpha = 0.50f),
-                modifier = Modifier.size(14.dp),
-            )
-        }
-    }
-    if (showNote) {
-        AlertDialog(
-            onDismissRequest = { showNote = false },
-            containerColor   = Color(0xFF1E1E30),
-            icon = {
-                Icon(Icons.Rounded.Notes, null, tint = accent, modifier = Modifier.size(22.dp))
-            },
-            title = {
-                Text(text, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            },
-            text = {
-                Text(note, color = Color(0xFFB0B0C8), fontSize = 13.sp, lineHeight = 20.sp)
-            },
-            confirmButton = {
-                TextButton(onClick = { showNote = false }) {
-                    Text("Đã hiểu", color = accent, fontWeight = FontWeight.Medium)
-                }
-            },
-        )
-    }
-}
-
 @Composable
 private fun ThinDivider() {
     HorizontalDivider(color = BorderDark.copy(alpha = 0.5f), thickness = 0.5.dp)
-}
-
-@Composable
-private fun InfoBanner(text: String, color: Color) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(color.copy(alpha = 0.07f))
-            .border(1.dp, color.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
-            .padding(13.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        Icon(Icons.Rounded.Info, null, tint = color.copy(alpha = 0.7f), modifier = Modifier.size(14.dp).padding(top = 1.dp))
-        Spacer(Modifier.width(8.dp))
-        Text(text, color = color.copy(alpha = 0.85f), fontSize = 12.sp, lineHeight = 18.sp)
-    }
-}
-
-@Composable
-private fun StatusBadge(text: String, color: Color) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(color.copy(alpha = 0.15f))
-            .border(1.dp, color.copy(alpha = 0.3f), RoundedCornerShape(20.dp))
-            .padding(horizontal = 9.dp, vertical = 4.dp),
-    ) {
-        Text(text, color = color, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-@Composable
-private fun RateRow(icon: ImageVector, label: String, value: Float, color: Color) {
-    Row(
-        Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Icon(icon, null, tint = color, modifier = Modifier.size(13.dp))
-        Text(label, color = TextSec, fontSize = 12.sp, modifier = Modifier.weight(1f))
-        Text(
-            "${(value * 100).toInt()}%",
-            color = color, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-        )
-    }
-}
-
-/** Mini visual bar showing the watch time range relative to max 30s */
-@Composable
-private fun RangePreview(min: Float, max: Float, total: Float, color: Color) {
-    val startFrac = (min / total).coerceIn(0f, 1f)
-    val endFrac   = (max / total).coerceIn(0f, 1f)
-    Column {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("0s", color = TextMuted, fontSize = 9.sp)
-            Text("${total.toInt()}s", color = TextMuted, fontSize = 9.sp)
-        }
-        Spacer(Modifier.height(3.dp))
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val totalPx = maxWidth
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(5.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(BorderDark),
-            )
-            Box(
-                modifier = Modifier
-                    .offset(x = totalPx * startFrac)
-                    .width(totalPx * (endFrac - startFrac))
-                    .height(5.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(color),
-            )
-        }
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1552,7 +1056,9 @@ private fun RangePreview(min: Float, max: Float, total: Float, color: Color) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+/** v1.11.0: dựng trên [AtSliderField] (đường gradient, núm có quầng sáng, rung theo nấc). `accent` giữ lại cho tương thích. */
 @Composable
+@Suppress("UNUSED_PARAMETER")
 private fun CfgSlider(
     label:    String,
     display:  String,
@@ -1563,69 +1069,16 @@ private fun CfgSlider(
     enabled:  Boolean = true,
     onChanged: (Float) -> Unit,
 ) {
-    val effectiveAccent = if (enabled) accent else TextSec
-    Column(Modifier
-        .padding(bottom = 2.dp)
-        .alpha(if (enabled) 1f else 0.38f)
-    ) {
-        if (label.isNotBlank()) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment     = Alignment.CenterVertically,
-            ) {
-                Text(label, color = TextSec, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                Spacer(Modifier.width(8.dp))
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(7.dp))
-                        .background(effectiveAccent.copy(alpha = 0.12f))
-                        .padding(horizontal = 9.dp, vertical = 3.dp),
-                ) {
-                    Text(display, color = effectiveAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-            Spacer(Modifier.height(2.dp))
-        } else {
-            // label hidden — still show value badge aligned right
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(7.dp))
-                        .background(effectiveAccent.copy(alpha = 0.12f))
-                        .padding(horizontal = 9.dp, vertical = 3.dp),
-                ) {
-                    Text(display, color = effectiveAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-        Box(modifier = Modifier.fillMaxWidth()) {
-            Slider(
-                value         = value.coerceIn(range.start, range.endInclusive),
-                onValueChange = if (enabled) onChanged else { _ -> },
-                valueRange    = range,
-                steps         = steps,
-                enabled       = enabled,
-                modifier      = Modifier.fillMaxWidth(),
-                colors        = SliderDefaults.colors(
-                    thumbColor         = effectiveAccent,
-                    activeTrackColor   = effectiveAccent,
-                    inactiveTrackColor = BorderHi,
-                    activeTickColor    = Color.Transparent,
-                    inactiveTickColor  = Color.Transparent,
-                ),
-                thumb = {
-                    Box(
-                        modifier = Modifier
-                            .size(18.dp)
-                            .clip(CircleShape)
-                            .background(effectiveAccent)
-                            .border(2.dp, effectiveAccent.copy(alpha = 0.3f), CircleShape),
-                    )
-                },
-            )
-        }
-    }
+    AtSliderField(
+        label         = label,
+        display       = display,
+        value         = value,
+        onValueChange = onChanged,
+        valueRange    = range,
+        steps         = steps,
+        enabled       = enabled,
+        modifier      = Modifier.padding(bottom = 4.dp),
+    )
 }
 
 @Composable
@@ -1633,7 +1086,6 @@ private fun CfgSwitch(
     label:     String,
     subtitle:  String? = null,
     value:     Boolean,
-    accent:    Color   = Purple,
     enabled:   Boolean = true,
     onChanged: (Boolean) -> Unit,
 ) {
@@ -1656,11 +1108,13 @@ private fun CfgSwitch(
             onCheckedChange = onChanged,
             enabled         = enabled,
             colors          = SwitchDefaults.colors(
-                checkedThumbColor   = Color.White,
-                checkedTrackColor   = accent,
-                uncheckedThumbColor = TextMuted,
-                uncheckedTrackColor = BorderDark,
-            ),
+                        checkedThumbColor    = Color.White,
+                        checkedTrackColor    = AtColors.Blue,
+                        checkedBorderColor   = Color.Transparent,
+                        uncheckedThumbColor  = Color.White,
+                        uncheckedTrackColor  = AtColors.HairlineHi,
+                        uncheckedBorderColor = Color.Transparent,
+                    ),
         )
     }
 }
@@ -1680,7 +1134,7 @@ private fun CfgStepper(
         }
         Text(
             "$value",
-            color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+            color = AtColors.TextPrim, fontSize = 16.sp, fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(horizontal = 14.dp),
         )
         StepBtn(Icons.Rounded.Add, value < range.last, accent) {
@@ -1719,7 +1173,7 @@ private fun CfgTextField(
             value         = value,
             onValueChange = onChanged,
             modifier      = Modifier.fillMaxWidth(),
-            placeholder   = { Text(hint, color = Color(0xFF3A3A52), fontSize = 12.sp) },
+            placeholder   = { Text(hint, color = AtColors.TextMuted, fontSize = 12.sp) },
             singleLine    = true,
             visualTransformation = if (obscure && !show) PasswordVisualTransformation()
                                    else VisualTransformation.None,
@@ -1736,8 +1190,8 @@ private fun CfgTextField(
                 unfocusedContainerColor = BgDeeper,
                 focusedBorderColor      = Purple,
                 unfocusedBorderColor    = BorderDark,
-                focusedTextColor        = Color.White,
-                unfocusedTextColor      = Color.White,
+                focusedTextColor        = AtColors.TextPrim,
+                unfocusedTextColor      = AtColors.TextPrim,
             ),
         )
     }
@@ -1765,7 +1219,7 @@ private fun CfgMultilineTextField(
             value         = value,
             onValueChange = onChanged,
             modifier      = Modifier.fillMaxWidth(),
-            placeholder   = { Text(hint, color = Color(0xFF3A3A52), fontSize = 12.sp) },
+            placeholder   = { Text(hint, color = AtColors.TextMuted, fontSize = 12.sp) },
             singleLine    = false,
             minLines      = minLines,
             maxLines      = maxLines,
@@ -1776,8 +1230,8 @@ private fun CfgMultilineTextField(
                 unfocusedContainerColor = BgDeeper,
                 focusedBorderColor      = Purple,
                 unfocusedBorderColor    = BorderDark,
-                focusedTextColor        = Color.White,
-                unfocusedTextColor      = Color.White,
+                focusedTextColor        = AtColors.TextPrim,
+                unfocusedTextColor      = AtColors.TextPrim,
             ),
         )
     }
@@ -1792,7 +1246,8 @@ private fun TaskEarnSection(
     state: ConfigUiState,
     onSet: (ConfigUiState.() -> ConfigUiState) -> Unit,
 ) {
-    val AccentTask = Color(0xFF6C63FF)
+    val accent = AtColors.Blue
+    val jobTypes = listOf("LIKE", "FOLLOW", "BOTH")
 
     Column(
         Modifier
@@ -1801,154 +1256,343 @@ private fun TaskEarnSection(
             .padding(horizontal = 14.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        F4fAccountCard()
 
-    InfoBanner(
-        "Cấu hình cách tool thực hiện nhiệm vụ TikTok kiếm tiền. " +
-        "Cần thiết lập Quyền trợ năng trước và kết nối nơi làm nhiệm vụ.",
-        AccentTask,
-    )
+        SettingCard(index = 1) {
+            CardLabel("Loại job", Icons.Rounded.WorkOutline, accent)
+            Spacer(Modifier.height(10.dp))
+            AtSegmented(
+                options       = listOf("Tim", "Follow", "Cả hai"),
+                selectedIndex = jobTypes.indexOf(state.taskJobType).coerceAtLeast(0),
+                onSelect      = { i -> onSet { copy(taskJobType = jobTypes[i]) } },
+            )
+        }
 
-    SectionTitle("Loại nhiệm vụ", Icons.Rounded.AssignmentTurnedIn, AccentTask)
-
-    SettingCard {
-        CardLabelWithNote("Loại job sẽ làm", Icons.Rounded.WorkOutline, AccentTask,
-            note = "Chọn loại nhiệm vụ tool sẽ thực hiện:\n\n" +
-                   "• Tim video ❤️: tool mở link TikTok và nhấn tim.\n" +
-                   "• Follow 👤: tool mở trang profile và nhấn theo dõi.\n" +
-                   "• Cả hai: tool làm cả tim lẫn follow tuỳ job nơi làm nhiệm vụ giao.")
-        Spacer(Modifier.height(10.dp))
-        val jobTypes = listOf("LIKE" to "Tim video ❤️", "FOLLOW" to "Follow 👤", "BOTH" to "Cả hai")
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            jobTypes.forEach { (value, label) ->
-                val selected = state.taskJobType == value
-                Surface(
-                    modifier = Modifier.weight(1f).clickable { onSet { copy(taskJobType = value) } },
-                    shape  = RoundedCornerShape(10.dp),
-                    color  = if (selected) AccentTask.copy(alpha = 0.2f) else BgDeeper,
-                    border = BorderStroke(1.dp, if (selected) AccentTask.copy(alpha = 0.7f) else BorderDark),
-                ) {
-                    Text(label,
-                        color = if (selected) AccentTask else TextSec,
-                        fontSize = 11.sp,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
-                    )
-                }
+        SettingCard(index = 2) {
+            CardLabel("Thời gian", Icons.Rounded.Timer, accent)
+            Spacer(Modifier.height(8.dp))
+            SettingSliderInt("Nuôi trước job", state.taskFarmBeforeJobSecs, 10, 300, 10, unit = " giây",
+                hint = "Xem feed trước khi nhận job đầu tiên của mỗi tài khoản") {
+                onSet { copy(taskFarmBeforeJobSecs = it) }
+            }
+            SettingSliderInt("Chờ sau khi mở link", state.taskJobDelaySecs, 2, 15, 1, unit = " giây") {
+                onSet { copy(taskJobDelaySecs = it) }
             }
         }
-    }
 
-    ThinDivider()
-    SectionTitle("Thời gian & Giới hạn", Icons.Rounded.Timer, AccentTask)
-
-    SettingCard {
-        CardLabelWithNote("Nuôi TikTok trước mỗi job", Icons.Rounded.Videocam, AccentTask,
-            note = "Thời gian (giây) tool lướt TikTok bình thường TRƯỚC khi mở link job. " +
-                   "Giúp hành vi tự nhiên hơn. Khuyến nghị: 30–90 giây.")
-        Spacer(Modifier.height(8.dp))
-        SettingSliderInt("Thời gian nuôi trước job (giây)", state.taskFarmBeforeJobSecs, 20, 300, 10) {
-            onSet { copy(taskFarmBeforeJobSecs = it) }
+        SettingCard(index = 3) {
+            CardLabel("Giới hạn", Icons.Rounded.ErrorOutline, accent)
+            Spacer(Modifier.height(8.dp))
+            SettingSliderInt("Job mỗi tài khoản", state.taskJobsPerAccount, 1, 150, 1) {
+                onSet { copy(taskJobsPerAccount = it) }
+            }
+            SettingSliderInt("Lỗi liên tiếp tối đa", state.taskMaxConsecFailures, 1, 10, 1,
+                hint = "Quá số lần này tài khoản sẽ được bỏ qua") {
+                onSet { copy(taskMaxConsecFailures = it) }
+            }
         }
-    }
 
-    SettingCard {
-        CardLabelWithNote("Delay sau khi mở link job", Icons.Rounded.HourglassTop, AccentTask,
-            note = "Giây tool chờ sau khi mở link TikTok trước khi tim/follow. " +
-                   "Cho video tải xong và tránh bị mark là bot. Khuyến nghị: 4–8 giây.")
-        Spacer(Modifier.height(8.dp))
-        SettingSliderInt("Delay mở link (giây)", state.taskJobDelaySecs, 2, 15, 1) {
-            onSet { copy(taskJobDelaySecs = it) }
+        SettingCard(index = 4) {
+            CardLabel("Nuôi giữa các job", Icons.Rounded.Spa, accent)
+            Spacer(Modifier.height(10.dp))
+            RangeSliderPair(
+                label    = "Nuôi ngắn sau mỗi job",
+                minValue = state.taskFarmAfterJobMinSecs,
+                maxValue = state.taskFarmAfterJobMaxSecs,
+                range    = 3..60,
+                accent   = accent,
+                summaryPrefix = "",
+                summarySuffix = " giây",
+                onMinChanged = { onSet { copy(taskFarmAfterJobMinSecs = it) } },
+                onMaxChanged = { onSet { copy(taskFarmAfterJobMaxSecs = it) } },
+            )
+            Spacer(Modifier.height(8.dp))
+            SettingSliderInt("Nuôi lâu mỗi N job", state.taskLongFarmEveryNJobs, 0, 50, 1,
+                zeroLabel = "Tắt", unit = " job") {
+                onSet { copy(taskLongFarmEveryNJobs = it) }
+            }
+            SettingSliderInt("Thời lượng nuôi lâu", state.taskLongFarmDurationSecs, 30, 900, 30, unit = " giây") {
+                onSet { copy(taskLongFarmDurationSecs = it) }
+            }
+            Text(
+                "Cách xem video và tim khi nuôi: tab Nuôi acc.",
+                color = AtColors.TextMuted, fontSize = 11.sp,
+            )
         }
+
+        Spacer(Modifier.height(24.dp))
     }
-
-    SettingCard {
-        CardLabelWithNote("Số job mỗi tài khoản", Icons.Rounded.ListAlt, AccentTask,
-            note = "Số nhiệm vụ tối đa mỗi tài khoản TikTok trong một lượt chạy. " +
-                   "Sau đó tool chuyển sang tài khoản tiếp theo. Khuyến nghị: 3–10.")
-        Spacer(Modifier.height(8.dp))
-        SettingSliderInt("Job mỗi tài khoản", state.taskJobsPerAccount, 1, 20, 1) {
-            onSet { copy(taskJobsPerAccount = it) }
-        }
-    }
-
-    SettingCard {
-        CardLabelWithNote("Lỗi liên tiếp tối đa", Icons.Rounded.ErrorOutline, AccentTask,
-            note = "Số lần thất bại liên tiếp trước khi bỏ qua tài khoản hiện tại. " +
-                   "Bao gồm: không có job, job bị lock, không thực hiện được. Khuyến nghị: 3–5.")
-        Spacer(Modifier.height(8.dp))
-        SettingSliderInt("Lỗi liên tiếp tối đa", state.taskMaxConsecFailures, 1, 10, 1) {
-            onSet { copy(taskMaxConsecFailures = it) }
-        }
-    }
-
-    ThinDivider()
-    SectionTitle("Nuôi acc giữa các job", Icons.Rounded.Spa, AccentTask)
-
-    SettingCard {
-        CardLabelWithNote("Nuôi ngắn sau mỗi job", Icons.Rounded.Videocam, AccentTask,
-            note = "Ngay SAU KHI báo cáo 1 job thành công, tool lướt feed bình thường trong " +
-                   "một khoảng thời gian ngẫu nhiên trước khi lấy job tiếp theo — tránh báo cáo " +
-                   "xong rồi nhận job mới ngay lập tức trông như bot. Khuyến nghị: 5–20 giây.")
-        Spacer(Modifier.height(10.dp))
-        RangeSliderPair(
-            label    = "Khoảng nuôi ngắn (giây)",
-            minValue = state.taskFarmAfterJobMinSecs,
-            maxValue = state.taskFarmAfterJobMaxSecs,
-            range    = 3..60,
-            accent   = AccentTask,
-            summaryPrefix = "Mỗi job: ",
-            onMinChanged = { onSet { copy(taskFarmAfterJobMinSecs = it) } },
-            onMaxChanged = { onSet { copy(taskFarmAfterJobMaxSecs = it) } },
-        )
-    }
-
-    SettingCard {
-        CardLabelWithNote("Nuôi lâu định kỳ", Icons.Rounded.SelfImprovement, AccentTask,
-            note = "Cứ hoàn thành đủ số job này, tool sẽ nuôi acc LÂU HƠN HẲN (thay vì nuôi " +
-                   "ngắn) trước khi lấy job tiếp theo — mô phỏng người dùng thật thỉnh thoảng " +
-                   "lướt TikTok lâu giữa các lần làm nhiệm vụ. Đặt '0' để tắt hẳn nuôi lâu.")
-        Spacer(Modifier.height(8.dp))
-        SettingSliderInt("Mỗi bao nhiêu job", state.taskLongFarmEveryNJobs, 0, 10, 1) {
-            onSet { copy(taskLongFarmEveryNJobs = it) }
-        }
-        Spacer(Modifier.height(4.dp))
-        SettingSliderInt("Thời lượng nuôi lâu (giây)", state.taskLongFarmDurationSecs, 60, 900, 30) {
-            onSet { copy(taskLongFarmDurationSecs = it) }
-        }
-    }
-
-    } // end Column
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Demo nuôi acc — v1.2.6: tách riêng từng nền tảng (giống cấu trúc tab
-//  "Thời gian / Hành động" của Nuôi TikTok), thay vì 1 trang dài gộp chung.
+//  Tài khoản nhận nhiệm vụ  [v1.12.0]
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Chọn tài khoản TikTok nhận nhiệm vụ — chọn thẳng từ danh sách acc đã liên kết Follow4Follow (không còn gõ tay @username).
+ *  • Tự động: mọi acc đã liên kết VÀ có trên máy.
+ *  • Chọn tay: chỉ những acc được tick (vẫn phải liên kết + có trên máy).
+ * Luật chọn nằm ở `TaskAccountSelector` (test được); acc "chưa có trên máy" sẽ không được làm cho tới khi AT PRO quét thấy nó.
+ */
 @Composable
-private fun DemoNoticeBanner() {
-    val amber = Color(0xFFF59E0B)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(amber.copy(alpha = 0.07f))
-            .border(0.5.dp, amber.copy(alpha = 0.30f), RoundedCornerShape(10.dp))
-            .padding(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+private fun TaskAccountsSection(
+    state:     ConfigUiState,
+    onSet:     (ConfigUiState.() -> ConfigUiState) -> Unit,
+    ui:        TaskAccountsUi,
+    onRefresh: () -> Unit,
+) {
+    val accent = AtColors.Blue
+    val manual = TaskAccountMode.parse(state.taskAccountMode) == TaskAccountMode.SELECTED
+    val selectedKeys = remember(state.taskSelectedAccounts) { TaskAccountSelector.parseList(state.taskSelectedAccounts).toSet() }
+
+    LaunchedEffect(Unit) { if (!ui.loaded) onRefresh() }
+
+    fun setSelected(keys: Collection<String>) = onSet { copy(taskSelectedAccounts = keys.distinct().joinToString(",")) }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 14.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Icon(Icons.Rounded.Info, null, tint = amber, modifier = Modifier.size(14.dp).padding(top = 1.dp))
+        SettingCard(index = 0) {
+            CardLabel("Cách chọn", Icons.Rounded.ManageAccounts, accent)
+            Spacer(Modifier.height(10.dp))
+            AtSegmented(
+                options       = listOf("Tự động", "Chọn tay"),
+                selectedIndex = if (manual) 1 else 0,
+                onSelect      = { i -> onSet { copy(taskAccountMode = if (i == 1) "SELECTED" else "AUTO") } },
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                if (manual) "Chỉ làm nhiệm vụ với các tài khoản bạn tick bên dưới."
+                else "Làm nhiệm vụ với mọi tài khoản đã liên kết Follow4Follow và có trên máy.",
+                color = AtColors.TextSec, fontSize = 12.sp,
+            )
+        }
+
+        SettingCard(index = 1) {
+            CardLabel("Tài khoản Follow4Follow", Icons.Rounded.Tag, accent)
+            Spacer(Modifier.height(8.dp))
+            when {
+                ui.loading && ui.rows.isEmpty() ->
+                    Text("Đang tải danh sách…", color = AtColors.TextMuted, fontSize = 12.sp)
+                ui.needLogin ->
+                    Text("Chưa đăng nhập Follow4Follow. Vào tab Dịch vụ để đăng nhập, rồi quay lại tải danh sách.", color = Amber, fontSize = 12.sp)
+                ui.error != null ->
+                    Text("Không tải được danh sách: ${ui.error}", color = Red, fontSize = 12.sp)
+                ui.loaded && ui.rows.isEmpty() ->
+                    Text("Tài khoản Follow4Follow chưa có acc TikTok nào. Hãy thêm acc trên follow4follow.net.", color = AtColors.TextMuted, fontSize = 12.sp)
+                else -> {
+                    val willDo = ui.rows.count { it.onDevice && (!manual || TaskAccountSelector.key(it.username) in selectedKeys) }
+                    Text(
+                        "Liên kết: ${ui.rows.size} · Có trên máy: ${ui.rows.count { it.onDevice }} · Sẽ làm: $willDo",
+                        color = AtColors.TextSec, fontSize = 12.sp,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    ui.rows.forEach { row ->
+                        val key = TaskAccountSelector.key(row.username)
+                        TaskAccountItem(
+                            name       = row.username,
+                            onDevice   = row.onDevice,
+                            checked    = if (manual) key in selectedKeys else row.onDevice,
+                            selectable = manual,
+                            onToggle   = { on -> setSelected(if (on) selectedKeys + key else selectedKeys - key) },
+                        )
+                    }
+                    if (manual) {
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            AtButton(
+                                text = "Chọn hết acc có trên máy",
+                                onClick = { setSelected(ui.rows.filter { it.onDevice }.map { TaskAccountSelector.key(it.username) }) },
+                                style = AtButtonStyle.Tonal, height = 40.dp, modifier = Modifier.weight(1f),
+                            )
+                            AtButton(
+                                text = "Bỏ chọn hết",
+                                onClick = { setSelected(emptyList()) },
+                                style = AtButtonStyle.Tonal, height = 40.dp, modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            AtButton(
+                text    = if (ui.loading) "Đang tải…" else "Tải lại danh sách",
+                onClick = onRefresh,
+                style   = AtButtonStyle.Tonal,
+                height  = 42.dp,
+                enabled = !ui.loading,
+            )
+            if (ui.loaded && ui.deviceCount == 0 && !ui.needLogin) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Chưa có tài khoản nào được quét trên máy. Chạy Nuôi TikTok một lần (hoặc quét tài khoản ở tab Tài khoản) để AT PRO biết các acc trên máy.",
+                    color = AtColors.TextMuted, fontSize = 11.sp,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+/** Một dòng tài khoản: tick (khi chọn tay) hoặc chấm trạng thái (khi tự động) + chip "Có trên máy / Chưa có trên máy". */
+@Composable
+private fun TaskAccountItem(name: String, onDevice: Boolean, checked: Boolean, selectable: Boolean, onToggle: (Boolean) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .then(if (selectable) Modifier.pressClickable { onToggle(!checked) } else Modifier),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = if (checked) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
+            contentDescription = null,
+            tint = if (checked) AtColors.Blue else AtColors.TextMuted,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Text("@$name", color = AtColors.TextPrim, fontSize = 14.sp, modifier = Modifier.weight(1f))
         Text(
-            "Nền tảng này chạy ở chế độ Demo — " +
-            "cần cài đặt app trên thiết bị và đăng nhập trước khi chạy.",
-            color = amber.copy(alpha = 0.85f), fontSize = 11.sp, lineHeight = 16.sp,
+            if (onDevice) "Có trên máy" else "Chưa có trên máy",
+            color = if (onDevice) Green else Amber, fontSize = 11.sp,
         )
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Nuôi acc trong lúc kiếm tiền  [v1.11.0]
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Ngưỡng số tim chọn được (chỉ tim video có ≥ ngưỡng); 0 = tắt. */
+private val MIN_LIKE_STEPS = intArrayOf(0, 100, 500, 1_000, 5_000, 10_000, 50_000, 100_000, 500_000, 1_000_000)
+
+/** Thanh kéo chọn ngưỡng số tim theo các mốc cố định (kéo theo chỉ số mốc, không kéo theo số). */
+@Composable
+private fun MinLikesSlider(label: String, value: Int, hint: String?, onChange: (Int) -> Unit) {
+    val idx = MIN_LIKE_STEPS.indexOfLast { it <= value }.coerceAtLeast(0)
+    AtSliderField(
+        label         = label,
+        display       = if (MIN_LIKE_STEPS[idx] <= 0) "Tắt" else "≥ ${CountParser.format(MIN_LIKE_STEPS[idx].toLong())} tim",
+        value         = idx.toFloat(),
+        onValueChange = { v -> onChange(MIN_LIKE_STEPS[v.roundToInt().coerceIn(0, MIN_LIKE_STEPS.lastIndex)]) },
+        valueRange    = 0f..MIN_LIKE_STEPS.lastIndex.toFloat(),
+        steps         = MIN_LIKE_STEPS.size - 2,
+        hint          = hint,
+        endLabels     = "Tắt" to "1Tr",
+        modifier      = Modifier.padding(bottom = 4.dp),
+    )
+}
+
+/**
+ * Cơ chế nuôi acc dùng TRƯỚC/SAU mỗi job (xem video, tỉ lệ tim, ngưỡng số tim, tim theo hashtag/chú thích).
+ * Bộ thiết lập riêng — không ảnh hưởng chế độ Nuôi TikTok. Job Tim luôn tim đúng video được giao,
+ * không bị ngưỡng số tim chặn.
+ */
+@Composable
+private fun TaskFarmSection(
+    state: ConfigUiState,
+    onSet: (ConfigUiState.() -> ConfigUiState) -> Unit,
+) {
+    val accent = AtColors.Sky
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 14.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            "Áp dụng cho lúc nuôi trước và sau mỗi job. Chế độ Nuôi TikTok có cài đặt riêng.",
+            color = AtColors.TextSec, fontSize = 12.sp,
+            modifier = Modifier.padding(horizontal = 4.dp).staggerIn(0),
+        )
+
+        SettingCard(index = 1) {
+            CardLabel("Xem video", Icons.Rounded.Timer, accent)
+            Spacer(Modifier.height(10.dp))
+            RangeSliderPair(
+                label         = "Thời gian xem mỗi video",
+                minValue      = state.taskFarmWatchMinSecs,
+                maxValue      = state.taskFarmWatchMaxSecs,
+                range         = 1..60,
+                accent        = accent,
+                summaryPrefix = "",
+                summarySuffix = " giây",
+                minGap        = 1,
+                onMinChanged  = { onSet { copy(taskFarmWatchMinSecs = it) } },
+                onMaxChanged  = { onSet { copy(taskFarmWatchMaxSecs = it) } },
+            )
+        }
+
+        SettingCard(index = 2) {
+            CardLabel("Tim video", Icons.Rounded.Favorite, accent)
+            Spacer(Modifier.height(10.dp))
+            CfgSlider(
+                label     = "Tỉ lệ tim",
+                display   = "${(state.taskFarmLikeRate * 100).roundToInt()}%",
+                value     = state.taskFarmLikeRate,
+                range     = 0f..1f,
+                steps     = 99,
+                accent    = accent,
+                onChanged = { v -> onSet { copy(taskFarmLikeRate = v) } },
+            )
+            Spacer(Modifier.height(8.dp))
+            MinLikesSlider(
+                label    = "Chỉ tim video có từ",
+                value    = state.taskFarmMinLikes,
+                hint     = "Video ít tim hơn mức này sẽ không được tim. Không áp dụng cho job Tim.",
+                onChange = { v -> onSet { copy(taskFarmMinLikes = v) } },
+            )
+        }
+
+        SettingCard(index = 3) {
+            CardLabel("Tim theo nội dung", Icons.Rounded.Tag, accent)
+            Spacer(Modifier.height(10.dp))
+            CfgSwitch(
+                label     = "Tim theo hashtag",
+                subtitle  = "Video có hashtag khớp sẽ được tim (vẫn qua ngưỡng số tim)",
+                value     = state.taskFarmLikeByHashtag,
+                onChanged = { onSet { copy(taskFarmLikeByHashtag = it) } },
+            )
+            Spacer(Modifier.height(6.dp))
+            CfgTextField(
+                label     = "Hashtag (cách nhau bằng dấu phẩy)",
+                value     = state.taskFarmHashtags,
+                hint      = "xuhuong, fyp, viral — không cần dấu #",
+                onChanged = { onSet { copy(taskFarmHashtags = it) } },
+            )
+            Spacer(Modifier.height(10.dp))
+            ThinDivider()
+            Spacer(Modifier.height(10.dp))
+            CfgSwitch(
+                label     = "Tim theo chú thích",
+                subtitle  = "Video có từ khoá trong chú thích sẽ được tim",
+                value     = state.taskFarmLikeByCaption,
+                onChanged = { onSet { copy(taskFarmLikeByCaption = it) } },
+            )
+            Spacer(Modifier.height(6.dp))
+            CfgTextField(
+                label     = "Từ khoá chú thích (cách nhau bằng dấu phẩy)",
+                value     = state.taskFarmCaptionKeywords,
+                hint      = "review, unboxing, hot",
+                isLast    = true,
+                onChanged = { onSet { copy(taskFarmCaptionKeywords = it) } },
+            )
+        }
+
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Nuôi Facebook và các dịch vụ khác (X · Instagram · Threads · Snapchat)
+// ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 private fun FacebookTimingSection(state: ConfigUiState, onSet: (ConfigUiState.() -> ConfigUiState) -> Unit) {
@@ -1957,29 +1601,16 @@ private fun FacebookTimingSection(state: ConfigUiState, onSet: (ConfigUiState.()
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PlatformBadge(Section.FACEBOOK_TIMING, size = 22.dp)
-            Text("Nuôi Facebook", color = FbBlue, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        }
-
-        SectionTitle("Thời gian phiên", Icons.Rounded.Timer, FbBlue)
         SettingCard {
-            CardLabelWithNote("Thời lượng nuôi mỗi phiên", Icons.Rounded.Schedule, FbBlue,
-                note = "Tổng thời gian (giây) tool sẽ lướt feed Facebook trong một phiên chạy. " +
-                       "Sau khi hết thời gian, tool tự động đóng Facebook và kết thúc.")
+            CardLabel("Thời lượng nuôi mỗi phiên", Icons.Rounded.Schedule, FbBlue)
             Spacer(Modifier.height(8.dp))
             SettingSliderInt("Thời gian nuôi (giây)", state.facebookNurtureDurationSecs, 60, 3600, 60) {
                 onSet { copy(facebookNurtureDurationSecs = it) }
             }
         }
 
-        ThinDivider()
-        SectionTitle("Tốc độ đọc bài", Icons.Rounded.MenuBook, FbBlue)
         SettingCard {
-            CardLabelWithNote("Thời gian đọc mỗi bài", Icons.Rounded.MenuBook, FbBlue,
-                note = "Khoảng thời gian (giây) tool dừng lại \"đọc\" mỗi bài đăng trước khi " +
-                       "quyết định thích hay lướt tiếp — mô phỏng hành vi đọc tự nhiên thay vì " +
-                       "lướt liên tục. Khuyến nghị: 8–25 giây.")
+            CardLabel("Thời gian đọc mỗi bài", Icons.Rounded.MenuBook, FbBlue)
             Spacer(Modifier.height(10.dp))
             RangeSliderPair(
                 label    = "Khoảng đọc bài (giây)",
@@ -2003,15 +1634,8 @@ private fun FacebookActionsSection(state: ConfigUiState, onSet: (ConfigUiState.(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PlatformBadge(Section.FACEBOOK_ACTIONS, size = 22.dp)
-            Text("Hành động Facebook", color = FbBlue, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        }
-
-        SectionTitle("Tương tác", Icons.Rounded.Favorite, FbBlue)
         SettingCard {
-            CardLabelWithNote("Tỉ lệ thích bài đăng", Icons.Rounded.ThumbUp, FbBlue,
-                note = "Xác suất tool sẽ bấm Thích (Like) sau khi đọc xong mỗi bài đăng.")
+            CardLabel("Tỉ lệ thích bài đăng", Icons.Rounded.ThumbUp, FbBlue)
             Spacer(Modifier.height(10.dp))
             CfgSlider(
                 label     = "",
@@ -2024,12 +1648,8 @@ private fun FacebookActionsSection(state: ConfigUiState, onSet: (ConfigUiState.(
             )
         }
 
-        ThinDivider()
-        SectionTitle("Xem bình luận", Icons.Rounded.Visibility, FbBlue)
         SettingCard {
-            CardLabelWithNote("Tỉ lệ xem bình luận", Icons.Rounded.Visibility, FbBlue,
-                note = "Xác suất tool sẽ mở phần bình luận lên XEM (không gõ/gửi gì) sau khi đọc " +
-                       "xong mỗi bài đăng, mô phỏng hành vi tò mò tự nhiên.")
+            CardLabel("Tỉ lệ xem bình luận", Icons.Rounded.Visibility, FbBlue)
             Spacer(Modifier.height(10.dp))
             CfgSlider(
                 label     = "",
@@ -2042,13 +1662,8 @@ private fun FacebookActionsSection(state: ConfigUiState, onSet: (ConfigUiState.(
             )
         }
 
-        ThinDivider()
-        SectionTitle("Reels", Icons.Rounded.SmartDisplay, FbBlue)
         SettingCard {
-            CardLabelWithNote("Xem Reels", Icons.Rounded.SmartDisplay, FbBlue,
-                note = "Xác suất tool sẽ ghé qua tab Reels sau mỗi lần lướt feed, lướt xem trong " +
-                       "một khoảng thời gian, thỉnh thoảng đúp màn hình để thích video, rồi quay " +
-                       "lại feed.")
+            CardLabel("Xem Reels", Icons.Rounded.SmartDisplay, FbBlue)
             Spacer(Modifier.height(10.dp))
             CfgSlider(
                 label     = "Tỉ lệ ghé Reels",
@@ -2093,11 +1708,6 @@ private fun XDemoSection(state: ConfigUiState, onSet: (ConfigUiState.() -> Confi
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        DemoNoticeBanner()
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PlatformBadge(Section.DEMO_X, size = 22.dp)
-            Text("X (Twitter)", color = TextPrim, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        }
         SettingSliderInt("Thời gian nuôi (giây)", state.xNurtureDurationSecs, 60, 3600, 60) {
             onSet { copy(xNurtureDurationSecs = it) }
         }
@@ -2135,11 +1745,6 @@ private fun InstagramDemoSection(state: ConfigUiState, onSet: (ConfigUiState.() 
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        DemoNoticeBanner()
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PlatformBadge(Section.DEMO_INSTAGRAM, size = 22.dp)
-            Text("Instagram", color = Color(0xFFC13584), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        }
         SettingSliderInt("Thời gian nuôi (giây)", state.instagramNurtureDurationSecs, 60, 3600, 60) {
             onSet { copy(instagramNurtureDurationSecs = it) }
         }
@@ -2177,11 +1782,6 @@ private fun ThreadsDemoSection(state: ConfigUiState, onSet: (ConfigUiState.() ->
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        DemoNoticeBanner()
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PlatformBadge(Section.DEMO_THREADS, size = 22.dp)
-            Text("Threads", color = TextPrim, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        }
         SettingSliderInt("Thời gian nuôi (giây)", state.threadsNurtureDurationSecs, 60, 3600, 60) {
             onSet { copy(threadsNurtureDurationSecs = it) }
         }
@@ -2211,11 +1811,6 @@ private fun SnapchatDemoSection(state: ConfigUiState, onSet: (ConfigUiState.() -
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        DemoNoticeBanner()
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PlatformBadge(Section.DEMO_SNAPCHAT, size = 22.dp)
-            Text("Snapchat", color = TextPrim, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        }
         SettingSliderInt("Thời gian nuôi (giây)", state.snapchatNurtureDurationSecs, 60, 3600, 60) {
             onSet { copy(snapchatNurtureDurationSecs = it) }
         }
@@ -2235,10 +1830,11 @@ private fun SnapchatDemoSection(state: ConfigUiState, onSet: (ConfigUiState.() -
 }
 
 /**
- * v1.2.9: Cặp slider min/max dùng chung 1 label — ví dụ khoảng thời gian đọc bài Facebook.
- * Tự động đảm bảo min ≤ max (kẹp giá trị nếu người dùng kéo chéo).
+ * v1.2.9: Khoảng min–max dùng chung 1 nhãn — ví dụ khoảng thời gian đọc bài Facebook.
+ * v1.11.0: một thanh kéo 2 núm ([AtRangeSliderField]) thay cho 2 thanh riêng; luôn giữ min ≤ max (cách nhau ≥ [minGap]).
  */
 @Composable
+@Suppress("UNUSED_PARAMETER")
 private fun RangeSliderPair(
     label:          String,
     minValue:       Int,
@@ -2247,37 +1843,33 @@ private fun RangeSliderPair(
     accent:         Color  = Purple,
     summaryPrefix:  String = "Mỗi bài: ",
     summarySuffix:  String = "s",
+    minGap:         Int    = 0,
     onMinChanged:   (Int) -> Unit,
     onMaxChanged:   (Int) -> Unit,
 ) {
-    Column {
-        Text(label, color = TextSec, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Column(Modifier.weight(1f)) {
-                Text("Tối thiểu", color = TextMuted, fontSize = 10.sp)
-                SettingSliderInt("", minValue, range.first, maxValue, 1) { v ->
-                    onMinChanged(minOf(v, maxValue))
-                }
-            }
-            Column(Modifier.weight(1f)) {
-                Text("Tối đa", color = TextMuted, fontSize = 10.sp)
-                SettingSliderInt("", maxValue, minValue, range.last, 1) { v ->
-                    onMaxChanged(maxOf(v, minValue))
-                }
-            }
-        }
-        Text(
-            "$summaryPrefix${minValue}–${maxValue}$summarySuffix",
-            color = accent, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(top = 4.dp),
-        )
-    }
+    val lo = minValue.coerceIn(range.first, range.last)
+    val hi = maxValue.coerceIn(lo, range.last)
+    AtRangeSliderField(
+        label         = label,
+        display       = "$summaryPrefix$lo–$hi$summarySuffix",
+        start         = lo.toFloat(),
+        end           = hi.toFloat(),
+        onRangeChange = { s, e ->
+            val ns = s.roundToInt(); val ne = e.roundToInt()
+            if (ns != minValue) onMinChanged(ns)
+            if (ne != maxValue) onMaxChanged(ne)
+        },
+        valueRange    = range.first.toFloat()..range.last.toFloat(),
+        steps         = (range.last - range.first - 1).coerceAtLeast(0),
+        minGap        = minGap.toFloat(),
+        modifier      = Modifier.padding(bottom = 6.dp),
+    )
 }
 
 // v1.3.0: Đã xoá LockedValueBadge / ExperimentModeBanner — không còn setting nào
 // bị khoá nữa, mọi slider nuôi acc luôn hiện chỉnh tay được.
 
-// Reuse existing helper — simple Int slider row
+// Thanh kéo số nguyên — v1.11.0: dựng trên [AtSliderField]; giá trị luôn làm tròn về bước [step].
 @Composable
 private fun SettingSliderInt(
     label:    String,
@@ -2285,27 +1877,20 @@ private fun SettingSliderInt(
     min:      Int,
     max:      Int,
     step:     Int,
+    unit:     String = "",
+    hint:     String? = null,
+    zeroLabel: String? = null,
     onChange: (Int) -> Unit,
 ) {
-    Column(modifier = Modifier.padding(bottom = 12.dp)) {
-        Row(
-            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(label, color = TextSec, fontSize = 12.sp)
-            Text("$value", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        }
-        Spacer(Modifier.height(4.dp))
-        Slider(
-            value         = value.toFloat(),
-            onValueChange = { onChange(it.toInt()) },
-            valueRange    = min.toFloat()..max.toFloat(),
-            steps         = ((max - min) / step) - 1,
-            modifier      = Modifier.fillMaxWidth(),
-            colors        = SliderDefaults.colors(
-                thumbColor       = Purple,
-                activeTrackColor = Purple,
-            ),
-        )
-    }
+    val intervals = ((max - min) / step).coerceAtLeast(1)
+    AtSliderField(
+        label         = label,
+        display       = if (value == 0 && zeroLabel != null) zeroLabel else "$value$unit",
+        value         = value.toFloat(),
+        onValueChange = { raw -> onChange((min + Math.round((raw - min) / step) * step).coerceIn(min, max)) },
+        valueRange    = min.toFloat()..max.toFloat(),
+        steps         = intervals - 1,
+        hint          = hint,
+        modifier      = Modifier.padding(bottom = 12.dp),
+    )
 }

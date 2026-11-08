@@ -22,6 +22,10 @@ import com.atpro.db.dao.AccountDao
 import com.atpro.db.entity.AccountEntity
 import com.atpro.network.UpdateChecker
 import com.atpro.network.UpdateInfo
+import com.atpro.tasks.TaskAccountMode
+import com.atpro.tasks.TaskAccountSelector
+import com.atpro.tasks.f4f.F4fAuth
+import com.atpro.tasks.f4f.F4fAuthState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -42,10 +46,28 @@ class DashboardViewModel(
 
     init {
         observeAccounts()
+        observeF4fSession()
         pollEngineState()
     }
 
+    /** v1.6.0: đăng nhập/đăng xuất Follow4Follow → cập nhật điều kiện bấm "Bắt đầu làm nhiệm vụ". */
+    private fun observeF4fSession() {
+        viewModelScope.launch {
+            F4fAuth.manager(appContext).state.collect { s ->
+                _uiState.update { it.copy(f4fLoggedIn = s is F4fAuthState.LoggedIn) }
+            }
+        }
+    }
+
     // ── Data sources ──────────────────────────────────────────────────────────
+
+    /** v1.12.0: đọc cách chọn tài khoản nhận nhiệm vụ từ cài đặt (người dùng chỉnh ở màn Cài đặt rồi quay lại Tổng quan). */
+    private suspend fun refreshTaskAccountSummary() {
+        val repo = LocalRepository.getInstance(appContext)
+        val manual = TaskAccountMode.parse(repo.getConfig("task_account_mode", "AUTO")) == TaskAccountMode.SELECTED
+        val count = TaskAccountSelector.parseList(repo.getConfig("task_selected_accounts", "")).size
+        _uiState.update { if (it.taskAccountManual == manual && it.taskSelectedCount == count) it else it.copy(taskAccountManual = manual, taskSelectedCount = count) }
+    }
 
     private fun observeAccounts() {
         viewModelScope.launch {
@@ -61,6 +83,7 @@ class DashboardViewModel(
     private fun pollEngineState() {
         viewModelScope.launch {
             var prevEngineRef: Any? = null
+            var taskSummaryTick = 0
             var statsJob: kotlinx.coroutines.Job? = null
             var statusJob: kotlinx.coroutines.Job? = null  // [THÊM] Job observe startupStatus
 
@@ -96,6 +119,10 @@ class DashboardViewModel(
 
                 // [v1.0.4] Bỏ polling accessibilityGranted/overlayGranted/notificationGranted.
                 // Permission state đã chuyển sang ConfigViewModel.refreshPermissions().
+                // v1.12.0: cập nhật tóm tắt chọn tài khoản nhiệm vụ mỗi ~3s khi đang ở chế độ nhiệm vụ
+                if (++taskSummaryTick % 6 == 0 && _uiState.value.serviceMode == ServiceMode.TASK) {
+                    runCatching { refreshTaskAccountSummary() }
+                }
                 _uiState.update {
                     it.copy(
                         serviceConnected = TikTokAccessibilityService.isRunning,
@@ -118,6 +145,7 @@ class DashboardViewModel(
     /** v1.2.1: Chuyển dashboard sang chế độ farm hoặc task. */
     fun setServiceMode(mode: ServiceMode) {
         _uiState.update { it.copy(serviceMode = mode) }
+        if (mode == ServiceMode.TASK) viewModelScope.launch { runCatching { refreshTaskAccountSummary() } }
     }
 
     fun setCustomAccounts(text: String) {
@@ -156,25 +184,16 @@ class DashboardViewModel(
      */
     fun startTask() {
         val engine = TikTokAccessibilityService.instance?.engine ?: return
-        val state  = _uiState.value
 
-        val inputList: List<String> = when (state.farmMode) {
-            FarmMode.ALL_LOCAL     -> emptyList()
-            FarmMode.SELECTED_LIST ->
-                state.customAccounts
-                    .lines()
-                    .map { it.trim().removePrefix("@") }
-                    .filter { it.isNotEmpty() }
-                    .distinct()
-        }
-
+        // v1.12.0: nhiệm vụ chọn tài khoản theo cài đặt RIÊNG (Cài đặt → Nhiệm vụ → Tài khoản), không còn dùng chung
+        // "Toàn bộ máy / Danh sách chọn" của Nuôi TikTok → engine tự đọc `task_account_mode` / `task_selected_accounts`.
         try {
             appContext.startForegroundService(FarmForegroundService.buildIntent(appContext))
         } catch (e: Exception) {
             Log.w("DashboardVM", "startForegroundService (task) failed: ${e.message}")
         }
 
-        engine.startTask(state.farmMode, inputList)
+        engine.startTask(FarmMode.ALL_LOCAL, emptyList())
     }
 
     fun stop() {
@@ -349,8 +368,10 @@ class DashboardViewModel(
                     "${appContext.packageName}.fileprovider",
                     apkFile,
                 )
-                val installIntent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
-                    data = uri
+                // ACTION_INSTALL_PACKAGE bị deprecated (API 29): dùng ACTION_VIEW + MIME APK — cách chuẩn, chạy mọi API ≥ 24
+                // (cần FileProvider + REQUEST_INSTALL_PACKAGES — đều đã có).
+                val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "application/vnd.android.package-archive")
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
@@ -395,13 +416,24 @@ data class DashboardUiState(
     val updateInfo:        UpdateInfo?         = null,
     // [v1.0.9] Tiến độ tải APK: -1=idle, 0–99=đang tải, -2=lỗi
     val downloadProgress:  Int                 = -1,
+    /** v1.6.0: đã đăng nhập Follow4Follow (cần cho TASK mode). */
+    val f4fLoggedIn:       Boolean             = false,
+    /** v1.12.0: chế độ NHIỆM VỤ chọn tài khoản riêng (Cài đặt → Nhiệm vụ → Tài khoản): true = chọn tay. */
+    val taskAccountManual: Boolean             = false,
+    val taskSelectedCount: Int                 = 0,
 ) {
     val activeCount: Int get() = activeAccounts.size
 
-    val displayCount: Int get() = when (farmMode) {
-        FarmMode.ALL_LOCAL ->
-            activeCount
-        FarmMode.SELECTED_LIST ->
+    private val isTask: Boolean get() = serviceMode == ServiceMode.TASK
+
+    /** v1.12.0: ở chế độ nhiệm vụ, danh sách là lựa chọn riêng của nhiệm vụ chứ không phải ô gõ tay của chế độ nuôi. */
+    val listMode: Boolean get() = if (isTask) taskAccountManual else farmMode == FarmMode.SELECTED_LIST
+
+    val displayCount: Int get() = when {
+        isTask && taskAccountManual -> taskSelectedCount
+        isTask                      -> activeCount
+        farmMode == FarmMode.ALL_LOCAL -> activeCount
+        else ->
             customAccounts.lines()
                 .map { it.trim() }
                 .filter { it.isNotEmpty() }
@@ -417,7 +449,7 @@ data class DashboardUiState(
     )
 
     val canStart: Boolean get() = serviceConnected && !isFarming &&
-        (serviceMode != ServiceMode.TASK || AppConstants.TASKS_ENABLED) &&
+        (serviceMode != ServiceMode.TASK || (AppConstants.TASKS_ENABLED && f4fLoggedIn)) &&
         (isDemoMode || when (farmMode) {
             FarmMode.ALL_LOCAL     -> true
             FarmMode.SELECTED_LIST -> customAccounts.isNotBlank()
@@ -427,7 +459,9 @@ data class DashboardUiState(
         !serviceConnected ->
             "Bật Accessibility Service trước"
         serviceMode == ServiceMode.TASK && !AppConstants.TASKS_ENABLED ->
-            "Nhiệm vụ kiếm tiền chưa sẵn sàng (đang chờ tích hợp Follow4Follow)"
+            "Nhiệm vụ kiếm tiền hiện đang tắt"
+        serviceMode == ServiceMode.TASK && !f4fLoggedIn ->
+            "Cần đăng nhập Follow4Follow"
         !isDemoMode && farmMode == FarmMode.SELECTED_LIST && customAccounts.isBlank() ->
             "Nhập danh sách tài khoản cần nuôi"
         else -> null

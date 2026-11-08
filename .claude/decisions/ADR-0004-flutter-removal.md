@@ -74,4 +74,4 @@ Full rollback requires restoring deleted Dart source from git history.
 ## Review trigger
 
 - When TD-NEW-001 is done: delete `bridge/FlutterBridge.kt` and update this ADR to Closed.
-- When OEM QA signs off: update QA-013 checklist sign-off section.
+- OEM QA: checklist QA-013 đã được xoá ở v1.6.0 (FeatureFlags không còn); QA thiết bị theo dõi trong `tasks/backlog.md`.

@@ -20,11 +20,6 @@ Known issues that are not blocking but should be addressed.
 
 ---
 
-## TD-005: Flutter UI — no tests
-**Severity**: N/A — Flutter removed (TASK-017)
-
----
-
 ## TD-006: LanWebSocketServer.serverScope never cancelled on process death
 
 **Severity**: LOW
@@ -32,33 +27,6 @@ Known issues that are not blocking but should be addressed.
 **Reason**: `serverScope` is a module-level CoroutineScope. If process is killed without calling `stop()`, the scope leaks. Low risk in practice (process death cleans coroutines) but worth noting.
 **Fix**: Could use FarmForegroundService scope instead; revisit if scope leak is confirmed
 **Added**: 2026-05-21
-
----
-
-## TD-NEW-001: FlutterBridge.kt stub — refactor callsites then delete
-
-**Severity**: LOW (no runtime impact)
-**Module**: `bridge/`
-**Reason**: 5 files still call `FlutterBridge.sendEvent()` which routes to
-`LanWebSocketServer.broadcast()`. The stub is compile-compatible but unnecessary
-long-term. Kept intentionally (Option A) to avoid multi-file churn in one pass.
-**Files to update**: `AutomationEngine.kt`, `PopupHandler.kt`,
-`TikTokAccessibilityService.kt`, `LanWebSocketServer.kt`, `OverlayFarmMonitor.kt`
-**Fix**: Replace each `FlutterBridge.sendEvent(type, data)` call with
-`LanWebSocketServer.broadcast(type, data)`, then delete `bridge/` package.
-**Added**: 2026-05-22
-
----
-
-## TD-NEW-002: FeatureFlags.kt constants permanently true — remove
-
-**Severity**: LOW (code clarity only)
-**Module**: `ui/`
-**Reason**: All 6 flags are `true` and will never be `false` again. The
-object is dead code. One file still imports it: `DashboardScreen.kt`
-import was already removed. Check for any remaining references before deleting.
-**Fix**: Delete `FeatureFlags.kt`. Grep for remaining imports first.
-**Added**: 2026-05-22
 
 ---
 
@@ -151,7 +119,7 @@ tested with `kotlinx-coroutines-test` + mock Context.
 
 ---
 
-## TD-GOLIKE-001: skipAds field chưa được consume bởi AutomationEngine
+## TD-FARM-003: skipAds field chưa được consume bởi AutomationEngine
 
 **Severity**: LOW (field + UI đã xong, automation chưa dùng)
 **Module**: `data/FarmConfig.kt`, `automation/AutomationEngine.kt`, `automation/PopupHandler.kt`
@@ -162,19 +130,4 @@ nút "Bỏ qua", "×"). Config được lưu/load đúng nhưng không có hiệ
   1. Detect node quảng cáo trong `PopupHandler.handle()` bằng content-desc / text pattern
   2. Nếu `farmConfig.skipAds == true` → click nút "Bỏ qua" hoặc swipe
   3. Thêm log `"[SkipAd] Quảng cáo bỏ qua"` vào FarmLog
-**Added**: 2026-06-01
-
----
-
-## TD-GOLIKE-002: GolikeViewModel.completeJob() chưa được gọi từ AutomationEngine
-
-**Severity**: LOW (API wrapper đã xong, chưa wire vào automation loop)
-**Module**: `ui/golike/GolikeViewModel.kt`, `automation/AutomationEngine.kt`
-**Reason**: v1.1.9 implement full Golike API layer (login, get-jobs, complete-jobs).
-`completeJob()` có thể gọi thủ công từ UI nhưng chưa được trigger tự động sau khi
-`AutomationEngine` thực hiện xong tương tác TikTok cho job Golike.
-**Fix scope**:
-  1. Thêm `GolikeJobQueue` vào AutomationEngine — lấy jobs từ GolikeRepository
-  2. Match job type (`like`/`follow`/`share`) với action đang thực hiện
-  3. Sau khi action thành công → gọi `golikeRepo.completeTikTokJob(jobId, username)`
 **Added**: 2026-06-01

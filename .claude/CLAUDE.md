@@ -90,7 +90,7 @@ Keep these docs up to date when architecture changes:
 - `.claude/context/current_focus.md`
 - `.claude/context/glossary.md`
 - `.claude/decisions/`
-- `.claude/revisions/`
+- `.claude/revision/` (ghi chú theo phiên bản `vX.Y.Z.md`)
 
 Use ADR-style notes for major decisions.
 
@@ -167,10 +167,8 @@ Source: https://github.com/multica-ai/andrej-karpathy-skills
 Source: https://github.com/android/skills
 
 - **agp-9-upgrade** — Migrate Android Gradle Plugin to version 9.
-- **migrate-xml-to-compose** — 10-step workflow to migrate XML layouts to Jetpack Compose.
 - **navigation-3** — Install/migrate to Jetpack Navigation 3; recipes for deep links,
   scenes, multiple backstacks, conditional navigation, Hilt integration.
 - **r8-analyzer** — Analyze and optimize R8/ProGuard keep rules to reduce APK size.
-- **play-billing-upgrade** — Upgrade Google Play Billing Library to the latest stable version.
 - **edge-to-edge** — Implement edge-to-edge support in Jetpack Compose; fix insets,
   IME handling, system bar legibility.

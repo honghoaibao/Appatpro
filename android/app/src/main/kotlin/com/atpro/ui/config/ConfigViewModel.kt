@@ -7,10 +7,21 @@ import androidx.lifecycle.*
 import com.atpro.data.AccessibilitySettingsHelper
 import com.atpro.data.LocalRepository
 import com.atpro.notification.AtProNotificationManager
+import com.atpro.notification.NotificationPrefs
+import com.atpro.tasks.TaskAccountSelector
+import com.atpro.tasks.TaskResult
+import com.atpro.tasks.f4f.F4fAuth
+import com.atpro.tasks.f4f.F4fAuthState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
-class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
+class ConfigViewModel(
+    private val repo: LocalRepository,
+    /** v1.12.0: cần để đọc danh sách acc Follow4Follow cho mục "Tài khoản nhận nhiệm vụ" (null trong test). */
+    private val appContext: Context? = null,
+) : ViewModel() {
 
     private val _state   = MutableStateFlow(ConfigUiState())
     val state: StateFlow<ConfigUiState> = _state.asStateFlow()
@@ -19,6 +30,41 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
     val saved: SharedFlow<Unit> = _saved
 
     init { load() }
+
+    // ── v1.12.0: Tài khoản nhận nhiệm vụ ──────────────────────────────────────
+
+    private val _taskAccounts = MutableStateFlow(TaskAccountsUi())
+    val taskAccounts: StateFlow<TaskAccountsUi> = _taskAccounts.asStateFlow()
+
+    /** Đọc danh sách acc đã liên kết Follow4Follow (quick-switch) + đối chiếu với acc đã có trên máy. */
+    fun refreshTaskAccounts() {
+        val ctx = appContext ?: return
+        if (_taskAccounts.value.loading) return
+        viewModelScope.launch {
+            _taskAccounts.update { it.copy(loading = true, error = null, needLogin = false) }
+            val loggedIn = F4fAuth.manager(ctx).state.value is F4fAuthState.LoggedIn
+            if (!loggedIn) {
+                _taskAccounts.value = TaskAccountsUi(loaded = true, needLogin = true)
+                return@launch
+            }
+            val deviceKeys = withContext(Dispatchers.IO) { repo.getAccounts() }
+                .map { TaskAccountSelector.key(it.username) }.toSet()
+            when (val r = withContext(Dispatchers.IO) { F4fAuth.provider(ctx).listAccounts() }) {
+                is TaskResult.Success -> {
+                    val rows = r.data
+                        .map { TaskAccountRow(it.username, TaskAccountSelector.key(it.username) in deviceKeys) }
+                        .sortedWith(compareByDescending<TaskAccountRow> { it.onDevice }.thenBy { it.username.lowercase() })
+                    _taskAccounts.value = TaskAccountsUi(loaded = true, rows = rows, deviceCount = deviceKeys.size)
+                }
+                is TaskResult.Error -> _taskAccounts.value = TaskAccountsUi(
+                    loaded = true,
+                    needLogin = r.isAuthError,
+                    error = if (r.isAuthError) null else r.message,
+                    deviceCount = deviceKeys.size,
+                )
+            }
+        }
+    }
 
     private fun load() {
         viewModelScope.launch {
@@ -33,6 +79,13 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
                 val temp = watchMin; watchMin = watchMax; watchMax = temp
             }
             if (watchMax - watchMin < 0.5) watchMax = watchMin + 0.5
+
+            // v1.11.0: khoảng xem của chế độ kiếm tiền (số nguyên giây, min < max để thanh kéo không lỗi)
+            val likeRateNow   = repo.getConfigDouble("like_rate", 0.30).toFloat()
+            var taskWatchMin  = repo.getConfigInt("task_farm_watch_min_secs", watchMin.toInt().coerceAtLeast(1))
+            var taskWatchMax  = repo.getConfigInt("task_farm_watch_max_secs", watchMax.toInt().coerceAtLeast(2))
+            if (taskWatchMin > taskWatchMax) { val t = taskWatchMin; taskWatchMin = taskWatchMax; taskWatchMax = t }
+            if (taskWatchMax - taskWatchMin < 1) taskWatchMax = taskWatchMin + 1
 
             val s = ConfigUiState(
                 isLoading                = false,
@@ -60,6 +113,17 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
                 likeAds                  = repo.getConfigBool  ("like_ads",            false),
                 verifyAccount            = repo.getConfigBool  ("verify_account",      true),
                 enableSystemNotifications = repo.getConfigBool ("enable_system_notifications", true),
+                // [v1.12.0] Thông báo nâng cao
+                notifAlerts               = repo.getConfigBool ("notif_alerts",   true),
+                notifSessions             = repo.getConfigBool ("notif_sessions", true),
+                notifAccounts             = repo.getConfigBool ("notif_accounts", true),
+                notifTasks                = repo.getConfigBool ("notif_tasks",    true),
+                notifQuietEnabled         = repo.getConfigBool ("notif_quiet_enabled", false),
+                notifQuietStart           = repo.getConfigInt  ("notif_quiet_start", 23).coerceIn(0, 23),
+                notifQuietEnd             = repo.getConfigInt  ("notif_quiet_end",   7).coerceIn(0, 23),
+                // [v1.12.0] Chọn tài khoản nhận nhiệm vụ
+                taskAccountMode           = repo.getConfig     ("task_account_mode", "AUTO").trim().uppercase().ifEmpty { "AUTO" },
+                taskSelectedAccounts      = repo.getConfig     ("task_selected_accounts", ""),
                 // [v1.1.9+] Tab ghé thăm
                 inboxViewRate             = repo.getConfigDouble("inbox_view_rate",          0.0).toFloat(),
                 inboxViewDurationSecs     = repo.getConfigInt   ("inbox_view_duration_secs", 15),
@@ -70,6 +134,7 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
                 captionKeywords           = repo.getConfig      ("caption_keywords",          ""),
                 likeByHashtag             = repo.getConfigBool  ("like_by_hashtag",           false),
                 hashtagKeywords           = repo.getConfig      ("hashtag_keywords",          ""),
+                minLikesToLike            = repo.getConfigInt   ("min_likes_to_like",         0),   // v1.11.0
                 // [v1.2.0] Tìm kiếm theo từ khoá
                 searchEnabled             = repo.getConfigBool  ("search_enabled",            false),
                 searchKeywords            = repo.getConfig      ("search_keywords",           ""),
@@ -86,6 +151,15 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
                 taskFarmAfterJobMaxSecs   = repo.getConfigInt   ("task_farm_after_job_max_secs", 20),
                 taskLongFarmEveryNJobs    = repo.getConfigInt   ("task_long_farm_every_n_jobs",  3),
                 taskLongFarmDurationSecs  = repo.getConfigInt   ("task_long_farm_duration_secs", 180),
+                // [v1.11.0] Nuôi acc trong lúc kiếm tiền
+                taskFarmLikeRate          = repo.getConfigDouble("task_farm_like_rate",        likeRateNow.toDouble()).toFloat(),
+                taskFarmWatchMinSecs      = taskWatchMin,
+                taskFarmWatchMaxSecs      = taskWatchMax,
+                taskFarmMinLikes          = repo.getConfigInt   ("task_farm_min_likes",        0),
+                taskFarmLikeByHashtag     = repo.getConfigBool  ("task_farm_like_by_hashtag",  false),
+                taskFarmHashtags          = repo.getConfig      ("task_farm_hashtags",         ""),
+                taskFarmLikeByCaption     = repo.getConfigBool  ("task_farm_like_by_caption",  false),
+                taskFarmCaptionKeywords   = repo.getConfig      ("task_farm_caption_keywords", ""),
                 // [v1.2.4] Demo nuôi acc
                 facebookNurtureDurationSecs = repo.getConfigInt   ("fb_nurture_duration_secs",  600),
                 facebookLikeRate            = repo.getConfigDouble("fb_like_rate",              0.10).toFloat(),
@@ -162,6 +236,16 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
             repo.setConfig("like_ads",                     "${s.likeAds}")  // [v1.1.8]
             repo.setConfig("verify_account",               "${s.verifyAccount}")
             repo.setConfig("enable_system_notifications",  "${s.enableSystemNotifications}")
+            // [v1.12.0]
+            repo.setConfig("notif_alerts",                 "${s.notifAlerts}")
+            repo.setConfig("notif_sessions",               "${s.notifSessions}")
+            repo.setConfig("notif_accounts",               "${s.notifAccounts}")
+            repo.setConfig("notif_tasks",                  "${s.notifTasks}")
+            repo.setConfig("notif_quiet_enabled",          "${s.notifQuietEnabled}")
+            repo.setConfig("notif_quiet_start",            "${s.notifQuietStart}")
+            repo.setConfig("notif_quiet_end",              "${s.notifQuietEnd}")
+            repo.setConfig("task_account_mode",            s.taskAccountMode)
+            repo.setConfig("task_selected_accounts",       s.taskSelectedAccounts)
             // [v1.1.9+] Tab ghé thăm
             repo.setConfig("inbox_view_rate",          "${s.inboxViewRate}")
             repo.setConfig("inbox_view_duration_secs", "${s.inboxViewDurationSecs}")
@@ -172,6 +256,7 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
             repo.setConfig("caption_keywords",         s.captionKeywords)
             repo.setConfig("like_by_hashtag",          "${s.likeByHashtag}")
             repo.setConfig("hashtag_keywords",         s.hashtagKeywords)
+            repo.setConfig("min_likes_to_like",        "${s.minLikesToLike}")   // v1.11.0
             // [v1.2.0] Tìm kiếm theo từ khoá
             repo.setConfig("search_enabled",           "${s.searchEnabled}")
             repo.setConfig("search_keywords",          s.searchKeywords)
@@ -188,6 +273,15 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
             repo.setConfig("task_farm_after_job_max_secs", "${s.taskFarmAfterJobMaxSecs}")
             repo.setConfig("task_long_farm_every_n_jobs",  "${s.taskLongFarmEveryNJobs}")
             repo.setConfig("task_long_farm_duration_secs", "${s.taskLongFarmDurationSecs}")
+            // [v1.11.0] Nuôi acc trong lúc kiếm tiền
+            repo.setConfig("task_farm_like_rate",          "${s.taskFarmLikeRate}")
+            repo.setConfig("task_farm_watch_min_secs",     "${s.taskFarmWatchMinSecs}")
+            repo.setConfig("task_farm_watch_max_secs",     "${s.taskFarmWatchMaxSecs}")
+            repo.setConfig("task_farm_min_likes",          "${s.taskFarmMinLikes}")
+            repo.setConfig("task_farm_like_by_hashtag",    "${s.taskFarmLikeByHashtag}")
+            repo.setConfig("task_farm_hashtags",           s.taskFarmHashtags)
+            repo.setConfig("task_farm_like_by_caption",    "${s.taskFarmLikeByCaption}")
+            repo.setConfig("task_farm_caption_keywords",   s.taskFarmCaptionKeywords)
             // [v1.2.4] Demo nuôi acc
             repo.setConfig("fb_nurture_duration_secs",       "${s.facebookNurtureDurationSecs}")
             repo.setConfig("fb_like_rate",                   "${s.facebookLikeRate}")
@@ -216,7 +310,16 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
             repo.setConfig("discord_webhook_url",            s.discordWebhookUrl)
 
             // Áp dụng ngay vào runtime manager
-            AtProNotificationManager.enableSystemNotifications = s.enableSystemNotifications
+            AtProNotificationManager.prefs = NotificationPrefs(
+                enabled        = s.enableSystemNotifications,
+                alerts         = s.notifAlerts,
+                sessions       = s.notifSessions,
+                accounts       = s.notifAccounts,
+                tasks          = s.notifTasks,
+                quietEnabled   = s.notifQuietEnabled,
+                quietStartHour = s.notifQuietStart,
+                quietEndHour   = s.notifQuietEnd,
+            )
 
             _state.update { it.copy(isSaving = false, isDirty = false) }
             _saved.emit(Unit)
@@ -259,7 +362,7 @@ class ConfigViewModel(private val repo: LocalRepository) : ViewModel() {
     class Factory(private val ctx: Context) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            ConfigViewModel(LocalRepository.getInstance(ctx.applicationContext)) as T
+            ConfigViewModel(LocalRepository.getInstance(ctx.applicationContext), ctx.applicationContext) as T
     }
 }
 
@@ -292,6 +395,17 @@ data class ConfigUiState(
     val likeAds:                  Boolean = false,
     val verifyAccount:            Boolean = true,
     val enableSystemNotifications: Boolean = true,
+    // [v1.12.0] Thông báo nâng cao: từng nhóm + giờ yên tĩnh (trong khoảng này thông báo không âm/rung)
+    val notifAlerts:              Boolean = true,
+    val notifSessions:            Boolean = true,
+    val notifAccounts:            Boolean = true,
+    val notifTasks:               Boolean = true,
+    val notifQuietEnabled:        Boolean = false,
+    val notifQuietStart:          Int     = 23,
+    val notifQuietEnd:            Int     = 7,
+    // [v1.12.0] Chọn tài khoản nhận nhiệm vụ: AUTO | SELECTED + danh sách username (phẩy)
+    val taskAccountMode:          String  = "AUTO",
+    val taskSelectedAccounts:     String  = "",
     val tikTokVersion:            String  = "Đang kiểm tra...",
     // [v1.1.9+] Tab ghé thăm
     val inboxViewRate:            Float   = 0.0f,
@@ -303,6 +417,8 @@ data class ConfigUiState(
     val captionKeywords:          String  = "",
     val likeByHashtag:            Boolean = false,
     val hashtagKeywords:          String  = "",
+    // v1.11.0: chỉ tim video có số tim >= ngưỡng (0 = tắt)
+    val minLikesToLike:           Int     = 0,
     // [v1.2.0] Tìm kiếm theo từ khoá
     val searchEnabled:            Boolean = false,
     val searchKeywords:           String  = "",
@@ -319,6 +435,15 @@ data class ConfigUiState(
     val taskFarmAfterJobMaxSecs:  Int     = 20,
     val taskLongFarmEveryNJobs:   Int     = 3,
     val taskLongFarmDurationSecs: Int     = 180,
+    // [v1.11.0] Nuôi acc trong lúc kiếm tiền — bộ thiết lập riêng
+    val taskFarmLikeRate:         Float   = 0.30f,
+    val taskFarmWatchMinSecs:     Int     = 3,
+    val taskFarmWatchMaxSecs:     Int     = 8,
+    val taskFarmMinLikes:         Int     = 0,
+    val taskFarmLikeByHashtag:    Boolean = false,
+    val taskFarmHashtags:         String  = "",
+    val taskFarmLikeByCaption:    Boolean = false,
+    val taskFarmCaptionKeywords:  String  = "",
     // [v1.2.4] Demo nuôi tài khoản các nền tảng khác
     val facebookNurtureDurationSecs: Int   = 180,
     val facebookLikeRate:            Float = 0.10f,
@@ -358,3 +483,15 @@ data class ConfigUiState(
 // luôn hiện slider chỉnh tay được, không còn trạng thái khoá/LockedDefaults nữa.
 // Dòng "experiment" trong danh sách comment (nếu người dùng từng gõ ở bản cũ)
 // vẫn được lọc ra khỏi comment thật sự — xem AutomationEngine.doComment().
+
+/** v1.12.0: một tài khoản F4F trong mục "Tài khoản nhận nhiệm vụ"; [onDevice] = đã có trong danh sách acc trên máy. */
+data class TaskAccountRow(val username: String, val onDevice: Boolean)
+
+data class TaskAccountsUi(
+    val loading: Boolean = false,
+    val loaded: Boolean = false,
+    val needLogin: Boolean = false,
+    val error: String? = null,
+    val rows: List<TaskAccountRow> = emptyList(),
+    val deviceCount: Int = 0,
+)

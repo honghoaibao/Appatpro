@@ -434,8 +434,9 @@ class PopupHandler(private val service: IFarmHost) {
         }
 
         for (kw in dismissTexts) {
-            val btn = NodeTraverser.findByText(root, kw, ignoreCase = true)
-            if (btn != null && btn.isClickable) {
+            // v1.11.0: nhãn ngắn ("x", "no", "ok") chỉ khớp NGUYÊN chữ — `contains` từng trúng "Đăng xuất"/"Notifications"…
+            val btn = NodeTraverser.findByText(root, kw, exact = kw.length <= 3, ignoreCase = true)
+            if (btn != null && btn.isClickable && !NodeTraverser.isLogoutLabel(btn.displayText)) {
                 service.clickNode(btn.node)
                 delay(800)
                 return PopupResult(true, "keyword_${match.action}")
@@ -458,8 +459,8 @@ class PopupHandler(private val service: IFarmHost) {
         root ?: return null
         val CLOSE = listOf("skip", "bỏ qua", "not now", "để sau", "close", "đóng", "x", "cancel")
         for (text in CLOSE) {
-            val btn = NodeTraverser.findByText(root, text, ignoreCase = true)
-            if (btn != null && btn.isClickable) {
+            val btn = NodeTraverser.findByText(root, text, exact = text.length <= 3, ignoreCase = true)
+            if (btn != null && btn.isClickable && !NodeTraverser.isLogoutLabel(btn.displayText)) {
                 service.clickNode(btn.node)
                 return true
             }

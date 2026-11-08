@@ -1,66 +1,93 @@
 package com.atpro.ui.stats
 
-import androidx.compose.animation.*
-import com.atpro.ui.theme.AtColors
-import com.atpro.ui.theme.AtType
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.*
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.*
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.rounded.BarChart
+import androidx.compose.material.icons.rounded.MonetizationOn
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.atpro.data.EarningsSummary
 import com.atpro.db.dao.TotalsRow
 import com.atpro.db.entity.DailyStatRow
+import com.atpro.ui.f4f.WalletNumbers
+import com.atpro.ui.f4f.fmt
+import com.atpro.ui.theme.AnimatedNumber
+import com.atpro.ui.theme.AtCard
+import com.atpro.ui.theme.AtChip
+import com.atpro.ui.theme.AtColors
+import com.atpro.ui.theme.AtEmptyState
+import com.atpro.ui.theme.AtHeroCard
+import com.atpro.ui.theme.AtSectionLabel
+import com.atpro.ui.theme.AtSegmented
+import com.atpro.ui.theme.AtSkeleton
+import com.atpro.ui.theme.AtStatTile
+import com.atpro.ui.theme.AtTopBar
+import com.atpro.ui.theme.AtType
+import com.atpro.ui.theme.staggerIn
 
-// ── Design tokens ─────────────────────────────────────────────
-private val BgDark    = AtColors.Bg
-private val CardDark  = AtColors.Surface
-private val BorderDark= AtColors.Hairline
-private val Purple    = AtColors.Accent
-private val Pink      = AtColors.Rose
-private val Green     = AtColors.Success
-private val Blue      = Color(0xFF60A5FA)
-private val Gold      = Color(0xFFF5A623)
-private val TextSec   = AtColors.TextSec
-private val TextMuted = AtColors.TextMuted
+// ─────────────────────────────────────────────────────────────────────────────
+//  StatsScreen — v1.10.0: làm lại.
+//  Hai tab: "Nuôi acc" (hoạt động) và "Kiếm tiền" (thu nhập theo job + số liệu Follow4Follow).
+//  Bỏ tab nền tảng demo (chỉ là trang trống) và danh sách chi tiết từng ngày/tài khoản → thay bằng biểu đồ.
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ── Các nền tảng thống kê ─────────────────────────────────────
-private enum class StatPlatform(val label: String, val color: Color) {
-    TIKTOK   ("TikTok",    Color(0xFF69C9D0)),
-    FACEBOOK ("Facebook",  Color(0xFF1877F2)),
-    X        ("X",         Color(0xFF1D9BF0)),
-    INSTAGRAM("Instagram", Color(0xFF833AB4)),
-    THREADS  ("Threads",   Color(0xFFAAAAAA)),
-    SNAPCHAT ("Snapchat",  Color(0xFFFFFC00)),
-}
-
-// ─────────────────────────────────────────────────────────────
-//  Root screen
-// ─────────────────────────────────────────────────────────────
+private val BgDark  get() = AtColors.Bg
+private val Pink    get() = AtColors.Rose
+private val Sky     get() = AtColors.Sky
+private val Blue    get() = AtColors.Blue
+private val Green   get() = AtColors.Success
+private val Amber   get() = AtColors.Warning
+private val TextSec get() = AtColors.TextSec
+private val TextMuted get() = AtColors.TextMuted
 
 @Composable
 fun StatsScreen(
     vm:           StatsViewModel,
-    onNavigateUp: (() -> Unit)?    = null,
+    onNavigateUp: (() -> Unit)? = null,
 ) {
-    val state      by vm.uiState.collectAsStateWithLifecycle()
-    val range      by vm.range.collectAsStateWithLifecycle()
-    var platform   by remember { mutableStateOf(StatPlatform.TIKTOK) }
+    val state    by vm.uiState.collectAsStateWithLifecycle()
+    val earnings by vm.earnings.collectAsStateWithLifecycle()
+    val server   by vm.server.collectAsStateWithLifecycle()
+    val range    by vm.range.collectAsStateWithLifecycle()
+    var tab      by remember { mutableStateOf(0) }
+
+    // Mở tab Kiếm tiền: đọc lại nhật ký + lấy số liệu phía server.
+    LaunchedEffect(tab) {
+        if (tab == 1) { vm.refreshEarnings(); vm.loadServer() }
+    }
 
     Column(
         modifier = Modifier
@@ -68,408 +95,257 @@ fun StatsScreen(
             .background(BgDark)
             .statusBarsPadding()
     ) {
-        // ── Header ──
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Thống kê", style = AtType.Title.copy(fontSize = 22.sp), color = AtColors.TextPrim)
-                Text("Tổng hợp hoạt động theo nền tảng", color = TextMuted, fontSize = 11.sp)
-            }
-        }
+        AtTopBar("Thống kê", onBack = onNavigateUp)
 
-        // ── Platform tabs ──
-        LazyRow(
-            contentPadding        = PaddingValues(horizontal = 16.dp),
+        AtSegmented(
+            options       = listOf("Nuôi acc", "Kiếm tiền"),
+            selectedIndex = tab,
+            onSelect      = { tab = it },
+            modifier      = Modifier.padding(horizontal = 16.dp),
+        )
+        Spacer(Modifier.height(10.dp))
+        Row(
+            Modifier.padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(StatPlatform.entries.toList()) { p ->
-                FilterChip(
-                    selected = platform == p,
-                    onClick  = { platform = p },
-                    label    = { Text(p.label, fontSize = 12.sp) },
-                    colors   = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = AtColors.SurfaceHigh,
-                        selectedLabelColor     = AtColors.TextPrim,
-                        containerColor         = CardDark,
-                        labelColor             = TextSec,
-                    ),
-                    border = FilterChipDefaults.filterChipBorder(
-                        borderColor = BorderDark,
-                        selectedBorderColor = AtColors.TextSec,
-                        enabled = true, selected = platform == p,
-                    ),
-                )
+            StatsViewModel.Range.values().forEach { r ->
+                AtChip(text = r.label, selected = range == r, onClick = { vm.setRange(r) })
             }
         }
-
         Spacer(Modifier.height(8.dp))
 
-        // ── Body theo platform ──
-        when (platform) {
-            StatPlatform.TIKTOK -> TikTokStatsBody(state, range, vm)
-            else                -> DemoStatsBody(platform)
+        AnimatedContent(
+            targetState    = tab,
+            transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(120)) },
+            label          = "stats_tab",
+            modifier       = Modifier.weight(1f).fillMaxWidth(),
+        ) { t ->
+            if (t == 0) FarmStats(state) else EarnStats(earnings, server)
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────
-//  TikTok stats (nội dung cũ)
+//  Tab 1 — Nuôi acc
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun TikTokStatsBody(
-    state: StatsUiState,
-    range: StatsViewModel.Range,
-    vm:    StatsViewModel,
-) {
-    // Range chips
-    LazyRow(
-        contentPadding        = PaddingValues(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        items(StatsViewModel.Range.entries.toList()) { r ->
-            FilterChip(
-                selected = range == r,
-                onClick  = { vm.setRange(r) },
-                label    = { Text(r.label, fontSize = 12.sp) },
-                colors   = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = AtColors.SurfaceHigh,
-                    selectedLabelColor     = AtColors.TextPrim,
-                    containerColor         = CardDark,
-                    labelColor             = TextSec,
-                ),
-                border = FilterChipDefaults.filterChipBorder(
-                    borderColor = BorderDark,
-                    selectedBorderColor = AtColors.TextSec,
-                    enabled = true, selected = range == r,
-                ),
-            )
-        }
-    }
-    Spacer(Modifier.height(8.dp))
-    AnimatedContent(
-        targetState   = state.isLoading,
-        transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(150)) },
-        label = "loading",
-    ) { loading ->
-        if (loading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Purple, modifier = Modifier.size(32.dp))
+private fun FarmStats(state: StatsUiState) {
+    val totals = state.totals
+    when {
+        state.isLoading && totals == null -> StatsSkeleton()
+        totals == null || (totals.sessionCount == 0 && state.dailyStats.isEmpty()) ->
+            AtEmptyState(Icons.Rounded.BarChart, "Chưa có dữ liệu")
+        else -> Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(Modifier.fillMaxWidth().staggerIn(0), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AtStatTile("Phiên",  totals.sessionCount.toString(), Modifier.weight(1f))
+                AtStatTile("Video",  totals.videosWatched.toString(), Modifier.weight(1f))
+                AtStatTile("Thích",  totals.likes.toString(), Modifier.weight(1f), valueColor = Pink)
+                AtStatTile("Follow", totals.follows.toString(), Modifier.weight(1f), valueColor = Sky)
             }
-        } else {
-            StatsContent(state)
-        }
-    }
-}
 
-// ─────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────
-//  Demo platform stats placeholder [v1.2.4]
-// ─────────────────────────────────────────────────────────────
-
-@Composable
-private fun DemoStatsBody(platform: StatPlatform) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Icon(Icons.Rounded.BarChart, null, tint = platform.color.copy(alpha = 0.4f), modifier = Modifier.size(52.dp))
-            Text(platform.label, color = platform.color, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Text(
-                "Chế độ Demo — thống kê chưa được theo dõi.\nChạy phiên nuôi acc để xem dữ liệu.",
-                color = TextMuted, fontSize = 13.sp, lineHeight = 20.sp, textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 32.dp),
-            )
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(platform.color.copy(alpha = 0.08f))
-                    .border(0.5.dp, platform.color.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-            ) {
-                Text("DEMO", color = platform.color, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            val byDay = remember(state.dailyStats) {
+                state.dailyStats.groupBy { it.date }.toSortedMap().map { (date, rows) ->
+                    Triple(date, rows.sumOf { it.likes }, rows.sumOf { it.follows })
+                }
             }
-        }
-    }
-}
+            if (byDay.isNotEmpty()) {
+                ChartCard("Theo ngày", Modifier.staggerIn(1)) {
+                    Legend(listOf(Pink to "Thích", Blue to "Follow"))
+                    Spacer(Modifier.height(10.dp))
+                    AtBarChart(
+                        values     = byDay.map { (it.second + it.third).toFloat() },
+                        lower      = byDay.map { it.second.toFloat() },
+                        labels     = byDay.map { it.first.takeLast(5).replace('-', '/').split('/').reversed().joinToString("/") },
+                        color      = Blue,
+                        lowerColor = Pink,
+                    )
+                }
+            }
 
-
-
-// ─────────────────────────────────────────────────────────────
-//  Content
-// ─────────────────────────────────────────────────────────────
-
-@Composable
-private fun StatsContent(state: StatsUiState) {
-    if (state.totals == null || state.totals.sessionCount == 0) {
-        EmptyStatsView()
-        return
-    }
-
-    LazyColumn(
-        contentPadding      = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item { SummaryCard(state.totals) }
-
-        // v1.2.3: Card tỷ lệ % tương tác — like/follow/comment trên mỗi video xem.
-        item { EngagementRateCard(state.totals) }
-
-        if (state.dailyStats.isNotEmpty()) {
-            item {
-                Text(
-                    "Theo ngày",
-                    color = TextSec, fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(top = 4.dp),
+            ChartCard("Tỉ lệ trên video", Modifier.staggerIn(2)) {
+                AtRankBars(
+                    items  = listOf(
+                        "Thích"      to totals.likeRate,
+                        "Follow"     to totals.followRate,
+                        "Bình luận"  to totals.commentRate,
+                    ),
+                    color  = Pink,
+                    format = { "%.1f%%".format(it) },
                 )
             }
 
-            val byDate = state.dailyStats.groupBy { it.date }
-            byDate.entries.sortedByDescending { it.key }.forEach { (date, rows) ->
-                item(key = date) { DayGroup(date = date, rows = rows) }
+            val topAccounts = remember(state.dailyStats) {
+                state.dailyStats.groupBy { it.accountId }
+                    .map { (acc, rows) -> "@$acc" to rows.sumOf { it.likes + it.follows }.toFloat() }
+                    .sortedByDescending { it.second }.take(5)
             }
-        }
-
-        item { Spacer(Modifier.height(24.dp)) }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────
-//  Summary card
-// ─────────────────────────────────────────────────────────────
-
-@Composable
-private fun SummaryCard(totals: TotalsRow) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(CardDark)
-            .border(1.dp, BorderDark, RoundedCornerShape(16.dp))
-            .padding(20.dp),
-    ) {
-        Text(
-            "Tổng cộng",
-            color = TextSec, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-        )
-        Spacer(Modifier.height(16.dp))
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            SummaryMetric("${totals.sessionCount}", "Phiên",    Icons.Rounded.Loop,       Purple)
-            SummaryMetric("${totals.videosWatched}", "Video",   Icons.Rounded.PlayCircle,  Blue)
-            SummaryMetric("${totals.likes}", "Thích",           Icons.Rounded.Favorite,    Pink)
-            SummaryMetric("${totals.follows}", "Theo dõi",      Icons.Rounded.PersonAdd,   Green)
+            if (topAccounts.size > 1) {
+                ChartCard("Tài khoản", Modifier.staggerIn(3)) {
+                    AtRankBars(topAccounts, color = Sky)
+                }
+            }
+            Spacer(Modifier.height(20.dp))
         }
     }
 }
 
-@Composable
-private fun SummaryMetric(value: String, label: String, icon: ImageVector, color: Color) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(icon, null, tint = color.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
-        Spacer(Modifier.height(4.dp))
-        Text(value, color = color, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
-        Spacer(Modifier.height(2.dp))
-        Text(label, color = TextMuted, fontSize = 11.sp)
-    }
-}
-
 // ─────────────────────────────────────────────────────────────
-//  Engagement rate card [v1.2.3] — tỷ lệ % like/follow/comment trên mỗi video
+//  Tab 2 — Kiếm tiền
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun EngagementRateCard(totals: TotalsRow) {
+private fun EarnStats(e: EarningsSummary, server: WalletNumbers?) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(CardDark)
-            .border(1.dp, BorderDark, RoundedCornerShape(16.dp))
-            .padding(16.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.Percent, null, tint = TextSec, modifier = Modifier.size(14.dp))
-            Spacer(Modifier.width(6.dp))
+        // Số liệu phía server (đã gộp nhiều nguồn): xu chờ · làm hôm nay · tổng xu
+        if (server != null) {
+            AtSectionLabel("Follow4Follow", Modifier.staggerIn(0))
+            Row(Modifier.fillMaxWidth().staggerIn(0), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AtStatTile("Xu chờ", server.pending.fmt(), Modifier.weight(1f), valueColor = Amber)
+                AtStatTile("Làm hôm nay", "${server.todayJobs} job", Modifier.weight(1f))
+                AtStatTile("Tổng xu", server.totalCoins.fmt(), Modifier.weight(1f))
+            }
+        }
+
+        if (e.isEmpty) {
+            AtEmptyState(Icons.Rounded.MonetizationOn, "Chưa có thu nhập")
+            return@Column
+        }
+
+        AtSectionLabel("Trên máy này", Modifier.staggerIn(1))
+        AtHeroCard(Modifier.fillMaxWidth().staggerIn(1)) {
+            Text("Thu nhập", color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                AnimatedNumber(e.totalCoins.toInt(), AtType.Title.copy(fontSize = 36.sp), color = Color.White)
+                Text("  xu", color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp, modifier = Modifier.padding(bottom = 5.dp))
+                Spacer(Modifier.weight(1f))
+                e.changePercent?.let { pct ->
+                    val up = pct >= 0
+                    Text(
+                        "${if (up) "▲" else "▼"} ${"%.0f".format(kotlin.math.abs(pct))}%",
+                        color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.White.copy(alpha = 0.18f))
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
             Text(
-                "Tỷ lệ tương tác / video",
-                color = TextSec, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                "TB ${formatRate(totals.avgVideosPerSession)} video/phiên",
-                color = TextMuted, fontSize = 11.sp,
+                "${e.totalJobs} job  ·  TB ${coin(e.avgPerJob)}/job",
+                color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp,
             )
         }
 
-        RateBar("Thích",      totals.likeRate,    Pink,  Icons.Rounded.Favorite)
-        RateBar("Theo dõi",   totals.followRate,  Green, Icons.Rounded.PersonAdd)
-        RateBar("Bình luận",  totals.commentRate, Blue,  Icons.Rounded.ChatBubble)
-    }
-}
+        Row(Modifier.fillMaxWidth().staggerIn(2), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AtStatTile("Hôm nay", coin(e.todayCoins), Modifier.weight(1f), valueColor = Green)
+            AtStatTile("Job hôm nay", e.todayJobs.toString(), Modifier.weight(1f))
+            AtStatTile("Ngày tốt nhất", e.bestDay?.let { coin(it.coins) } ?: "—", Modifier.weight(1f))
+        }
 
-/** Thanh tiến trình hiển thị tỷ lệ % (0–100), kẹp ở 100% nếu vượt (vd nhiều like/video). */
-@Composable
-private fun RateBar(label: String, percent: Float, color: Color, icon: ImageVector) {
-    val clamped = (percent / 100f).coerceIn(0f, 1f)
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, tint = color.copy(alpha = 0.8f), modifier = Modifier.size(13.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(label, color = TextSec, fontSize = 12.sp, modifier = Modifier.weight(1f))
-            Text(
-                "${formatRate(percent)}%",
-                color = color, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+        ChartCard("Theo ngày", Modifier.staggerIn(3)) {
+            Legend(listOf(Sky to "Tim", Blue to "Follow"))
+            Spacer(Modifier.height(10.dp))
+            AtBarChart(
+                values     = e.days.map { it.coins.toFloat() },
+                lower      = e.days.map { it.likeCoins.toFloat() },
+                labels     = e.days.map { it.label },
+                color      = Blue,
+                lowerColor = Sky,
+                format     = { coin(it.toDouble()) + " xu" },
             )
         }
-        LinearProgressIndicator(
-            progress   = { clamped },
-            modifier   = Modifier
-                .fillMaxWidth()
-                .height(7.dp)
-                .clip(RoundedCornerShape(50)),
-            color      = color,
-            trackColor = color.copy(alpha = 0.12f),
-        )
+
+        if (e.days.size > 1) {
+            ChartCard("Cộng dồn", Modifier.staggerIn(4)) {
+                AtAreaChart(e.cumulative, e.days.map { it.label }, color = Green)
+            }
+        }
+
+        ChartCard("Loại job", Modifier.staggerIn(5)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AtDonutChart(
+                    parts = listOf(e.likeCoins.toFloat() to Sky, e.followCoins.toFloat() to Blue),
+                    centerTop = "${e.likeJobs + e.followJobs}",
+                    centerBottom = "job",
+                )
+                Spacer(Modifier.padding(start = 18.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AtLegendRow(Sky,  "Tim · ${e.likeJobs} job",     coin(e.likeCoins))
+                    AtLegendRow(Blue, "Follow · ${e.followJobs} job", coin(e.followCoins))
+                }
+            }
+        }
+
+        ChartCard("Theo giờ", Modifier.staggerIn(6)) {
+            AtBarChart(
+                values = e.hourCoins.map { it.toFloat() },
+                labels = (0..23).map { "${it}h" },
+                color  = Amber,
+                height = 110.dp,
+                format = { coin(it.toDouble()) + " xu" },
+            )
+        }
+
+        if (e.topAccounts.isNotEmpty()) {
+            ChartCard("Tài khoản", Modifier.staggerIn(7)) {
+                AtRankBars(
+                    items  = e.topAccounts.map { "@${it.first}" to it.second.toFloat() },
+                    color  = Green,
+                    format = { coin(it.toDouble()) },
+                )
+            }
+        }
+        Spacer(Modifier.height(20.dp))
     }
 }
 
-/** Format 1 chữ số sau dấu phẩy, bỏ ".0" thừa (vd 12.0 → "12", 12.5 → "12.5"). */
-private fun formatRate(value: Float): String {
-    val rounded = Math.round(value * 10f) / 10f
-    return if (rounded == rounded.toLong().toFloat()) rounded.toLong().toString()
-    else rounded.toString()
-}
-
 // ─────────────────────────────────────────────────────────────
-//  Day group
+//  Thành phần chung
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun DayGroup(date: String, rows: List<DailyStatRow>) {
+private fun ChartCard(title: String, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    AtCard(modifier.fillMaxWidth()) {
+        Text(title, color = AtColors.TextPrim, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(12.dp))
+        content()
+    }
+}
+
+@Composable
+private fun Legend(items: List<Pair<Color, String>>) {
+    Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+        items.forEach { (c, label) ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(8.dp).clip(RoundedCornerShape(3.dp)).background(c))
+                Spacer(Modifier.width(6.dp))
+                Text(label, color = TextSec, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatsSkeleton() {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(CardDark)
-            .border(1.dp, BorderDark, RoundedCornerShape(16.dp))
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        val dayTotalSessions = rows.sumOf { it.sessionCount }
-        val dayTotalVideos   = rows.sumOf { it.videosWatched }
-        val dayTotalLikes    = rows.sumOf { it.likes }
-        val dayTotalFollows  = rows.sumOf { it.follows }
-        val dayLikeRate      = if (dayTotalVideos > 0) dayTotalLikes * 100f / dayTotalVideos else 0f
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                date,
-                color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.width(8.dp))
-            // v1.2.3: tỷ lệ % like trong ngày — chip nhỏ cạnh ngày.
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Pink.copy(alpha = 0.14f))
-                    .border(1.dp, Pink.copy(alpha = 0.25f), RoundedCornerShape(20.dp))
-                    .padding(horizontal = 7.dp, vertical = 2.dp),
-            ) {
-                Text("${formatRate(dayLikeRate)}% thích", color = Pink, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-            }
-            Spacer(Modifier.weight(1f))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment     = Alignment.CenterVertically,
-            ) {
-                MicroStat("${dayTotalSessions}", Icons.Rounded.Loop,        TextSec)
-                MicroStat("${dayTotalVideos}",   Icons.Rounded.PlayCircle,  Blue)
-                MicroStat("${dayTotalLikes}",    Icons.Rounded.Favorite,    Pink)
-                MicroStat("${dayTotalFollows}",  Icons.Rounded.PersonAdd,   Green)
-            }
-        }
-
-        if (rows.size > 1) {
-            HorizontalDivider(color = BorderDark, thickness = 0.5.dp)
-            rows.sortedByDescending { it.sessionCount }.forEach { row ->
-                AccountDayRow(row)
-            }
-        }
+        AtSkeleton(Modifier.fillMaxWidth().height(64.dp))
+        AtSkeleton(Modifier.fillMaxWidth().height(200.dp))
+        AtSkeleton(Modifier.fillMaxWidth().height(120.dp))
     }
 }
 
-@Composable
-private fun AccountDayRow(row: DailyStatRow) {
-    Row(
-        modifier          = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            "@${row.accountId}",
-            color = Purple.copy(alpha = 0.8f), fontSize = 12.sp,
-            modifier = Modifier.weight(1f),
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            MicroStat("${row.sessionCount}",   Icons.Rounded.Loop,       TextSec)
-            MicroStat("${row.videosWatched}",  Icons.Rounded.PlayCircle, Blue)
-            MicroStat("${row.likes}",          Icons.Rounded.Favorite,   Pink)
-            MicroStat("${row.follows}",        Icons.Rounded.PersonAdd,  Green)
-        }
-    }
-}
-
-@Composable
-private fun MicroStat(value: String, icon: ImageVector, color: Color) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-        Icon(icon, null, tint = color.copy(alpha = 0.7f), modifier = Modifier.size(10.dp))
-        Text(value, color = color, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-// ─────────────────────────────────────────────────────────────
-//  Empty state
-// ─────────────────────────────────────────────────────────────
-
-@Composable
-private fun EmptyStatsView() {
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(88.dp)
-                .clip(RoundedCornerShape(50))
-                .background(CardDark),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Rounded.BarChart,
-                contentDescription = null,
-                tint     = TextMuted.copy(alpha = 0.5f),
-                modifier = Modifier.size(40.dp),
-            )
-        }
-        Spacer(Modifier.height(16.dp))
-        Text(
-            "Chưa có dữ liệu",
-            color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Thống kê sẽ xuất hiện\nsau khi hoàn thành phiên farm đầu tiên",
-            color     = TextMuted,
-            fontSize  = 13.sp,
-            lineHeight = 20.sp,
-            textAlign = TextAlign.Center,
-        )
-    }
-}
+/** 12 → "12", 12.5 → "12,5" (xu thường là số nguyên; chỉ hiện số lẻ khi có). */
+private fun coin(v: Double): String =
+    if (v % 1.0 == 0.0) v.toLong().fmt() else java.util.Locale.getDefault().let { "%.1f".format(it, v) }

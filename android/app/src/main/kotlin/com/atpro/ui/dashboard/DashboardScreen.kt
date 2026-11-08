@@ -48,6 +48,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import com.atpro.R
+import com.atpro.tasks.f4f.F4fAuth
+import com.atpro.tasks.f4f.F4fAuthState
+import com.atpro.ui.theme.AtHeroCard
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -63,41 +66,31 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.atpro.automation.FarmMode
 import com.atpro.automation.LiveFarmStats
 import com.atpro.network.UpdateInfo
-import com.atpro.ui.accounts.AccountsActivity
-import com.atpro.ui.config.ConfigActivity
-import com.atpro.ui.logs.LogsActivity
-import com.atpro.ui.stats.StatsActivity
 
 // ── Design tokens ─────────────────────────────────────────────
-private val BgDark      = AtColors.Bg
-private val CardDark    = AtColors.Surface
-private val BorderDark  = AtColors.Hairline
-private val Purple      = AtColors.Accent
-private val Pink        = AtColors.Rose
-private val Green       = AtColors.Success
-private val Amber       = AtColors.Warning
-private val RedStop     = AtColors.Danger
-private val TextPrim    = AtColors.TextPrim
-private val TextSec     = AtColors.TextSec
-private val TextMuted   = AtColors.TextMuted
-
-// ─────────────────────────────────────────────────────────────
+private val BgDark get() = AtColors.Bg
+private val CardDark get() = AtColors.Surface
+private val BorderDark get() = AtColors.Hairline
+private val Purple get() = AtColors.Accent
+private val Pink get() = AtColors.Rose
+private val Green get() = AtColors.Success
+private val Amber get() = AtColors.Warning
+private val RedStop get() = AtColors.Danger
+private val TextPrim get() = AtColors.TextPrim
+private val TextSec get() = AtColors.TextSec
+private val TextMuted get() = AtColors.TextMuted // ─────────────────────────────────────────────────────────────
 //  Root Screen
 // ─────────────────────────────────────────────────────────────
 
 @Composable
 fun DashboardScreen(vm: DashboardViewModel) {
-    val state      by vm.uiState.collectAsStateWithLifecycle()
-    val context    = LocalContext.current
-
-    // [v1.1.5] Trạng thái thu nhỏ popup — reset mỗi khi farm kết thúc
-    var isMinimized by remember { mutableStateOf(false) }
-    LaunchedEffect(state.isStartingUp) {
-        if (!state.isStartingUp) isMinimized = false
-    }
+    val state by vm.uiState.collectAsStateWithLifecycle()
 
     // [v1.0.5 → v1.2.9] Kiểm tra phiên bản mới — ĐÃ CHUYỂN lên MainScreen.kt để popup
     // không bị mất khi người dùng chuyển tab (DashboardScreen bị unmount khi rời tab Dashboard).
+    //
+    // v1.9.0: bỏ hộp thoại "Đang khởi động" + bong bóng thu nhỏ trong app — trùng chức năng với popup nổi
+    // (OverlayFarmMonitor) và che mất Tổng quan; trạng thái hiện thời nay là một dòng ngay trong FarmingView.
 
     Box(
         modifier = Modifier
@@ -105,7 +98,7 @@ fun DashboardScreen(vm: DashboardViewModel) {
             .background(BgDark)
     ) {
         // [v1.0.4] Bỏ permission gate — mở thẳng Dashboard không cần cấp quyền trước.
-        // Việc cấp quyền được thực hiện qua tab "Quyền" trong Cài đặt.
+        // Việc cấp quyền được thực hiện ở Cài đặt → Quyền & trợ năng.
         AnimatedContent(
             targetState = state.isFarming,
             transitionSpec = {
@@ -121,144 +114,6 @@ fun DashboardScreen(vm: DashboardViewModel) {
         ) { farming ->
             if (farming) FarmingView(state, vm)
             else         IdleView(state, vm)
-        }
-
-        // ── [v1.1.5] Startup status popup — có nút thu nhỏ ──────────────────
-        if (state.isStartingUp && !isMinimized) {
-            StartupStatusDialog(
-                status     = state.startupStatus,
-                isPaused   = state.isPaused,
-                onPause    = vm::pause,
-                onResume   = vm::resume,
-                onStop     = vm::stop,
-                onMinimize = { isMinimized = true },
-            )
-        }
-
-        // ── [v1.1.5] Bubble thu nhỏ — hiện khi popup bị minimize ────────────
-        AnimatedVisibility(
-            visible = state.isStartingUp && isMinimized,
-            enter   = fadeIn(tween(200)) + scaleIn(tween(220), initialScale = 0.6f),
-            exit    = fadeOut(tween(150)) + scaleOut(tween(150)),
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 20.dp, bottom = 20.dp),
-        ) {
-            MinimizedBubble(
-                isPaused  = state.isPaused,
-                onExpand  = { isMinimized = false },
-            )
-        }
-
-        // [v1.0.5 → v1.2.9] Update dialog — ĐÃ CHUYỂN lên MainScreen.kt (xem comment ở trên).
-    }
-}
-
-// ─────────────────────────────────────────────────────────────
-//  [v1.1.9] Startup Status Dialog — redesigned popup
-//  Cải tiến: accent strip, icon header, bố cục rõ ràng hơn
-// ─────────────────────────────────────────────────────────────
-
-@Composable
-private fun StartupStatusDialog(
-    status:     String,
-    isPaused:   Boolean,
-    onPause:    () -> Unit,
-    onResume:   () -> Unit,
-    onStop:     () -> Unit,
-    onMinimize: () -> Unit,
-) {
-    Dialog(
-        onDismissRequest = { /* không dismiss khi tap ngoài */ },
-        properties = DialogProperties(
-            dismissOnBackPress      = false,
-            dismissOnClickOutside   = false,
-            usePlatformDefaultWidth = false,
-        ),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.64f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            AtDialogCard(widthFraction = 0.84f) {
-                // ── Header: trạng thái · thu nhỏ ──
-                Row(
-                    modifier          = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    AnimatedContent(
-                        targetState    = isPaused,
-                        transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(150)) },
-                        label          = "startup_title",
-                    ) { paused ->
-                        AtStatus(
-                            text    = if (paused) "Đã tạm dừng" else "Đang khởi động",
-                            color   = if (paused) Amber else Green,
-                            pulsing = !paused,
-                        )
-                    }
-                    Spacer(Modifier.weight(1f))
-                    IconButton(onClick = onMinimize, modifier = Modifier.size(32.dp)) {
-                        Icon(
-                            Icons.Rounded.KeyboardArrowDown,
-                            contentDescription = "Thu nhỏ",
-                            tint     = TextMuted,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(14.dp))
-
-                // ── Dòng trạng thái hiện tại ──
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(AtColors.SurfaceHigh)
-                        .padding(horizontal = 12.dp, vertical = 12.dp),
-                    contentAlignment = Alignment.CenterStart,
-                ) {
-                    AnimatedContent(
-                        targetState    = status,
-                        transitionSpec = {
-                            (fadeIn(tween(200)) + slideInVertically(tween(200)) { it / 4 }) togetherWith
-                                (fadeOut(tween(120)) + slideOutVertically(tween(120)) { -it / 4 })
-                        },
-                        label = "startup_status",
-                    ) { msg ->
-                        Text(text = msg, color = TextSec, fontSize = 13.sp, lineHeight = 18.sp)
-                    }
-                }
-
-                Spacer(Modifier.height(16.dp))
-
-                // ── Điều khiển ──
-                Row(
-                    modifier              = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    AtButton(
-                        text     = if (isPaused) "Tiếp tục" else "Tạm dừng",
-                        onClick  = if (isPaused) onResume else onPause,
-                        modifier = Modifier.weight(1f),
-                        icon     = if (isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
-                        style    = AtButtonStyle.Secondary,
-                        height   = 44.dp,
-                    )
-                    AtButton(
-                        text     = "Dừng",
-                        onClick  = onStop,
-                        modifier = Modifier.weight(1f),
-                        icon     = Icons.Rounded.Stop,
-                        style    = AtButtonStyle.Danger,
-                        height   = 44.dp,
-                    )
-                }
-            }
         }
     }
 }
@@ -292,7 +147,7 @@ fun UpdateAvailableDialog(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.64f))
+                .background(AtColors.Scrim)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication        = null,
@@ -381,7 +236,7 @@ fun UpdateAvailableDialog(
                             )
                         } else if (hasError) {
                             Text(
-                                "Tải thất bại. Kiểm tra mạng rồi thử lại.",
+                                "Tải thất bại",
                                 color    = RedStop,
                                 fontSize = 12.sp,
                             )
@@ -423,7 +278,10 @@ fun UpdateAvailableDialog(
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun IdleView(state: DashboardUiState, vm: DashboardViewModel) {
+private fun IdleView(
+    state: DashboardUiState,
+    vm:    DashboardViewModel,
+) {
     val context = LocalContext.current
 
     val (startLabel, startAction) = when (state.serviceMode) {
@@ -444,7 +302,7 @@ private fun IdleView(state: DashboardUiState, vm: DashboardViewModel) {
     ) {
         Spacer(Modifier.height(20.dp))
 
-        // ── Header: logo + tên · trạng thái · cài đặt ──
+        // ── Header: logo + tên · trạng thái (Cài đặt đã có tab riêng ở thanh dưới) ──
         Row(
             modifier          = Modifier.fillMaxWidth().staggerIn(0),
             verticalAlignment = Alignment.CenterVertically,
@@ -464,45 +322,100 @@ private fun IdleView(state: DashboardUiState, vm: DashboardViewModel) {
                 color   = if (state.serviceConnected) Green else TextMuted,
                 pulsing = state.serviceConnected,
             )
-            Spacer(Modifier.width(4.dp))
-            IconButton(
-                onClick  = { context.startActivity(Intent(context, ConfigActivity::class.java)) },
-                modifier = Modifier.size(40.dp),
-            ) {
-                Icon(
-                    Icons.Rounded.Settings,
-                    contentDescription = "Cài đặt",
-                    tint     = TextSec,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
         }
 
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(28.dp))
 
-        // ── Số tài khoản (số đếm lên mượt) ──
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.fillMaxWidth().staggerIn(1),
+        // ── Thẻ nổi bật: dịch vụ đang chọn · số tài khoản (số đếm lên mượt) ──
+        val serviceLabel = when (state.serviceMode) {
+            com.atpro.automation.ServiceMode.FARM              -> "Nuôi TikTok"
+            com.atpro.automation.ServiceMode.TASK              -> "Nhiệm vụ kiếm tiền"
+            com.atpro.automation.ServiceMode.FACEBOOK_NURTURE  -> "Nuôi Facebook"
+            com.atpro.automation.ServiceMode.X_NURTURE         -> "Nuôi X"
+            com.atpro.automation.ServiceMode.INSTAGRAM_NURTURE -> "Nuôi Instagram"
+            com.atpro.automation.ServiceMode.THREADS_NURTURE   -> "Nuôi Threads"
+            com.atpro.automation.ServiceMode.SNAPCHAT_NURTURE  -> "Nuôi Snapchat"
+        }
+        val f4f by F4fAuth.manager(context).state.collectAsStateWithLifecycle()
+        AtHeroCard(
+            modifier       = Modifier.fillMaxWidth().staggerIn(1),
+            contentPadding = PaddingValues(horizontal = 22.dp, vertical = 22.dp),
         ) {
-            AnimatedNumber(value = state.displayCount, style = AtType.Display)
-            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    serviceLabel,
+                    color      = Color.White,
+                    fontSize   = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier   = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.White.copy(alpha = 0.18f))
+                        .padding(horizontal = 11.dp, vertical = 4.dp),
+                )
+            }
+            Spacer(Modifier.height(20.dp))
+            AnimatedNumber(
+                value = state.displayCount,
+                style = AtType.Display.copy(fontSize = 68.sp, lineHeight = 68.sp),
+                color = Color.White,
+            )
+            Spacer(Modifier.height(6.dp))
             Text(
                 text  = when {
-                    state.farmMode == FarmMode.SELECTED_LIST -> "tài khoản trong danh sách"
-                    state.displayCount == 0                  -> "tài khoản"
-                    else                                     -> "tài khoản hoạt động"
+                    state.serviceMode == com.atpro.automation.ServiceMode.TASK && state.listMode -> "tài khoản đã chọn nhận nhiệm vụ"
+                    state.listMode           -> "tài khoản trong danh sách"
+                    state.displayCount == 0  -> "tài khoản"
+                    else                     -> "tài khoản hoạt động"
                 },
-                color    = TextMuted,
+                color    = Color.White.copy(alpha = 0.86f),
                 fontSize = 14.sp,
             )
+            val loggedIn = f4f as? F4fAuthState.LoggedIn
+            if (state.serviceMode == com.atpro.automation.ServiceMode.TASK && loggedIn != null) {
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.White.copy(alpha = 0.14f))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Số dư Follow4Follow", color = Color.White.copy(alpha = 0.86f), fontSize = 12.sp, modifier = Modifier.weight(1f))
+                    Text(loggedIn.balance ?: "—", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
         }
 
         Spacer(Modifier.weight(1f))
 
         // ── Điều khiển + nút chính ──
         Column(Modifier.fillMaxWidth().staggerIn(2)) {
-            AnimatedVisibility(visible = !state.isDemoMode) {
+            // v1.12.0: chế độ nhiệm vụ có cách chọn tài khoản riêng (Cài đặt → Nhiệm vụ → Tài khoản): hiện tóm tắt thay cho ô gõ tay.
+            AnimatedVisibility(visible = state.serviceMode == com.atpro.automation.ServiceMode.TASK) {
+                Column {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(AtColors.Surface)
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Tài khoản nhận nhiệm vụ", color = AtColors.TextPrim, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                if (state.taskAccountManual) "Chọn tay · ${state.taskSelectedCount} tài khoản"
+                                else "Tự động · mọi acc đã liên kết và có trên máy",
+                                color = TextMuted, fontSize = 12.sp,
+                            )
+                        }
+                        Text("Cài đặt › Nhiệm vụ", color = AtColors.Accent, fontSize = 11.sp)
+                    }
+                    Spacer(Modifier.height(16.dp))
+                }
+            }
+            AnimatedVisibility(visible = !state.isDemoMode && state.serviceMode != com.atpro.automation.ServiceMode.TASK) {
                 Column {
                     AtSegmented(
                         options       = listOf("Toàn bộ máy", "Danh sách chọn"),
@@ -548,7 +461,7 @@ private fun IdleView(state: DashboardUiState, vm: DashboardViewModel) {
             }
         }
 
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(24.dp))
     }
 }
 
@@ -558,7 +471,8 @@ private fun IdleView(state: DashboardUiState, vm: DashboardViewModel) {
 
 @Composable
 private fun FarmingView(state: DashboardUiState, vm: DashboardViewModel) {
-    val stats = state.liveStats
+    val stats    = state.liveStats
+    val taskMode = state.serviceMode == com.atpro.automation.ServiceMode.TASK
 
     Column(
         modifier = Modifier
@@ -597,7 +511,7 @@ private fun FarmingView(state: DashboardUiState, vm: DashboardViewModel) {
 
         Spacer(Modifier.weight(1f))
 
-        CurrentAccountCard(stats)
+        CurrentAccountCard(stats, taskMode)
 
         Spacer(Modifier.height(12.dp))
 
@@ -605,7 +519,34 @@ private fun FarmingView(state: DashboardUiState, vm: DashboardViewModel) {
             visible = stats.account.isNotEmpty(),
             enter   = fadeIn(tween(400)) + expandVertically(tween(400)),
         ) {
-            StatsGrid(stats)
+            StatsGrid(stats, taskMode)
+        }
+
+        // v1.9.0: dòng trạng thái hiện thời (thay cho hộp thoại "Đang khởi động" che màn hình).
+        AnimatedVisibility(
+            visible = state.startupStatus.isNotBlank(),
+            enter   = fadeIn(tween(250)) + expandVertically(tween(250)),
+            exit    = fadeOut(tween(150)) + shrinkVertically(tween(150)),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(AtColors.SurfaceHigh)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                LiveDot(color = if (state.isPaused) Amber else AtColors.Sky, pulsing = !state.isPaused)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    state.startupStatus,
+                    color    = TextSec,
+                    fontSize = 12.sp,
+                    maxLines = 2,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+            }
         }
 
         Spacer(Modifier.weight(1f))
@@ -646,11 +587,11 @@ private fun AccountListInput(value: String, onChanged: (String) -> Unit) {
             colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor   = CardDark,
                 unfocusedContainerColor = CardDark,
-                focusedBorderColor      = TextSec,
-                unfocusedBorderColor    = BorderDark,
+                focusedBorderColor      = AtColors.Blue,
+                unfocusedBorderColor    = AtColors.HairlineHi,
                 focusedTextColor        = TextPrim,
                 unfocusedTextColor      = TextPrim,
-                cursorColor             = TextPrim,
+                cursorColor             = AtColors.Blue,
             ),
         )
         Spacer(Modifier.height(6.dp))
@@ -679,52 +620,20 @@ private fun AppLogo() {
     )
 }
 
-// ─────────────────────────────────────────────────────────────
-//  MinimizedBubble — bubble tròn khi popup được thu nhỏ.
-//  v1.4.0: phẳng, vòng lan toả theo trạng thái (xanh = chạy, vàng = tạm dừng). Chạm để mở lại.
-// ─────────────────────────────────────────────────────────────
-
 @Composable
-private fun MinimizedBubble(
-    isPaused: Boolean,
-    onExpand: () -> Unit,
-) {
-    val tone = if (isPaused) Amber else Green
-    Box(contentAlignment = Alignment.Center) {
-        LiveDot(
-            color    = tone,
-            pulsing  = !isPaused,
-            modifier = Modifier.size(16.dp).graphicsLayer { scaleX = 4.5f; scaleY = 4.5f; alpha = 0.35f },
-        )
-        Box(
-            modifier = Modifier
-                .size(56.dp)
-                .pressClickable(pressedScale = 0.94f, onClick = onExpand)
-                .clip(CircleShape)
-                .background(CardDark)
-                .border(1.5.dp, tone, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Image(
-                painter            = painterResource(R.drawable.icon_app),
-                contentDescription = "Mở lại trạng thái",
-                contentScale       = ContentScale.Crop,
-                modifier           = Modifier.size(36.dp).clip(CircleShape),
-            )
-        }
+private fun CurrentAccountCard(stats: LiveFarmStats, taskMode: Boolean) {
+    // v1.9.0: chế độ nhiệm vụ đo tiến độ theo số job đã xong của acc hiện tại (✓ n / N), không theo số acc.
+    val progress = when {
+        taskMode -> if (stats.jobsTarget > 0) (stats.jobsDone.toFloat() / stats.jobsTarget).coerceIn(0f, 1f) else 0f
+        else     -> if (stats.total > 0) stats.index.toFloat() / stats.total else 0f
     }
-}
-
-@Composable
-private fun CurrentAccountCard(stats: LiveFarmStats) {
-    val progress = if (stats.total > 0) stats.index.toFloat() / stats.total else 0f
     val animProgress by animateFloatAsState(
         targetValue   = progress,
         animationSpec = tween(500, easing = EaseOut),
         label         = "progress",
     )
 
-    AtCard(
+    AtHeroCard(
         modifier       = Modifier.fillMaxWidth().staggerIn(0),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 22.dp),
     ) {
@@ -743,13 +652,17 @@ private fun CurrentAccountCard(stats: LiveFarmStats) {
                 Text(
                     "@${acc.ifEmpty { "..." }}",
                     style = AtType.Title,
-                    color = TextPrim,
+                    color = Color.White,
                 )
             }
             Spacer(Modifier.height(6.dp))
             Text(
-                "${stats.index} / ${stats.total}",
-                color    = TextMuted,
+                if (taskMode) {
+                    "Job ${stats.jobsDone} / ${stats.jobsTarget}" +
+                        (if (stats.total > 0) "  ·  acc ${stats.index}/${stats.total}" else "") +
+                        (if (stats.reward > 0.0) "  ·  +${if (stats.reward % 1.0 == 0.0) stats.reward.toLong().toString() else "%.2f".format(stats.reward)}" else "")
+                } else "${stats.index} / ${stats.total}",
+                color    = Color.White.copy(alpha = 0.85f),
                 fontSize = 13.sp,
             )
             Spacer(Modifier.height(18.dp))
@@ -757,17 +670,17 @@ private fun CurrentAccountCard(stats: LiveFarmStats) {
                 progress   = { animProgress },
                 modifier   = Modifier
                     .fillMaxWidth()
-                    .height(4.dp)
+                    .height(5.dp)
                     .clip(RoundedCornerShape(50)),
-                color      = Purple,
-                trackColor = BorderDark,
+                color      = Color.White,
+                trackColor = Color.White.copy(alpha = 0.25f),
             )
         }
     }
 }
 
 @Composable
-private fun StatsGrid(stats: LiveFarmStats) {
+private fun StatsGrid(stats: LiveFarmStats, taskMode: Boolean) {
     val mins = stats.remainingSecs / 60
     val secs = stats.remainingSecs % 60
     AtCard(
@@ -775,14 +688,27 @@ private fun StatsGrid(stats: LiveFarmStats) {
         contentPadding = PaddingValues(vertical = 16.dp),
     ) {
         Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-            StatCell(Modifier.weight(1f), "Video") { AnimatedNumber(stats.videos,  AtType.Number) }
-            StatDivider()
-            StatCell(Modifier.weight(1f), "Thích") { AnimatedNumber(stats.likes,   AtType.Number) }
-            StatDivider()
-            StatCell(Modifier.weight(1f), "Theo")  { AnimatedNumber(stats.follows, AtType.Number) }
-            StatDivider()
-            StatCell(Modifier.weight(1f), "Còn lại") {
-                Text("$mins:${secs.toString().padStart(2, '0')}", style = AtType.Number, color = TextPrim)
+            if (taskMode) {
+                // v1.9.0: nhiệm vụ không có "Video"/"Còn lại" → Job · Thích · Theo · Lỗi liên tiếp.
+                StatCell(Modifier.weight(1f), "Job")   { AnimatedNumber(stats.jobsDone, AtType.Number) }
+                StatDivider()
+                StatCell(Modifier.weight(1f), "Thích") { AnimatedNumber(stats.likes,    AtType.Number) }
+                StatDivider()
+                StatCell(Modifier.weight(1f), "Theo")  { AnimatedNumber(stats.follows,  AtType.Number) }
+                StatDivider()
+                StatCell(Modifier.weight(1f), "Lỗi") {
+                    Text("${stats.consecErrors}", style = AtType.Number, color = if (stats.consecErrors > 0) Amber else TextPrim)
+                }
+            } else {
+                StatCell(Modifier.weight(1f), "Video") { AnimatedNumber(stats.videos,  AtType.Number) }
+                StatDivider()
+                StatCell(Modifier.weight(1f), "Thích") { AnimatedNumber(stats.likes,   AtType.Number) }
+                StatDivider()
+                StatCell(Modifier.weight(1f), "Theo")  { AnimatedNumber(stats.follows, AtType.Number) }
+                StatDivider()
+                StatCell(Modifier.weight(1f), "Còn lại") {
+                    Text("$mins:${secs.toString().padStart(2, '0')}", style = AtType.Number, color = TextPrim)
+                }
             }
         }
     }
@@ -807,10 +733,9 @@ private fun StatDivider() {
 //  Hỗ trợ: # ## ###, **bold**, - bullet, dòng trống
 // ─────────────────────────────────────────────────────────────
 
-private val ChangelogPurple = AtColors.Accent
-private val ChangelogWhite  = Color.White
-private val ChangelogSec    = AtColors.TextSec
-
+private val ChangelogPurple get() = AtColors.Accent
+private val ChangelogWhite get() = AtColors.TextPrim
+private val ChangelogSec get() = AtColors.TextSec
 @Composable
 private fun MarkdownChangelogText(markdown: String) {
     val lines = markdown.lines()
