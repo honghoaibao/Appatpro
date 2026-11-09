@@ -37,6 +37,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.atpro.auth.domain.AuthRepository
+import com.atpro.sync.BackupOwnershipManager
+import kotlinx.coroutines.launch
+import android.widget.Toast
 import com.atpro.ui.accounts.AccountsScreen
 import com.atpro.ui.accounts.AccountsViewModel
 import com.atpro.ui.dashboard.DashboardScreen
@@ -91,10 +94,17 @@ fun MainScreen(
     scheduleVm:  ScheduleViewModel,
     logsVm:      LogsViewModel,
     authRepository: AuthRepository,
+    backupOwnershipManager: BackupOwnershipManager,
     onSignOut: () -> Unit,
 ) {
     val context = LocalContext.current
     val authSession by authRepository.session.collectAsStateWithLifecycle()
+    val backupOwnershipState by backupOwnershipManager.state.collectAsStateWithLifecycle()
+    val ownershipScope = rememberCoroutineScope()
+
+    LaunchedEffect(authSession?.user?.id) {
+        backupOwnershipManager.refresh(authSession?.user?.id)
+    }
     var selectedTab by remember { mutableStateOf(Tab.DASHBOARD) }
     // v1.8.0: Thống kê / Lịch tự động mở dạng màn hình phủ (null = đóng); giữ overlay cuối để hiệu ứng đóng không bị trống.
     var overlay     by remember { mutableStateOf<Overlay?>(null) }
@@ -191,6 +201,29 @@ fun MainScreen(
                         onOpenStats    = { openOverlay(Overlay.STATS) },
                         onOpenSchedule = { openOverlay(Overlay.SCHEDULE) },
                         authEmail = authSession?.user?.email,
+                        backupOwnershipState = backupOwnershipState,
+                        onBindBackupOwner = {
+                            ownershipScope.launch {
+                                val result = backupOwnershipManager.bindToCurrentUser(
+                                    authUserId = authSession?.user?.id,
+                                    confirmedByUser = true,
+                                )
+                                if (result != com.atpro.sync.BackupOwnerBindingResult.Bound &&
+                                    result != com.atpro.sync.BackupOwnerBindingResult.AlreadyBound
+                                ) {
+                                    val message = when (result) {
+                                        com.atpro.sync.BackupOwnerBindingResult.DifferentAccount ->
+                                            "Dữ liệu cục bộ đang thuộc một tài khoản AT PRO khác."
+                                        com.atpro.sync.BackupOwnerBindingResult.ConfirmationRequired ->
+                                            "Cần xác nhận liên kết trước khi tiếp tục."
+                                        com.atpro.sync.BackupOwnerBindingResult.SignedOut ->
+                                            "Vui lòng đăng nhập lại."
+                                        else -> "Không thể liên kết dữ liệu sao lưu trên thiết bị này."
+                                    }
+                                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        },
                         onSignOut = onSignOut,
                     )
                 }

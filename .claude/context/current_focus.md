@@ -6,9 +6,10 @@
 - Phases 3.1–3.3: Auth foundation, lifecycle, UI and protected routing implemented in source; not Android-build-verified or device-tested.
 - Phase 3.4.1: Room-first snapshot architecture/data policy documented in context/cloud_sync_architecture.md and ADR-0018.
 - Phase 3.4.2: Room v2 Outbox + Sync Metadata, additive migration, stable session UUIDs and atomic local mutation recording implemented; not build-verified.
-- Phase 3.4.3: deterministic local snapshot builder, JSON/GZIP/Base64 + SHA-256 codec, bounded decode validation, stable earnings entry IDs and durable earnings dirty generations implemented in source; not build-verified. No cloud writes or restore operations.
-- Next step: **3.4.4 — installation identity, Auth owner binding and remote revision metadata lifecycle**.
-- Constraints: Room remains local-first; no credentials/tokens in backup; different Auth owners must be blocked until explicit resolution; do not run GitHub Actions until the single final build run; do not modify main.
+- Phase 3.4.3: local snapshot builder, JSON/GZIP/Base64 + SHA-256 codec, bounded decode validation, stable earnings IDs and durable dirty generations implemented in source; not build-verified.
+- Phase 3.4.4: Room v3 owner/revision timestamps, explicit owner confirmation in Settings, mismatch blocking, UUID validation and local expected-revision checkpoint API implemented in source; not build-verified. It performs no Supabase request.
+- Next step: **3.4.5 — source/security/conflict review and fixes**.
+- Constraints: Room remains local-first; never upload credentials/tokens; another Auth owner must be blocked with no automatic reassignment; do not run GitHub Actions until the single final build run; do not modify main.
 
 ## Trạng thái: v1.12.0 — nhận nhiệm vụ theo `f4f.py` v2.8, chọn tài khoản nhiệm vụ riêng, thông báo nâng cấp (trên nền v1.11.0); chờ build thật + QA thiết bị
 

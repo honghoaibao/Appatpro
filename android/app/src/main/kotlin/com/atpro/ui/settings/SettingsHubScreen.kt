@@ -43,6 +43,7 @@ import com.atpro.ui.theme.AtThemeMode
 import com.atpro.ui.theme.AtThemeState
 import com.atpro.ui.theme.AtTopBar
 import com.atpro.ui.theme.staggerIn
+import com.atpro.sync.BackupOwnershipState
 
 /**
  * v1.8.0 — Tab "Cài đặt": một danh mục phẳng, MỘT cấp, thay cho việc chui vào Cài đặt → tab nhóm → chip mục.
@@ -59,10 +60,13 @@ fun SettingsHubScreen(
     onOpenStats:    () -> Unit,
     onOpenSchedule: () -> Unit,
     authEmail: String?,
+    backupOwnershipState: BackupOwnershipState,
+    onBindBackupOwner: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     val context = LocalContext.current
     var showSignOutConfirmation by remember { mutableStateOf(false) }
+    var showBackupOwnerConfirmation by remember { mutableStateOf(false) }
     val mode = AtThemeState.mode
     val version = remember {
         try { context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty() } catch (e: Exception) { "" }
@@ -103,6 +107,54 @@ fun SettingsHubScreen(
                 )
             }
             Spacer(Modifier.height(20.dp))
+
+            // ── Sao lưu đám mây: chỉ xác nhận chủ sở hữu, chưa bật đồng bộ ──
+            AtSectionLabel("Sao lưu dữ liệu", Modifier.padding(start = 4.dp, bottom = 8.dp))
+            AtCard(Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
+                when (val ownership = backupOwnershipState) {
+                    BackupOwnershipState.Checking -> AtListRow(
+                        "Đang kiểm tra liên kết",
+                        subtitle = "Đang đọc trạng thái dữ liệu cục bộ",
+                        icon = Icons.Rounded.AccountCircle,
+                        chevron = false,
+                    )
+                    BackupOwnershipState.SignedOut -> AtListRow(
+                        "Chưa đăng nhập",
+                        subtitle = "Đăng nhập AT PRO để kiểm tra chủ sở hữu dữ liệu",
+                        icon = Icons.Rounded.AccountCircle,
+                        chevron = false,
+                    )
+                    is BackupOwnershipState.NeedsConfirmation -> AtListRow(
+                        "Liên kết dữ liệu với tài khoản này",
+                        subtitle = "Cần xác nhận lần đầu · Revision ${ownership.lastRemoteRevision}",
+                        icon = Icons.Rounded.AccountCircle,
+                        tint = AtColors.Sky,
+                        onClick = { showBackupOwnerConfirmation = true },
+                    )
+                    is BackupOwnershipState.Linked -> AtListRow(
+                        "Đã liên kết với tài khoản hiện tại",
+                        subtitle = "Revision ${ownership.lastRemoteRevision} · Đồng bộ cloud chưa được bật",
+                        icon = Icons.Rounded.AccountCircle,
+                        tint = AtColors.Sky,
+                        chevron = false,
+                    )
+                    BackupOwnershipState.DifferentAccount -> AtListRow(
+                        "Dữ liệu đã thuộc tài khoản khác",
+                        subtitle = "Đồng bộ bị khóa. Không tự động chuyển hoặc gắn lại dữ liệu.",
+                        icon = Icons.Rounded.AdminPanelSettings,
+                        tint = AtColors.Danger,
+                        chevron = false,
+                    )
+                    BackupOwnershipState.InvalidAuthIdentity,
+                    BackupOwnershipState.MetadataUnavailable -> AtListRow(
+                        "Không thể xác minh chủ sở hữu",
+                        subtitle = "Dữ liệu cục bộ vẫn được giữ nguyên; chưa cho phép sao lưu.",
+                        icon = Icons.Rounded.AdminPanelSettings,
+                        tint = AtColors.Danger,
+                        chevron = false,
+                    )
+                }
+            }
 
             // ── Giao diện (chỉnh ngay) ──
             AtSectionLabel("Giao diện", Modifier.padding(start = 4.dp, bottom = 8.dp))
@@ -149,6 +201,19 @@ fun SettingsHubScreen(
                 AtListRow("AT PRO", subtitle = if (version.isNotBlank()) "Phiên bản $version" else "AT PRO", icon = Icons.Rounded.Info, chevron = false)
             }
         }
+    }
+
+    if (showBackupOwnerConfirmation) {
+        AtDialog(
+            onDismiss = { showBackupOwnerConfirmation = false },
+            title = "Liên kết dữ liệu với tài khoản này?",
+            message = "Sau khi xác nhận, dữ liệu trên thiết bị sẽ được gắn với tài khoản AT PRO đang đăng nhập. Nếu đăng nhập bằng tài khoản khác, ứng dụng sẽ chặn đồng bộ tự động và không tự chuyển quyền sở hữu. Thao tác này chưa tải lên, tải xuống hoặc xóa dữ liệu.",
+            confirmText = "Xác nhận liên kết",
+            onConfirm = {
+                showBackupOwnerConfirmation = false
+                onBindBackupOwner()
+            },
+        )
     }
 
     if (showSignOutConfirmation) {

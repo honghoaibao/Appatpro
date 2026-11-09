@@ -10,6 +10,8 @@ import com.atpro.data.EarningsStore
 import com.atpro.data.LocalRepository
 import com.atpro.notification.AtProNotificationManager
 import com.atpro.ui.theme.AtThemeState
+import com.atpro.db.AtProDatabase
+import com.atpro.sync.BackupOwnershipManager
 import kotlinx.coroutines.*
 
 class AtProApplication : MultiDexApplication() {
@@ -17,6 +19,10 @@ class AtProApplication : MultiDexApplication() {
     val appScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     /** One process-wide Auth repository so all screens share one session StateFlow and refresh mutex. */
+    val backupOwnershipManager: BackupOwnershipManager by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        BackupOwnershipManager(AtProDatabase.getInstance(applicationContext))
+    }
+
     val authRepository: AuthRepository by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         SupabaseAuthRepository(
             sessionStore = AndroidKeystoreAuthSessionStore(applicationContext),

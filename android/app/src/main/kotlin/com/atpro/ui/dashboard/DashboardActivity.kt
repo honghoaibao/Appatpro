@@ -90,6 +90,7 @@ class DashboardActivity : AppCompatActivity() {
                     scheduleVm = scheduleVm,
                     logsVm = logsVm,
                     authRepository = app.authRepository,
+                    backupOwnershipManager = app.backupOwnershipManager,
                     onSignOut = {
                         // Keep remote revocation alive beyond this Activity. The repository
                         // emits a null session only after the encrypted local session is cleared.

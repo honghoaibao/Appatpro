@@ -1,9 +1,9 @@
 # Cloud Sync Architecture — Appatpro
 
-- **Status:** Architecture approved; Phase 3.4.2 Room journal implementation added (source-only, not build-verified)
+- **Status:** Architecture approved; Phases 3.4.2–3.4.4 implemented in source on the feature branch (not Android-build-verified)
 - **Date:** 2026-11-09
 - **Scope:** Phase 3.4 design baseline
-- **Related ADRs:** ADR-0015, ADR-0016, ADR-0017, ADR-0018
+- **Related ADRs:** ADR-0015, ADR-0016, ADR-0017, ADR-0018, ADR-0019, ADR-0020, ADR-0021
 
 ## 1. Goals and invariants
 
@@ -98,15 +98,18 @@ Do not serialize an entire Room database file, Android SharedPreferences file, t
 
 The next Room migration (planned as a separate implementation task) adds:
 
-### sync_metadata
+### sync_metadata (Room schema v3)
 
 One local metadata row containing:
-- Bound Supabase owner_id.
+- Bound Supabase Auth user UUID, initially NULL.
+- `ownerBoundAt`: local timestamp of the explicit first-use owner confirmation.
 - Random app-installation UUID (not Settings.Secure.ANDROID_ID), persisted across app restarts.
 - Last confirmed remote revision.
-- Last successful sync timestamp.
-- Last acknowledged snapshot checksum.
-- Local snapshot format version and sync status.
+- Last successful sync timestamp and revision-confirmation timestamp.
+- Last confirmed snapshot checksum.
+- Snapshot format version and local sync status.
+
+Room migration 2→3 adds only the two nullable timestamps `ownerBoundAt` and `lastRevisionConfirmedAt`; the v1→v2 migration remains in the chain. No user rows are rewritten or deleted.
 
 The installation UUID identifies an app installation, not a physical device or person. A reinstall may create a new UUID; the restored cloud backup remains associated with the Auth user.
 
@@ -130,6 +133,21 @@ Rules:
 - Phase 3.4.3 adds a versioned line format (`v2|entryUUID|timestampMs|kind|reward|account`), atomically upgrades legacy rows with stable UUIDs, and persists a generation/acknowledged-generation marker in `earnings.dirty`. The backup builder captures the earnings rows and generation together under the file lock. A future sync may acknowledge only the captured generation after the remote snapshot commit; any later append leaves the store dirty.
 
 Do not create one Outbox event for every diagnostic log line. Logs are local-only in snapshot format v1.
+
+### Owner binding state machine
+
+The app derives the local ownership state from the signed-in Supabase Auth user UUID and the singleton metadata row:
+- Signed out → no cloud operation.
+- Owner is NULL → show a first-use confirmation; do not upload or restore.
+- Owner matches the current Auth UUID → eligible for a future sync layer to evaluate other gates.
+- Owner belongs to another Auth UUID → block upload and restore; no automatic reassignment path exists.
+- Invalid UUID or incomplete metadata → fail closed and preserve all local data.
+
+The Settings screen confirmation binds only the current local installation data to the account shown in the active Auth session. It does not transfer data, upload a snapshot or change the server. Sign-out retains the bound owner. An account-switch/export/reassign workflow is intentionally not part of this phase.
+
+### Remote revision checkpoint lifecycle
+
+The local checkpoint is advanced only after a future server operation reports a confirmed atomic compare-and-swap from revision R to R+1. The client then persists revision, checksum, schema version, successful-sync timestamp and confirmation timestamp with an owner-scoped + expected-local-revision SQL update. A late response, wrong owner, invalid checksum, stale local revision or non-consecutive revision is rejected. This phase adds the local checkpoint contract only; it does not call the server or define the RPC itself.
 
 ## 6. Sync components and responsibilities
 
@@ -208,9 +226,9 @@ The Room database currently survives sign-out and is not partitioned by Supabase
 - **3.4.1 (this document):** architecture and data policy only.
 - **3.4.2:** ✅ Room v2 Outbox/metadata entities, additive migration, stable session UUIDs and atomic local mutation recording (not build-verified).
 - **3.4.3:** ✅ Local snapshot builder, deterministic JSON/GZIP/Base64 + SHA-256 codec, bounded decode validation, stable earnings IDs and durable dirty-generation tracking (source-only; no cloud writes).
-- **3.4.4:** installation identity, owner binding and revision metadata.
+- **3.4.4:** ✅ Room v3 owner-binding timestamps, explicit Settings confirmation, signed-in-owner matching/blocking, and local CAS revision-checkpoint contract (source-only; no cloud calls).
 - **3.4.5:** source/security/conflict review and fixes.
 - **3.4.6:** WorkManager/network scheduling and batch sync adapter.
 - **4.1 onward:** Supabase RPC/schema/revision write contract, RLS/grants review, and cloud integration.
 
-No Supabase schema, RLS, grants, rows, Auth settings, Room schema, Gradle files or application code were changed by Phase 3.4.1.
+Phase 3.4.1 itself changed architecture documentation only. Phases 3.4.2–3.4.4 add local Room/application code only; no Supabase schema, RLS, grants, rows, Auth settings or cloud requests were changed.

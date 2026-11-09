@@ -23,7 +23,7 @@ import com.atpro.db.entity.*
         SyncMetadataEntity::class,
         SyncOutboxEntity::class,
     ],
-    version  = 2,
+    version  = 3,
     exportSchema = false,
 )
 abstract class AtProDatabase : RoomDatabase() {
@@ -96,6 +96,16 @@ abstract class AtProDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Add owner-binding and revision-checkpoint timestamps without touching any user data.
+         */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE sync_metadata ADD COLUMN ownerBoundAt INTEGER")
+                db.execSQL("ALTER TABLE sync_metadata ADD COLUMN lastRevisionConfirmedAt INTEGER")
+            }
+        }
+
         @Volatile
         private var INSTANCE: AtProDatabase? = null
 
@@ -106,7 +116,7 @@ abstract class AtProDatabase : RoomDatabase() {
                     AtProDatabase::class.java,
                     "atpro.db",
                 )
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .addCallback(object : RoomDatabase.Callback() {
                     override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                         // Fresh installs do not execute migrations; seed the singleton row here too.
