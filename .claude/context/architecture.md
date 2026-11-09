@@ -49,7 +49,12 @@ android/app/src/main/kotlin/com/atpro/
 ├── scheduler/              ANDROID-FIRST ✅
 │   └── ScheduledFarmManager.kt         — schedule management (contains FarmAlarmReceiver)
 ├── security/               ANDROID-FIRST ✅
-│   └── StringEncryptor.kt              — che chuỗi (XOR): package TikTok, khoá ký F4F, token F4F khi lưu (+ AppConstants, cờ TASKS_ENABLED)
+│   └── StringEncryptor.kt              — che chuỗi legacy (XOR): package TikTok, khoá ký F4F, token F4F khi lưu (+ AppConstants)
+├── auth/                   ANDROID-FIRST ✅ (phase 3)
+│   ├── SupabaseAuthRepository.kt       — email/password auth, refresh, sign-out; REST qua HttpURLConnection
+│   ├── SecureAuthSessionStorage.kt     — AES-GCM session storage backed by Android Keystore
+│   ├── SupabaseAuthModels.kt           — auth state, session, response parsing
+│   └── SupabaseConfig.kt               — project URL + publishable key only
 ├── ui/                     ANDROID-FIRST ✅ (Jetpack Compose)
 │   ├── dashboard/   DashboardActivity + DashboardScreen + DashboardViewModel
 │   ├── accounts/    AccountsScreen    + AccountsViewModel   (tab; v1.9.0: bỏ AccountsActivity)
@@ -74,6 +79,10 @@ Flutter (`lib/`) has been removed entirely.
 ## Data flow
 
 ```
+Auth UI (optional) → Supabase Auth (email/password)
+       ↓
+AuthSession (AES-GCM / Android Keystore)
+
 TikTok (UI) ←→ TikTokAccessibilityService
                       ↓
               AutomationEngine
@@ -81,6 +90,9 @@ TikTok (UI) ←→ TikTokAccessibilityService
      LocalRepository   LanWebSocketServer.broadcast()
           ↓                    ↓
        Room DB          LAN WebSocket clients (multi-device)
+
+Room remains canonical/local-first. Supabase Auth is optional; cloud backup/sync is a separate
+bounded data layer and must never run inside AutomationEngine or Accessibility callbacks.
 ```
 
 ## Dependency rules

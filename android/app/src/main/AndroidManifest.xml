@@ -123,6 +123,13 @@
             android:theme="@style/AppTheme"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- AT PRO account authentication (optional; app remains local-first) -->
+        <activity
+            android:name=".ui.auth.AuthActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- [v1.0.9] FileProvider để share đường dẫn APK cập nhật với hệ thống installer -->
         <provider
             android:name="androidx.core.content.FileProvider"

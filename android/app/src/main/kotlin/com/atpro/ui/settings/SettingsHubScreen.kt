@@ -51,6 +51,7 @@ import com.atpro.ui.theme.staggerIn
  */
 @Composable
 fun SettingsHubScreen(
+    onOpenAccount:  () -> Unit,
     onOpenConfig:   (section: String) -> Unit,
     onOpenStats:    () -> Unit,
     onOpenSchedule: () -> Unit,
@@ -87,10 +88,22 @@ fun SettingsHubScreen(
                 )
             }
 
+            // ── Tài khoản AT PRO ──
+            Spacer(Modifier.height(20.dp))
+            AtSectionLabel("Tài khoản", Modifier.padding(start = 4.dp, bottom = 8.dp))
+            AtCard(Modifier.fillMaxWidth().staggerIn(1), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
+                AtListRow(
+                    "Tài khoản AT PRO",
+                    subtitle = "Đăng ký, đăng nhập và quản lý phiên",
+                    icon = Icons.Rounded.AccountCircle,
+                    onClick = onOpenAccount,
+                )
+            }
+
             // ── Công cụ ──
             Spacer(Modifier.height(20.dp))
             AtSectionLabel("Công cụ", Modifier.padding(start = 4.dp, bottom = 8.dp))
-            AtCard(Modifier.fillMaxWidth().staggerIn(1), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
+            AtCard(Modifier.fillMaxWidth().staggerIn(2), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
                 AtListRow("Thống kê", subtitle = "Hoạt động và thu nhập", icon = Icons.Rounded.BarChart, onClick = onOpenStats)
                 AtDivider()
                 AtListRow("Lịch tự động", subtitle = "Hẹn giờ chạy", icon = Icons.Rounded.Schedule, tint = AtColors.Sky, onClick = onOpenSchedule)
@@ -99,7 +112,7 @@ fun SettingsHubScreen(
             // ── Cấu hình ──
             Spacer(Modifier.height(20.dp))
             AtSectionLabel("Cấu hình", Modifier.padding(start = 4.dp, bottom = 8.dp))
-            AtCard(Modifier.fillMaxWidth().staggerIn(2), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
+            AtCard(Modifier.fillMaxWidth().staggerIn(3), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
                 AtListRow("Quyền & trợ năng", subtitle = "Cấp quyền cho app", icon = Icons.Rounded.AdminPanelSettings, onClick = { onOpenConfig("PERMISSIONS") })
                 AtDivider()
                 AtListRow("Thông báo", subtitle = "Hệ thống và Discord", icon = Icons.Rounded.NotificationsNone, tint = AtColors.Sky, onClick = { onOpenConfig("NOTIFICATIONS") })
@@ -118,7 +131,7 @@ fun SettingsHubScreen(
             // ── Ứng dụng ──
             Spacer(Modifier.height(20.dp))
             AtSectionLabel("Ứng dụng", Modifier.padding(start = 4.dp, bottom = 8.dp))
-            AtCard(Modifier.fillMaxWidth().staggerIn(3), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
+            AtCard(Modifier.fillMaxWidth().staggerIn(4), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
                 AtListRow("AT PRO", subtitle = if (version.isNotBlank()) "Phiên bản $version" else "AT PRO", icon = Icons.Rounded.Info, chevron = false)
             }
         }

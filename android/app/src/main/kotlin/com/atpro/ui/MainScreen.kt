@@ -1,5 +1,6 @@
 package com.atpro.ui
 
+import android.content.Intent
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
@@ -43,6 +44,7 @@ import com.atpro.ui.dashboard.DashboardViewModel
 import com.atpro.ui.dashboard.UpdateAvailableDialog
 import com.atpro.ui.f4f.F4fHubScreen
 import com.atpro.ui.f4f.F4fHubTab
+import com.atpro.ui.auth.AuthActivity
 import com.atpro.ui.config.ConfigActivity
 import com.atpro.ui.logs.LogsScreen
 import com.atpro.ui.logs.LogsViewModel
@@ -183,6 +185,7 @@ fun MainScreen(
                     Tab.ACCOUNTS -> AccountsScreen(vm = accountsVm)
                     Tab.LOGS     -> LogsScreen(vm = logsVm)
                     Tab.SETTINGS -> SettingsHubScreen(
+                        onOpenAccount  = { context.startActivity(Intent(context, AuthActivity::class.java)) },
                         onOpenConfig   = { section -> context.startActivity(ConfigActivity.intent(context, section)) },
                         onOpenStats    = { openOverlay(Overlay.STATS) },
                         onOpenSchedule = { openOverlay(Overlay.SCHEDULE) },

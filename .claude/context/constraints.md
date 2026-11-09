@@ -20,8 +20,10 @@ Hard constraints that must never be violated. Check this file before any archite
 
 ## Data constraints
 
-- **Offline-first**: All data stored in Room (SQLite). No cloud sync, no internet required for core farming
-- **No Supabase**: Removed. Do not re-introduce cloud DB
+- **Offline-first**: Room (SQLite) remains the source of truth for app behavior. Core farming must not require internet.
+- **Supabase**: Optional AT PRO account and cloud backup only; never replace Room or block signed-out users from core features.
+- **Cloud sync**: Batch changes only when online and data has changed. Keep sync out of automation hot paths.
+- **Cloud exclusions**: Never upload passwords, Follow4Follow tokens, Discord webhooks, or service-role/secret keys.
 - **Encryption**: Sensitive fields (credentials, tokens) must go through `StringEncryptor` (Follow4Follow: token qua `F4fTokenCodec`; **không bao giờ lưu mật khẩu**; không log token/`x-sign`)
 - **Follow4Follow**: mọi request phải ký `x-ts`/`x-sign` (`F4fSigner`); `complete-job` chỉ gọi sau ≥5s kể từ lúc mở link; không complete/skip khi `accountActive = null`
 - **Màu giao diện**: chỉ lấy màu qua `AtColors.*` (getter động theo chế độ Sáng/Tối). KHÔNG sao chép vào `val` cấp file / enum / bảng khởi tạo một lần (bị đóng băng, không đổi theo chế độ) — dùng `val X get() = AtColors.Y` hoặc lambda/enum tông (ADR-0009). Hộp thoại dùng `AtDialog`, ô nhập dùng `AtTextField`; không dùng `AlertDialog`/`FilterChip` Material trực tiếp

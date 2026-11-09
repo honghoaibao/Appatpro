@@ -29,3 +29,11 @@
 - Room DB file is stored in the app's private data directory — protected by Android sandbox
 - No sensitive data in `assets/` or `res/` directories
 - `StringEncryptor` must use AES-256-GCM or equivalent — verify in code before modifying
+
+
+## AT PRO cloud account (phase 3)
+
+- The Supabase publishable key may be included in the Android client; never ship service_role or secret keys.
+- Persist Supabase access/refresh tokens only through AES-GCM with a key generated and held by Android Keystore.
+- Never send Follow4Follow tokens, passwords, Discord webhooks, or credentials for managed social accounts to cloud backup.
+- Core functionality must remain available without an AT PRO login or internet connectivity.

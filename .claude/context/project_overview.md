@@ -46,11 +46,12 @@ Chi tiết từng package và quy tắc phụ thuộc: xem `architecture.md`.
 ## Key facts
 
 - Package: `com.atpro` · minSdk 24 · target/compileSdk 34
-- DB: Room 2.6.1 (SQLite, local only — không Supabase); cấu hình `FarmConfig` đọc/ghi dạng key-value qua `LocalRepository`
+- DB: Room 2.6.1 (SQLite, source of truth local-first); Supabase AT App được dùng cho tài khoản tùy chọn và cloud backup; cấu hình `FarmConfig` đọc/ghi dạng key-value qua `LocalRepository`
 - State: Coroutines/Flow → StateFlow → Compose (không còn Riverpod)
 - Accessibility: `TikTokAccessibilityService` thực hiện toàn bộ thao tác UI; `getRootNode()` là `suspend` (từ v1.3.1)
 - Đa thiết bị: `LanWebSocketServer` qua LAN
 - Lập lịch: `ScheduledFarmManager` (WorkManager + AlarmManager)
 - Overlay: `OverlayFarmMonitor` (cửa sổ nổi trạng thái farm)
 - Nhiệm vụ kiếm tiền: `com.atpro.tasks.TaskProvider` → `tasks/f4f/` (Follow4Follow); tài liệu API: `context/Follow4FollowAPI_Documentation.md` + `context/follow4follow/` (tham chiếu đầy đủ & `f4f.py`)
+- Auth (phase 3): Supabase email/password Auth; access/refresh token được mã hóa AES-GCM qua Android Keystore; không bắt buộc đăng nhập để chạy công cụ.
 - CI: GitHub Actions, Gradle 8.3 qua `setup-gradle@v6`, JDK 17; `gradle-wrapper.jar` cố ý không commit
