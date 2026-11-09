@@ -28,7 +28,7 @@ Supabase access tokens are short-lived and refresh tokens are rotated. The Auth 
 - The implementation uses the existing `HttpURLConnection`, coroutines, and `org.json`; no dependency or Gradle changes are needed.
 - Auth remains separate from UI, Room, Follow4Follow, and automation logic.
 - The application layer must provide a single shared AuthRepository instance so the refresh mutex protects the app's active session lifecycle.
-- A local sign-out can complete while offline. If server revocation fails, the device no longer retains the refresh token, but Supabase may keep the server-side session until it expires or is otherwise invalidated.
+- A local sign-out can complete while offline. If server revocation fails, the device no longer retains the refresh token, but Supabase may retain the server-side session until it is explicitly revoked or a configured session-lifetime/inactivity policy terminates it. Refresh tokens do not expire by default.
 - Email confirmation, password recovery, deep-link confirmation handling, UI, and app startup wiring remain separate follow-up work.
 
 ## Verification status
