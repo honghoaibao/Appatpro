@@ -1,9 +1,9 @@
 # Cloud Sync Architecture — Appatpro
 
-- **Status:** Phases 3.4.2–3.4.7 implemented in source (not Android-build-verified); Phase 4.1 Supabase CAS/RLS write boundary applied and verified in AT App, while client sync remains gated
+- **Status:** Phases 3.4.2–3.4.7 implemented in source (not Android-build-verified); Phases 4.1–4.4 database backup CAS/RLS and public-schema hardening applied and verified in AT App; Android remote sync remains gated
 - **Date:** 2026-11-10
-- **Scope:** Phase 3.4 design baseline
-- **Related ADRs:** ADR-0015, ADR-0016, ADR-0017, ADR-0018, ADR-0019, ADR-0020, ADR-0021, ADR-0022, ADR-0023
+- **Scope:** Room-first backup architecture and Supabase security contract
+- **Related ADRs:** ADR-0015, ADR-0016, ADR-0017, ADR-0018, ADR-0019, ADR-0020, ADR-0021, ADR-0022, ADR-0023, ADR-0024, ADR-0025
 
 ## 1. Goals and invariants
 
@@ -253,8 +253,9 @@ The Room database currently survives sign-out and is not partitioned by Supabase
 - **3.4.5:** ✅ source/security/conflict review; strict local metadata and snapshot validation added. ADR-0022 documents the unresolved account merge gate (source-only, not build-verified).
 - **3.4.6:** ✅ unique connected-network WorkManager preflight, mutation/startup/auth triggers, metadata-only Outbox head projection and bounded 50-event / 512 KiB planner. No cloud operation or Outbox acknowledgement (source-only, not build-verified).
 - **3.4.7:** ✅ Room v4 account conflict model: independent status/stat timestamps, migration 3→4 with exactly-once legacy baseline contribution, per-installation Long counters, component-wise MAX merge policy, saturating aggregate and snapshot format v2. Pure tests added; not build-verified.
-- **4.1:** ✅ Applied the authenticated server-side revision CAS/RLS contract to AT App. Authenticated table access is SELECT-only; writes go through the owner-scoped save_user_backup RPC. Transaction smoke tests passed with all synthetic rows rolled back. Android remote writes remain disabled.
+- **4.1:** ✅ Applied the authenticated server-side revision CAS/RLS contract to AT App. Authenticated table access is SELECT-only; writes go through the owner-scoped save_user_backup RPC. Transaction smoke tests passed with all synthetic rows rolled back. Android remote writes remain disabled. See ADR-0024.
+- **4.2–4.4:** ✅ Audited the exposed database surface. All six public base tables have RLS; five operational tables retain their owner-scoped CRUD policies. `daily_stats` is SECURITY INVOKER and SELECT-only. Removed client EXECUTE from trigger-only functions, removed obsolete user_backups write policies, and tightened `postgres` default privileges so new public tables/sequences/functions are not automatically granted to anon/authenticated. Transaction smoke tests confirmed defaults, view isolation and trigger execution.
 - **4.2–4.4:** Review the remaining Supabase tables, views, triggers, default privileges and RLS policies. Keep changes scoped to separately approved findings; do not alter unrelated operational tables automatically.
 - **5.x onward:** Separately implement and test the remote merge/restore coordinator, bounded revision-conflict retry, owner binding and exact Outbox acknowledgement. Do not enable app-side remote writes before this gate is verified.
 
-Phase 3.4.1 itself changed architecture documentation only. Phases 3.4.2–3.4.7 changed local Room/application code, validation, preflight scheduling, account conflict handling and documentation only. Phase 4.1 changed only the user_backups write function and its table/function grants, plus migration and architecture documentation; it did not change backup rows, normalized operational tables, Auth settings, Android source or automation behavior.
+Phase 3.4.1 itself changed architecture documentation only. Phases 3.4.2–3.4.7 changed local Room/application code, validation, preflight scheduling, account conflict handling and documentation only. Phase 4.1 changed only the user_backups write function and its table/function grants. Phases 4.2–4.4 changed only public-schema default privileges, the daily_stats view grants/comment, EXECUTE grants on two trigger functions, obsolete user_backups write policies and documentation. No backup rows, normalized operational rows, Auth settings, Android source or automation behavior were changed.
