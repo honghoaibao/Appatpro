@@ -23,8 +23,29 @@ interface SyncOutboxDao {
     @Query("SELECT * FROM sync_outbox ORDER BY sequence ASC LIMIT :limit")
     suspend fun getPending(limit: Int = 200): List<SyncOutboxEntity>
 
+    /**
+     * Read only a bounded Outbox head for scheduling decisions. Payload JSON stays in SQLite;
+     * only its UTF-8 byte length is projected into memory.
+     */
+    @Query("""
+        SELECT
+            eventId,
+            sequence,
+            dataset,
+            operation,
+            length(CAST(COALESCE(payloadJson, '') AS BLOB)) AS payloadBytes,
+            nextAttemptAt
+        FROM sync_outbox
+        ORDER BY sequence ASC
+        LIMIT :limit
+    """)
+    suspend fun getPendingHead(limit: Int): List<SyncOutboxHeadRow>
+
     @Query("SELECT COUNT(*) FROM sync_outbox")
     suspend fun getPendingCount(): Int
+
+    @Query("SELECT COUNT(*) FROM sync_outbox WHERE dataset = :dataset")
+    suspend fun getPendingCountForDataset(dataset: String): Int
 
     @Query("DELETE FROM sync_outbox WHERE eventId IN (:eventIds)")
     suspend fun deleteAcknowledged(eventIds: List<String>): Int
@@ -38,3 +59,13 @@ interface SyncOutboxDao {
     """)
     suspend fun markRetry(eventId: String, nextAttemptAt: Long, lastErrorCode: String?)
 }
+
+/** Small query projection; no Outbox payload or secret-bearing config value is loaded. */
+data class SyncOutboxHeadRow(
+    val eventId: String,
+    val sequence: Long,
+    val dataset: String,
+    val operation: String,
+    val payloadBytes: Int,
+    val nextAttemptAt: Long,
+)

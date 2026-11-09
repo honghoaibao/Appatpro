@@ -12,6 +12,7 @@ import com.atpro.notification.AtProNotificationManager
 import com.atpro.ui.theme.AtThemeState
 import com.atpro.db.AtProDatabase
 import com.atpro.sync.BackupOwnershipManager
+import com.atpro.sync.SyncWorkScheduler
 import kotlinx.coroutines.*
 
 class AtProApplication : MultiDexApplication() {
@@ -51,6 +52,16 @@ class AtProApplication : MultiDexApplication() {
         appScope.launch {
             runCatching { AtProNotificationManager.loadConfig() }
                 .onFailure { Log.e("AtProApp", "loadConfig: ${it.message}") }
+        }
+
+        appScope.launch {
+            try {
+                SyncWorkScheduler.scheduleIfPending(this@AtProApplication)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.w("AtProApp", "Could not schedule backup preflight", error)
+            }
         }
 
         appScope.launch {

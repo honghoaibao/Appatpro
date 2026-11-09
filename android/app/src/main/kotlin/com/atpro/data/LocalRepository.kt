@@ -8,6 +8,8 @@ import com.atpro.db.AtProDatabase
 import com.atpro.db.dao.TotalsRow
 import com.atpro.db.entity.*
 import com.atpro.sync.BackupConfigPolicy
+import com.atpro.sync.SyncWorkScheduler
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -42,12 +44,27 @@ class LocalRepository(context: Context) : IFarmRepository {
             }
     }
 
-    private val db      = AtProDatabase.getInstance(context)
+    private val appContext = context.applicationContext
+    private val db      = AtProDatabase.getInstance(appContext)
     private val accounts = db.accountDao()
     private val sessions = db.sessionDao()
     private val logs     = db.logDao()
     private val configs  = db.configDao()
     private val syncOutbox = db.syncOutboxDao()
+
+    /**
+     * Schedule only after the Room mutation/Outbox transaction has committed.
+     * WorkManager KEEP coalesces rapid writes; scheduling failure never rolls back local data.
+     */
+    private suspend fun requestBackupPreflight() {
+        try {
+            SyncWorkScheduler.scheduleIfPending(appContext)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w(TAG, "Could not schedule backup preflight", error)
+        }
+    }
 
     /** Call only from the same Room transaction as the domain mutation. */
     private suspend fun enqueueUpsert(dataset: String, entityKey: String, payloadJson: String) {
@@ -121,6 +138,7 @@ class LocalRepository(context: Context) : IFarmRepository {
             accounts.upsert(account)
             enqueueAccountUpsert(account)
         }
+        requestBackupPreflight()
     }
 
     suspend fun deleteAccount(username: String) {
@@ -129,6 +147,7 @@ class LocalRepository(context: Context) : IFarmRepository {
             accounts.delete(normalized)
             enqueueDelete("accounts", normalized)
         }
+        requestBackupPreflight()
     }
 
     /** Update account status directly (e.g. "banned") from AccountsScreen actions. */
@@ -143,6 +162,7 @@ class LocalRepository(context: Context) : IFarmRepository {
             )
             accounts.getByUsername(username)?.let { enqueueAccountUpsert(it) }
         }
+        requestBackupPreflight()
     }
 
     override suspend fun setCheckpoint(username: String, isCheckpoint: Boolean) {
@@ -187,6 +207,7 @@ class LocalRepository(context: Context) : IFarmRepository {
             accounts.addStats(accountId, likes, follows, videos)
             accounts.getByUsername(accountId)?.let { enqueueAccountUpsert(it) }
         }
+        requestBackupPreflight()
 
         Log.i(TAG, "Session $sessionId @$accountId closed — " +
             "likes=$likes follows=$follows videos=$videos duration=${durationSecs}s")
@@ -282,6 +303,7 @@ class LocalRepository(context: Context) : IFarmRepository {
                 else -> Unit
             }
         }
+        if (BackupConfigPolicy.datasetFor(key) != null) requestBackupPreflight()
     }
 
     suspend fun deleteConfig(key: String) {
@@ -293,6 +315,7 @@ class LocalRepository(context: Context) : IFarmRepository {
                 else -> Unit
             }
         }
+        if (BackupConfigPolicy.datasetFor(key) != null) requestBackupPreflight()
     }
 
     suspend fun getConfigInt(key: String, default: Int): Int =

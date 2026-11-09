@@ -160,7 +160,7 @@ The local checkpoint is advanced only after a future server operation reports a 
 | CloudBackupRepository | Reads the user's user_backups row and commits a revision-checked snapshot |
 | BackupMergeEngine | Merges pending local changes with the latest remote snapshot without losing unrelated-device changes |
 | BackupRestoreCoordinator | Validates and stages the remote payload, then applies it atomically to Room and safely to file-backed earnings |
-| SyncWorker | Future WorkManager adapter; runs only with network connectivity and delegates to SyncManager |
+| SyncWorker | Phase 3.4.6 local-only preflight; verifies local Auth/owner gates and prepares bounded Outbox metadata candidates. Remote executor remains disabled. |
 
 The automation engine, AccessibilityService, dashboard state machine and Follow4Follow provider do not depend on or call SyncManager.
 
@@ -217,11 +217,14 @@ The Room database currently survives sign-out and is not partitioned by Supabase
 
 ## 11. Scheduling and resource policy
 
-- A future WorkManager request uses a CONNECTED network constraint and unique work name to coalesce duplicate requests.
-- Request sync only when there are pending changes or an explicit restore/repair is needed.
-- Use a short debounce after local writes; never sync on every small write or from a tight loop.
-- Use bounded batches and compression; do not send logs on every sync.
-- Use exponential backoff for transient network/server failures. Do not retry authentication/validation failures indefinitely.
+- Phase 3.4.6 uses an existing WorkManager 2.9.0 dependency; no additional library is required.
+- Schedule one unique one-time request only when the Outbox or earnings dirty marker indicates pending backup data. The request requires `NetworkType.CONNECTED`, waits 20 seconds, and uses `ExistingWorkPolicy.KEEP` to coalesce a burst of local writes. It is not periodic polling.
+- Re-check at application startup, after committed backup-eligible Room mutations, when the Auth session changes, and after explicit owner binding.
+- The worker restores the encrypted Auth session locally, verifies the bound owner, reads only a bounded metadata projection of the Outbox head, and checks whether earnings are dirty. It never loads Outbox JSON payloads during preflight.
+- Batch planning is capped at 50 events and 512 KiB of payload bytes. It preserves monotonic sequence order and will not skip an earlier event whose retry window has not opened.
+- Any pending account event activates the ADR-0022 merge gate for the entire snapshot. The worker does not bypass it by selecting other datasets.
+- **Remote execution is disabled in this phase:** no Supabase HTTP/RPC, upload/download, Outbox acknowledgement, revision update, earnings acknowledgement, retry mutation, or restore is performed. A successful WorkManager result means only that local preflight completed.
+- Once remote execution is implemented, transient errors may use bounded exponential backoff; authentication/validation errors must not retry indefinitely. Do not use Realtime or continuous polling.
 - No Supabase Realtime subscription or continuous polling is required for v1 snapshot sync.
 - Network requests never run on the main thread and never block an automation session.
 
@@ -232,7 +235,8 @@ The Room database currently survives sign-out and is not partitioned by Supabase
 - **3.4.3:** ✅ Local snapshot builder, deterministic JSON/GZIP/Base64 + SHA-256 codec, bounded decode validation, stable earnings IDs and durable dirty-generation tracking (source-only; no cloud writes).
 - **3.4.4:** ✅ Room v3 owner-binding timestamps, explicit Settings confirmation, signed-in-owner matching/blocking, and local CAS revision-checkpoint contract (source-only; no cloud calls).
 - **3.4.5:** ✅ source/security/conflict review; strict local metadata and snapshot validation added. ADR-0022 documents the unresolved account merge gate (source-only, not build-verified).
-- **3.4.6:** WorkManager/network scheduling shell and bounded batch plumbing only; cloud writes/account-event acknowledgements remain disabled until ADR-0022 and Phase 4.1 are implemented and verified.
-- **4.1 onward:** Supabase RPC/schema/revision write contract, RLS/grants review, and cloud integration.
+- **3.4.6:** ✅ unique connected-network WorkManager preflight, mutation/startup/auth triggers, metadata-only Outbox head projection and bounded 50-event / 512 KiB planner. No cloud operation or Outbox acknowledgement (source-only, not build-verified).
+- **3.4.7:** required account conflict model from ADR-0022: separate status/stat timestamps and per-installation cumulative contributions, additive migration and tests.
+- **4.1 onward:** Supabase RPC/schema/revision write contract, RLS/grants review and cloud integration. Remote writes remain disabled until both ADR-0022 and the Phase 4.1 server contract are implemented and verified.
 
-Phase 3.4.1 itself changed architecture documentation only. Phases 3.4.2–3.4.5 add local Room/application code and validation/documentation only; no Supabase schema, RLS, grants, rows, Auth settings or cloud requests were changed.
+Phase 3.4.1 itself changed architecture documentation only. Phases 3.4.2–3.4.6 add local Room/application code, validation, preflight scheduling and documentation only; no Supabase schema, RLS, grants, rows, Auth settings or cloud requests were changed.

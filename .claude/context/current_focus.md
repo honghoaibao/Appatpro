@@ -9,8 +9,9 @@
 - Phase 3.4.3: local snapshot builder, JSON/GZIP/Base64 + SHA-256 codec, bounded decode validation, stable earnings IDs and durable dirty generations implemented in source; not build-verified.
 - Phase 3.4.4: Room v3 owner/revision timestamps, explicit owner confirmation in Settings, mismatch blocking and local expected-revision checkpoint API implemented in source; not build-verified.
 - Phase 3.4.5: strict metadata/snapshot validation and DAO hardening implemented in source; ADR-0022 records the account multi-device conflict gate. Not build-verified.
-- Next step: **3.4.6 — WorkManager/network scheduling shell only**. No account cloud writes or Outbox acknowledgements until ADR-0022 and Phase 4.1 are complete.
-- Constraints: Room remains local-first; never upload credentials/tokens; another Auth owner must be blocked with no automatic reassignment; account status/stats must not use LWW or blind summation; do not run GitHub Actions until the single final build run; do not modify main.
+- Phase 3.4.6: unique CONNECTED-network WorkManager preflight, 20-second debounce, local-write/startup/Auth triggers and metadata-only bounded batch planning (50 events / 512 KiB). No remote calls or acknowledgements; not build-verified.
+- Next required gate: **3.4.7 — implement the ADR-0022 account conflict model** (separate state/stat timestamps and per-installation cumulative contributions). Phase 4.1 RPC work must not enable writes until this gate is complete.
+- Constraints: Room remains local-first; never upload credentials/tokens; another Auth owner must be blocked with no automatic reassignment; account status/stats must not use LWW or blind summation; Phase 3.4.6 worker is preflight-only; do not run GitHub Actions until the single final build run; do not modify main.
 
 ## Trạng thái: v1.12.0 — nhận nhiệm vụ theo `f4f.py` v2.8, chọn tài khoản nhiệm vụ riêng, thông báo nâng cấp (trên nền v1.11.0); chờ build thật + QA thiết bị
 
