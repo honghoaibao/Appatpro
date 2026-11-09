@@ -5,7 +5,9 @@ import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.atpro.AtProApplication
 import com.atpro.ui.dashboard.DashboardActivity
 import com.atpro.ui.theme.AtTheme
@@ -29,15 +31,13 @@ class AuthActivity : AppCompatActivity() {
         }
 
         lifecycleScope.launch {
-            authViewModel.events.collect { event ->
-                when (event) {
-                    AuthUiEvent.OpenDashboard -> {
-                        startActivity(
-                            Intent(this@AuthActivity, DashboardActivity::class.java).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
-                            },
-                        )
-                        finish()
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                authViewModel.events.collect { event ->
+                    when (event) {
+                        AuthUiEvent.OpenDashboard -> {
+                            startActivity(Intent(this@AuthActivity, DashboardActivity::class.java))
+                            finish()
+                        }
                     }
                 }
             }
