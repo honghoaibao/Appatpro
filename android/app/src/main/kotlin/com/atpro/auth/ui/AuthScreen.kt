@@ -92,7 +92,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
             )
             Spacer(Modifier.height(5.dp))
             Text(
-                text = if (state.isRegisterMode) "Tạo tài khoản để đồng bộ dữ liệu" else "Đăng nhập để tiếp tục",
+                text = if (state.isRegisterMode) "Tạo tài khoản AT PRO" else "Đăng nhập để tiếp tục",
                 color = AtColors.TextMuted,
                 fontSize = 13.sp,
                 textAlign = TextAlign.Center,
@@ -262,6 +262,32 @@ fun AuthScreen(viewModel: AuthViewModel) {
                 color = AtColors.TextMuted,
                 fontSize = 11.sp,
                 textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+
+@Composable
+fun AuthCheckingScreen() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(AtColors.Bg)
+            .navigationBarsPadding(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(28.dp),
+                color = AtColors.Accent,
+                strokeWidth = 2.5.dp,
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = "Đang kiểm tra tài khoản...",
+                color = AtColors.TextSec,
+                fontSize = 13.sp,
             )
         }
     }
