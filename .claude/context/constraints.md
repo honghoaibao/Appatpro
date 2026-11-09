@@ -20,9 +20,12 @@ Hard constraints that must never be violated. Check this file before any archite
 
 ## Data constraints
 
-- **Offline-first**: All data stored in Room (SQLite). No cloud sync, no internet required for core farming
-- **No Supabase**: Removed. Do not re-introduce cloud DB
-- **Encryption**: Sensitive fields (credentials, tokens) must go through `StringEncryptor` (Follow4Follow: token qua `F4fTokenCodec`; **không bao giờ lưu mật khẩu**; không log token/`x-sign`)
+- **Local-first**: Room remains the source of truth for app data. Core features must continue to work offline and must not wait for Supabase.
+- **Cloud data portability**: Supabase is allowed only for AT PRO account authentication and the later remote backup/sync layer. It must not become a runtime dependency of the automation engine or replace Room as the local database.
+- **Sync safety**: Future sync must be authenticated, owner-scoped, retryable, and non-destructive on transient failures. Do not overwrite good local data with an incomplete or stale remote response.
+- **Supabase client key**: Android may contain only the project's publishable key. Never embed a Supabase secret key or `service_role` key in the APK or repository.
+- **Auth credentials**: Never persist an AT PRO password. New Supabase access/refresh tokens must be encrypted with AES-GCM using a key held by Android Keystore; never log tokens or passwords.
+- **Legacy Follow4Follow storage**: Leave its existing implementation unchanged in this scope. `StringEncryptor` uses XOR obfuscation, not cryptographic encryption; do not reuse it for Supabase or new sensitive data. A separate migration is required to improve legacy F4F token storage.
 - **Follow4Follow**: mọi request phải ký `x-ts`/`x-sign` (`F4fSigner`); `complete-job` chỉ gọi sau ≥5s kể từ lúc mở link; không complete/skip khi `accountActive = null`
 - **Màu giao diện**: chỉ lấy màu qua `AtColors.*` (getter động theo chế độ Sáng/Tối). KHÔNG sao chép vào `val` cấp file / enum / bảng khởi tạo một lần (bị đóng băng, không đổi theo chế độ) — dùng `val X get() = AtColors.Y` hoặc lambda/enum tông (ADR-0009). Hộp thoại dùng `AtDialog`, ô nhập dùng `AtTextField`; không dùng `AlertDialog`/`FilterChip` Material trực tiếp
 - **Thứ tự phát hiện acc**: `detectCurrentAccount()` PHẢI chạy trước `openSwitchPopup()` (popup/Cài đặt TikTok che tab Hồ sơ) — cả nuôi acc và task mode; không bao giờ click vào acc ở vị trí 0 của switch popup (là acc đang login, no-op)
