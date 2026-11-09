@@ -18,18 +18,22 @@ import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.MonetizationOn
+import androidx.compose.material.icons.rounded.Logout
 import androidx.compose.material.icons.rounded.NotificationsNone
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.ThumbUp
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.atpro.ui.theme.AtCard
+import com.atpro.ui.theme.AtDialog
 import com.atpro.ui.theme.AtColors
 import com.atpro.ui.theme.AtDivider
 import com.atpro.ui.theme.AtListRow
@@ -54,8 +58,11 @@ fun SettingsHubScreen(
     onOpenConfig:   (section: String) -> Unit,
     onOpenStats:    () -> Unit,
     onOpenSchedule: () -> Unit,
+    authEmail: String?,
+    onSignOut: () -> Unit,
 ) {
     val context = LocalContext.current
+    var showSignOutConfirmation by remember { mutableStateOf(false) }
     val mode = AtThemeState.mode
     val version = remember {
         try { context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty() } catch (e: Exception) { "" }
@@ -77,6 +84,25 @@ fun SettingsHubScreen(
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 24.dp),
         ) {
+            // ── Tài khoản AT PRO ──
+            AtSectionLabel("Tài khoản", Modifier.padding(start = 4.dp, bottom = 8.dp))
+            AtCard(Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
+                AtListRow(
+                    "Đang đăng nhập",
+                    subtitle = authEmail ?: "Tài khoản AT PRO",
+                    icon = Icons.Rounded.AccountCircle,
+                    chevron = false,
+                )
+                AtDivider()
+                AtListRow(
+                    "Đăng xuất",
+                    subtitle = "Đăng xuất khỏi thiết bị này",
+                    icon = Icons.Rounded.Logout,
+                    tint = AtColors.Danger,
+                    onClick = { showSignOutConfirmation = true },
+                )
+            }
+
             // ── Giao diện (chỉnh ngay) ──
             AtSectionLabel("Giao diện", Modifier.padding(start = 4.dp, bottom = 8.dp))
             AtCard(Modifier.fillMaxWidth().staggerIn(0)) {
@@ -122,5 +148,19 @@ fun SettingsHubScreen(
                 AtListRow("AT PRO", subtitle = if (version.isNotBlank()) "Phiên bản $version" else "AT PRO", icon = Icons.Rounded.Info, chevron = false)
             }
         }
+    }
+
+    if (showSignOutConfirmation) {
+        AtDialog(
+            onDismiss = { showSignOutConfirmation = false },
+            title = "Đăng xuất khỏi AT PRO?",
+            message = "Phiên đăng nhập được lưu trên thiết bị này sẽ bị xóa. Dữ liệu cục bộ của app không bị xóa.",
+            confirmText = "Đăng xuất",
+            onConfirm = {
+                showSignOutConfirmation = false
+                onSignOut()
+            },
+            danger = true,
+        )
     }
 }
