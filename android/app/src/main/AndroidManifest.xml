@@ -77,6 +77,12 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".auth.ui.AuthActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme"
+            android:windowSoftInputMode="adjustResize" />
+
         <service
             android:name=".accessibility.TikTokAccessibilityService"
             android:exported="true"
