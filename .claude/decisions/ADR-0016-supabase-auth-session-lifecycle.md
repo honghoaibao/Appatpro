@@ -18,7 +18,7 @@ Supabase access tokens are short-lived and refresh tokens are rotated. The Auth 
 3. Implement refresh at `POST /auth/v1/token?grant_type=refresh_token`.
 4. When a successful token response does not contain a user, retrieve the authenticated user from `GET /auth/v1/user`. During refresh, reuse the current session's user identity because refresh does not change the account.
 5. Determine the signup outcome from the response itself. When tokens are returned, persist the encrypted session and report that confirmation is not pending. When only a user is returned, report that email confirmation is required. Do not hard-code the project's current Confirm Email setting.
-6. Serialize signup, sign-in, restore, refresh, and sign-out through one repository mutex to prevent concurrent refresh-token rotation within the repository instance.
+6. Keep `restoreSession()` local-only: load the encrypted session and update StateFlow without a network request. Cloud operations can call `refreshSession()` explicitly when a valid access token is needed. Serialize signup, sign-in, restore, refresh, and the local sign-out mutation through one repository mutex to prevent concurrent refresh-token rotation within the repository instance.
 7. Persist only Auth sessions using the existing AES-GCM Android Keystore store. Never persist or log passwords, access tokens, or refresh tokens in plaintext.
 8. Implement sign-out with `scope=local`. Clear this device's local session first and emit a null session only after persistent storage has been cleared. Release the repository mutex before best-effort server revocation, so network latency does not block a subsequent sign-in. A network failure must not leave the user signed in locally or affect other devices.
 9. Keep HTTP error mapping bounded and avoid implicit request retries. Preserve the saved session after transient refresh failures; clear it when Supabase rejects the refresh token as invalid or unauthorized.
@@ -27,6 +27,7 @@ Supabase access tokens are short-lived and refresh tokens are rotated. The Auth 
 
 - The implementation uses the existing `HttpURLConnection`, coroutines, and `org.json`; no dependency or Gradle changes are needed.
 - Auth remains separate from UI, Room, Follow4Follow, and automation logic.
+- Launcher session restoration is local-only and does not wait for network access. The future sync layer must refresh an expired/near-expiry token before using Supabase APIs.
 - The application layer must provide a single shared AuthRepository instance so the refresh mutex protects the app's active session lifecycle.
 - A local sign-out can complete while offline. If server revocation fails, the device no longer retains the refresh token, but Supabase may retain the server-side session until it is explicitly revoked or a configured session-lifetime/inactivity policy terminates it. Refresh tokens do not expire by default.
 - Email confirmation, password recovery, deep-link confirmation handling, UI, and app startup wiring remain separate follow-up work.
