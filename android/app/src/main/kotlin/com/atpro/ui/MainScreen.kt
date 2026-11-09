@@ -36,6 +36,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.atpro.AtProApplication
+import com.atpro.auth.domain.AuthRepository
 import com.atpro.ui.accounts.AccountsScreen
 import com.atpro.ui.accounts.AccountsViewModel
 import com.atpro.ui.dashboard.DashboardScreen
@@ -89,8 +91,11 @@ fun MainScreen(
     accountsVm:  AccountsViewModel,
     scheduleVm:  ScheduleViewModel,
     logsVm:      LogsViewModel,
+    authRepository: AuthRepository,
+    onSignOut: () -> Unit,
 ) {
     val context = LocalContext.current
+    val authSession by authRepository.session.collectAsStateWithLifecycle()
     var selectedTab by remember { mutableStateOf(Tab.DASHBOARD) }
     // v1.8.0: Thống kê / Lịch tự động mở dạng màn hình phủ (null = đóng); giữ overlay cuối để hiệu ứng đóng không bị trống.
     var overlay     by remember { mutableStateOf<Overlay?>(null) }
@@ -186,6 +191,8 @@ fun MainScreen(
                         onOpenConfig   = { section -> context.startActivity(ConfigActivity.intent(context, section)) },
                         onOpenStats    = { openOverlay(Overlay.STATS) },
                         onOpenSchedule = { openOverlay(Overlay.SCHEDULE) },
+                        authEmail = authSession?.user?.email,
+                        onSignOut = onSignOut,
                     )
                 }
             }
