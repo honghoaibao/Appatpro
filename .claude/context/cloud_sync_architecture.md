@@ -1,9 +1,9 @@
 # Cloud Sync Architecture — Appatpro
 
-- **Status:** Architecture approved; Phases 3.4.2–3.4.5 implemented in source on the feature branch (not Android-build-verified)
-- **Date:** 2026-11-09
+- **Status:** Phases 3.4.2–3.4.7 implemented in source (not Android-build-verified); Phase 4.1 Supabase CAS/RLS write boundary applied and verified in AT App, while client sync remains gated
+- **Date:** 2026-11-10
 - **Scope:** Phase 3.4 design baseline
-- **Related ADRs:** ADR-0015, ADR-0016, ADR-0017, ADR-0018, ADR-0019, ADR-0020, ADR-0021, ADR-0022
+- **Related ADRs:** ADR-0015, ADR-0016, ADR-0017, ADR-0018, ADR-0019, ADR-0020, ADR-0021, ADR-0022, ADR-0023
 
 ## 1. Goals and invariants
 
@@ -45,8 +45,10 @@ Current verified structure:
 - payload TEXT NOT NULL, constrained by octet_length(payload) <= 8,388,608.
 - checksum TEXT NOT NULL, constrained to exactly 64 characters.
 - updated_at TIMESTAMPTZ NOT NULL DEFAULT now().
-- RLS is enabled. The current policies allow authenticated users to SELECT, INSERT and UPDATE only their own row using auth.uid() = owner_id.
-- The authenticated role currently has SELECT, INSERT and UPDATE privileges; there is no authenticated DELETE policy/privilege.
+- RLS is enabled. The owner-scoped SELECT policy remains active; authenticated users can read only the row whose owner_id equals auth.uid().
+- After Phase 4.1, authenticated has SELECT only. Direct INSERT, UPDATE and DELETE privileges are revoked; anon has no table privileges. The older owner-scoped INSERT/UPDATE policies remain as defense-in-depth but cannot be used without table grants.
+- Authenticated snapshot writes must use public.save_user_backup(p_expected_revision, p_schema_version, p_payload, p_checksum). Only authenticated can execute it; anon and PUBLIC cannot.
+- The RPC is SECURITY DEFINER with an empty search_path, fully qualified object references and no caller-supplied owner_id. It derives ownership from auth.uid() and only writes that user's row.
 - The table currently has zero rows.
 
 The normalized accounts, sessions, configs, farm_logs and devices tables are **not** the initial sync write target. Their current schema has integration concerns that require separate migration review first:
@@ -178,7 +180,20 @@ Required write flow:
 5. If the revision changed, re-read and re-merge. Retry a small bounded number of times; otherwise leave the Outbox pending for a later run.
 6. Acknowledge only the exact Outbox event IDs included in the successful revision. If the process crashes after cloud commit but before local acknowledgement, the same event IDs are replayed idempotently.
 
-Because the current REST transport deliberately does not implement HTTP PATCH, Phase 4.1 must decide and implement an atomic revision-check operation (preferred: a narrow Postgres RPC using SECURITY INVOKER, auth.uid(), a fixed safe search path and grants only to authenticated). Do not replace this with blind upsert. Do not use SECURITY DEFINER to bypass RLS.
+Because the current REST transport deliberately does not implement HTTP PATCH, Phase 4.1 implemented a narrow Postgres RPC rather than a blind upsert. The RPC is callable only by authenticated users and direct table INSERT/UPDATE/DELETE grants are revoked.
+
+### Supabase server-side write boundary (Phase 4.1)
+
+- Function: public.save_user_backup(p_expected_revision bigint, p_schema_version integer, p_payload text, p_checksum text). The owner is derived only from auth.uid(); owner_id is not an RPC argument.
+- The function is SECURITY DEFINER because authenticated clients intentionally have no direct table DML privileges. It is owned by postgres, has an empty search_path, uses schema-qualified references, contains no dynamic SQL, validates auth.uid() and touches only public.user_backups.
+- expected revision 0 can create revision 1, or update an existing revision-0 row. A non-zero expected revision can only update an existing row whose owner_id and revision both match. A missing row or stale revision raises BACKUP_REVISION_CONFLICT (SQLSTATE P0001); it never creates a row from a non-zero expected revision.
+- Input checks require a non-negative, non-null expected revision; positive schema version; non-empty Base64 payload no larger than 8 MiB, with Base64 length/alphabet/padding checks; and a lowercase 64-character hexadecimal SHA-256 field. updated_at is assigned by the database clock.
+- The app stores Base64(GZIP(canonical UTF-8 JSON)); the database does not decompress the payload or recompute the checksum. The app's bounded restore pipeline remains responsible for GZIP, checksum-content, canonical JSON, format-version and dataset validation.
+- RLS remains enabled. The authenticated owner-scoped SELECT policy is active. The former INSERT/UPDATE owner policies remain, but authenticated has no grants to invoke them directly.
+- Supabase Security Advisor reports one expected warning because this authenticated RPC is a SECURITY DEFINER function in the exposed public schema. This is an intentional, narrowly scoped exception: its body derives identity from auth.uid(), has a fixed empty search_path, has no dynamic SQL or caller-supplied owner, and is the sole authenticated write path. Any future expansion of the function must be reviewed again.
+- The RPC's server updated_at orders snapshot commits only. It does not solve cross-device ordering of account statusUpdatedAt values, which remain device wall-clock values. The later merge/restore integration must use a server-authoritative per-entity ordering signal or preserve uncertain status conflicts for user resolution.
+
+Do not replace this contract with a blind upsert or grant authenticated direct table writes. The existence of the RPC does not enable app-side remote sync or Outbox acknowledgement.
 
 ## 8. Merge and conflict policy
 
@@ -238,6 +253,6 @@ The Room database currently survives sign-out and is not partitioned by Supabase
 - **3.4.5:** ✅ source/security/conflict review; strict local metadata and snapshot validation added. ADR-0022 documents the unresolved account merge gate (source-only, not build-verified).
 - **3.4.6:** ✅ unique connected-network WorkManager preflight, mutation/startup/auth triggers, metadata-only Outbox head projection and bounded 50-event / 512 KiB planner. No cloud operation or Outbox acknowledgement (source-only, not build-verified).
 - **3.4.7:** ✅ Room v4 account conflict model: independent status/stat timestamps, migration 3→4 with exactly-once legacy baseline contribution, per-installation Long counters, component-wise MAX merge policy, saturating aggregate and snapshot format v2. Pure tests added; not build-verified.
-- **4.1 onward:** Supabase RPC/schema/revision write contract, RLS/grants review, then a separately approved remote merge/restore integration. Remote writes remain disabled until the server contract and integration are implemented and verified.
+- **4.1:** ✅ Applied the authenticated server-side revision CAS/RLS contract to AT App. Authenticated table access is SELECT-only; writes go through the owner-scoped save_user_backup RPC. Transaction smoke tests passed with all synthetic rows rolled back. Android remote writes remain disabled.
 
-Phase 3.4.1 itself changed architecture documentation only. Phases 3.4.2–3.4.7 add local Room/application code, validation, preflight scheduling, account conflict handling and documentation only; no Supabase schema, RLS, grants, rows, Auth settings or cloud requests were changed.
+Phase 3.4.1 itself changed architecture documentation only. Phases 3.4.2–3.4.7 changed local Room/application code, validation, preflight scheduling, account conflict handling and documentation only. Phase 4.1 changed only the user_backups write function and its table/function grants, plus migration and architecture documentation; it did not change backup rows, normalized operational tables, Auth settings, Android source or automation behavior.
