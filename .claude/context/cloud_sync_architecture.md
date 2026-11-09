@@ -1,9 +1,9 @@
 # Cloud Sync Architecture — Appatpro
 
-- **Status:** Architecture approved; Phases 3.4.2–3.4.4 implemented in source on the feature branch (not Android-build-verified)
+- **Status:** Architecture approved; Phases 3.4.2–3.4.5 implemented in source on the feature branch (not Android-build-verified)
 - **Date:** 2026-11-09
 - **Scope:** Phase 3.4 design baseline
-- **Related ADRs:** ADR-0015, ADR-0016, ADR-0017, ADR-0018, ADR-0019, ADR-0020, ADR-0021
+- **Related ADRs:** ADR-0015, ADR-0016, ADR-0017, ADR-0018, ADR-0019, ADR-0020, ADR-0021, ADR-0022
 
 ## 1. Goals and invariants
 
@@ -181,14 +181,18 @@ Because the current REST transport deliberately does not implement HTTP PATCH, P
 
 ## 8. Merge and conflict policy
 
-- **Accounts:** key by normalized username. Status/checkpoint use the most recent updatedAt; aggregate counters must not be blindly summed from two snapshots. Preserve the pre-sync totals as a legacy baseline and track post-sync session increments as idempotent per-install contributions, then derive the displayed total. This avoids double counting a restored aggregate when another device logs in.
+- **Accounts:** key by normalized username. The current Room model is not yet safe for a multi-device merge: one `updatedAt` is shared by status changes and aggregate-stat updates, while counters are complete cumulative totals. Do not use generic LWW for status or sum snapshot totals. Before account sync is enabled, add independent `statusUpdatedAt`/`statsUpdatedAt` fields and per-installation cumulative contributions keyed by installation UUID; derive displayed totals from distinct contributions. See ADR-0022.
 - **Sessions:** merge as a set by stable session UUID; only closed sessions are uploaded. The same UUID is an update to one logical session, never a duplicate insert.
 - **Configs:** merge by allowlisted key and updatedAt; unknown keys are ignored. Device-local preferences and credentials never enter the shared snapshot.
 - **Schedules:** preserve their definitions, but import with enabled = false; require the user to review and manually enable them on a target installation.
 - **Earnings:** merge by stable earning-entry UUID; preserve only entries still retained by the local EarningsStore policy.
 - **Deletes:** account/config/schedule deletions use tombstones so a stale device cannot resurrect a deleted item.
 - **Logs:** excluded from v1 snapshot; remain on the originating device.
-- **Unresolvable conflict:** preserve both the local pending changes and the latest remote snapshot; do not silently discard either side.
+- **Unresolvable conflict:** preserve both the local pending changes and the latest remote snapshot; do not silently discard either side. For unresolved account status/stat conflicts, leave the affected Outbox batch pending and do not apply last-write-wins or blind summation.
+
+### Account merge gate
+
+The account merge model in ADR-0022 is a hard prerequisite for enabling multi-device writes or acknowledging account Outbox events. A worker may prepare/read data, but it must not upload a merged account dataset, overwrite account status/counters, or acknowledge an unresolved account batch until the additive local contribution model and its tests exist.
 
 ## 9. Auth ownership boundary
 
@@ -227,8 +231,8 @@ The Room database currently survives sign-out and is not partitioned by Supabase
 - **3.4.2:** ✅ Room v2 Outbox/metadata entities, additive migration, stable session UUIDs and atomic local mutation recording (not build-verified).
 - **3.4.3:** ✅ Local snapshot builder, deterministic JSON/GZIP/Base64 + SHA-256 codec, bounded decode validation, stable earnings IDs and durable dirty-generation tracking (source-only; no cloud writes).
 - **3.4.4:** ✅ Room v3 owner-binding timestamps, explicit Settings confirmation, signed-in-owner matching/blocking, and local CAS revision-checkpoint contract (source-only; no cloud calls).
-- **3.4.5:** source/security/conflict review and fixes.
-- **3.4.6:** WorkManager/network scheduling and batch sync adapter.
+- **3.4.5:** ✅ source/security/conflict review; strict local metadata and snapshot validation added. ADR-0022 documents the unresolved account merge gate (source-only, not build-verified).
+- **3.4.6:** WorkManager/network scheduling shell and bounded batch plumbing only; cloud writes/account-event acknowledgements remain disabled until ADR-0022 and Phase 4.1 are implemented and verified.
 - **4.1 onward:** Supabase RPC/schema/revision write contract, RLS/grants review, and cloud integration.
 
-Phase 3.4.1 itself changed architecture documentation only. Phases 3.4.2–3.4.4 add local Room/application code only; no Supabase schema, RLS, grants, rows, Auth settings or cloud requests were changed.
+Phase 3.4.1 itself changed architecture documentation only. Phases 3.4.2–3.4.5 add local Room/application code and validation/documentation only; no Supabase schema, RLS, grants, rows, Auth settings or cloud requests were changed.

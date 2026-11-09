@@ -68,7 +68,7 @@ class BackupOwnershipManager(
     suspend fun isBoundToCurrentUser(authUserId: String?): Boolean {
         val ownerId = BackupMetadataRules.normalizeAuthUserId(authUserId) ?: return false
         val metadata = readMetadataOrNull() ?: return false
-        return isMetadataStructurallyValid(metadata) && metadata.ownerUserId == ownerId
+        return BackupMetadataRules.isStructurallyValid(metadata) && metadata.ownerUserId == ownerId
     }
 
     /**
@@ -91,7 +91,7 @@ class BackupOwnershipManager(
         val outcome = database.withTransaction {
             val dao = database.syncMetadataDao()
             val metadata = dao.get() ?: return@withTransaction BindingDecision.MissingMetadata
-            if (!isMetadataStructurallyValid(metadata)) {
+            if (!BackupMetadataRules.isStructurallyValid(metadata)) {
                 return@withTransaction BindingDecision.MissingMetadata
             }
 
@@ -161,7 +161,7 @@ class BackupOwnershipManager(
         val outcome = database.withTransaction {
             val dao = database.syncMetadataDao()
             val metadata = dao.get() ?: return@withTransaction CommitDecision.MissingMetadata
-            if (!isMetadataStructurallyValid(metadata)) {
+            if (!BackupMetadataRules.isStructurallyValid(metadata)) {
                 return@withTransaction CommitDecision.MissingMetadata
             }
             if (metadata.ownerUserId != ownerId) {
@@ -202,23 +202,13 @@ class BackupOwnershipManager(
 
         val metadata = readMetadataOrNull()
             ?: return BackupOwnershipState.MetadataUnavailable
-        if (!isMetadataStructurallyValid(metadata)) {
+        if (!BackupMetadataRules.isStructurallyValid(metadata)) {
             return BackupOwnershipState.MetadataUnavailable
         }
 
         val boundOwner = metadata.ownerUserId
-        if (boundOwner == null) {
-            if (metadata.ownerBoundAt != null) return BackupOwnershipState.MetadataUnavailable
-            return BackupOwnershipState.NeedsConfirmation(metadata.lastRemoteRevision)
-        }
-        val normalizedBoundOwner = BackupMetadataRules.normalizeAuthUserId(boundOwner)
-            ?: return BackupOwnershipState.MetadataUnavailable
-        if (metadata.ownerBoundAt == null || metadata.ownerBoundAt <= 0L ||
-            (metadata.lastRemoteRevision > 0L && metadata.lastRevisionConfirmedAt == null)
-        ) {
-            return BackupOwnershipState.MetadataUnavailable
-        }
-        return if (normalizedBoundOwner == ownerId) {
+            ?: return BackupOwnershipState.NeedsConfirmation(metadata.lastRemoteRevision)
+        return if (boundOwner == ownerId) {
             BackupOwnershipState.Linked(
                 lastRemoteRevision = metadata.lastRemoteRevision,
                 lastSuccessfulSyncAt = metadata.lastSuccessfulSyncAt,
@@ -229,7 +219,6 @@ class BackupOwnershipManager(
     }
 
 
-
     private suspend fun readMetadataOrNull(): SyncMetadataEntity? = try {
         database.syncMetadataDao().get()
     } catch (cancelled: CancellationException) {
@@ -237,32 +226,6 @@ class BackupOwnershipManager(
     } catch (_: Exception) {
         null
     }
-
-    private fun isMetadataStructurallyValid(
-        metadata: SyncMetadataEntity,
-    ): Boolean {
-        if (!isValidInstallationId(metadata.installationId) ||
-            metadata.lastRemoteRevision < 0L ||
-            metadata.formatVersion <= 0 ||
-            (metadata.lastChecksum != null && !BackupMetadataRules.isValidChecksum(metadata.lastChecksum)) ||
-            (metadata.lastRemoteRevision > 0L &&
-                (metadata.lastChecksum == null || metadata.lastRevisionConfirmedAt == null))
-        ) {
-            return false
-        }
-
-        val ownerId = metadata.ownerUserId
-        return if (ownerId == null) {
-            metadata.ownerBoundAt == null
-        } else {
-            BackupMetadataRules.normalizeAuthUserId(ownerId) != null &&
-                metadata.ownerBoundAt != null &&
-                metadata.ownerBoundAt > 0L
-        }
-    }
-
-    private fun isValidInstallationId(value: String): Boolean =
-        BackupMetadataRules.normalizeAuthUserId(value) != null
 
     private enum class BindingDecision {
         Bound,

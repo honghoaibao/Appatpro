@@ -6,7 +6,6 @@ import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
-import java.util.UUID
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -142,66 +141,8 @@ object BackupCodec {
     }
 
 
-    private fun validateSnapshot(snapshot: BackupSnapshot) {
-        if (snapshot.createdAt < 0L || snapshot.appVersion.isBlank()) {
-            throw BackupCodecException("Backup envelope is missing required metadata")
-        }
-        runCatching { UUID.fromString(snapshot.sourceInstallId) }
-            .getOrElse { throw BackupCodecException("Backup installation ID is not a valid UUID") }
-
-        val accountNames = snapshot.datasets.accounts.map { it.username }
-        if (accountNames.any { it.isBlank() } || accountNames.distinct().size != accountNames.size) {
-            throw BackupCodecException("Backup contains blank or duplicate account names")
-        }
-        if (snapshot.datasets.accountStats.keys.any { it !in accountNames }) {
-            throw BackupCodecException("Backup account statistics reference an unknown account")
-        }
-        if (snapshot.datasets.accountStats.values.any {
-                it.sessionsCount < 0 || it.totalLikes < 0 || it.totalFollows < 0 || it.totalVideos < 0
-            }
-        ) {
-            throw BackupCodecException("Backup contains negative account statistics")
-        }
-
-        val sessionIds = snapshot.datasets.closedSessions.map { it.syncId }
-        if (sessionIds.distinct().size != sessionIds.size || snapshot.datasets.closedSessions.any {
-                !isUuid(it.syncId) || it.accountId.isBlank() ||
-                    it.durationSecs < 0 || it.likes < 0 || it.follows < 0 ||
-                    it.comments < 0 || it.videosWatched < 0
-            }
-        ) {
-            throw BackupCodecException("Backup contains invalid or duplicate closed sessions")
-        }
-
-        val configKeys = snapshot.datasets.safeConfigs.map { it.key }
-        if (configKeys.distinct().size != configKeys.size || snapshot.datasets.safeConfigs.any {
-                BackupConfigPolicy.datasetFor(it.key) != "safeConfigs"
-            }
-        ) {
-            throw BackupCodecException("Backup contains a configuration key outside the safe allowlist")
-        }
-
-        val scheduleIds = snapshot.datasets.schedules.map { it.scheduleId }
-        if (scheduleIds.distinct().size != scheduleIds.size || snapshot.datasets.schedules.any {
-                it.scheduleId.isBlank() || it.hourOfDay !in 0..23 || it.minute !in 0..59 ||
-                    it.daysOfWeek.any { day -> day !in 1..7 } || it.serviceMode.isBlank()
-            }
-        ) {
-            throw BackupCodecException("Backup contains an invalid schedule definition")
-        }
-
-        val earningIds = snapshot.datasets.earnings.map { it.id }
-        if (earningIds.distinct().size != earningIds.size || snapshot.datasets.earnings.any {
-                !isUuid(it.id) || it.kind.isBlank() || !it.reward.isFinite() ||
-                    it.reward < 0.0 || it.atMs < 0L
-            }
-        ) {
-            throw BackupCodecException("Backup contains invalid or duplicate earnings entries")
-        }
-    }
-
-    private fun isUuid(value: String): Boolean =
-        runCatching { UUID.fromString(value) }.isSuccess
+    private fun validateSnapshot(snapshot: BackupSnapshot) =
+        BackupSnapshotValidator.validate(snapshot)
 
     private fun decompressBounded(compressed: ByteArray): ByteArray {
         try {

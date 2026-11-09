@@ -1,8 +1,6 @@
 package com.atpro.db.dao
 
 import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.atpro.db.entity.SyncMetadataEntity
 
@@ -10,9 +8,6 @@ import com.atpro.db.entity.SyncMetadataEntity
 interface SyncMetadataDao {
     @Query("SELECT * FROM sync_metadata WHERE id = 1 LIMIT 1")
     suspend fun get(): SyncMetadataEntity?
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsert(metadata: SyncMetadataEntity)
 
     /**
      * First binding only. The WHERE clause prevents a stale UI action or concurrent
@@ -24,7 +19,7 @@ interface SyncMetadataDao {
             ownerBoundAt = :boundAt,
             syncStatus = 'IDLE',
             updatedAt = :updatedAt
-        WHERE id = 1 AND ownerUserId IS NULL
+        WHERE id = 1 AND ownerUserId IS NULL AND ownerBoundAt IS NULL
     """)
     suspend fun bindOwnerIfUnbound(
         ownerUserId: String,
@@ -47,6 +42,7 @@ interface SyncMetadataDao {
             updatedAt = :confirmedAt
         WHERE id = 1
           AND ownerUserId = :ownerUserId
+          AND ownerBoundAt IS NOT NULL
           AND lastRemoteRevision = :expectedRevision
     """)
     suspend fun recordCommittedRevision(
