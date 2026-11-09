@@ -44,6 +44,7 @@ class SupabaseAuthRepository(
 
     override suspend fun restoreSession(): AuthSession? = sessionMutex.withLock {
         val saved = try {
+            // Startup restoration is local-only: it must remain fast and work offline.
             withContext(ioDispatcher) { sessionStore.read() }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -52,31 +53,8 @@ class SupabaseAuthRepository(
             return@withLock null
         }
 
-        if (saved == null) {
-            mutableSession.value = null
-            return@withLock null
-        }
         mutableSession.value = saved
-
-        // Refresh slightly before expiry so an API request does not race the expiry edge.
-        if (saved.expiresAtEpochSeconds > nowEpochSeconds() + REFRESH_EARLY_SECONDS) {
-            return@withLock saved
-        }
-
-        when (val result = refreshSessionLocked(saved)) {
-            is AuthResult.Success -> result.value
-            is AuthResult.Failure -> {
-                // A transient network/rate-limit failure must not destroy a usable
-                // refresh token. Keep the saved session so the caller can retry later.
-                if (result.statusCode == INVALID_SESSION_STATUS ||
-                    result.statusCode == UNAUTHORIZED_STATUS
-                ) {
-                    null
-                } else {
-                    saved
-                }
-            }
-        }
+        saved
     }
 
     override suspend fun signUp(
@@ -445,7 +423,6 @@ class SupabaseAuthRepository(
         const val REFRESH_TOKEN_PATH = "/auth/v1/token?grant_type=refresh_token"
         const val SIGN_OUT_LOCAL_PATH = "/auth/v1/logout?scope=local"
 
-        const val REFRESH_EARLY_SECONDS = 60L
         const val DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS = 3_600L
         const val INVALID_SESSION_STATUS = 400
         const val UNAUTHORIZED_STATUS = 401
