@@ -2,11 +2,13 @@ package com.atpro.ui.dashboard
 
 import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.atpro.AtProApplication
+import com.atpro.auth.domain.AuthResult
 import com.atpro.auth.ui.AuthActivity
 import com.atpro.notification.NotificationNavigator
 import com.atpro.ui.MainScreen
@@ -15,8 +17,10 @@ import com.atpro.ui.logs.LogsViewModel
 import com.atpro.ui.schedule.ScheduleViewModel
 import com.atpro.ui.stats.StatsViewModel
 import com.atpro.ui.theme.AtTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * DashboardActivity — single-Activity host cho toàn bộ app.
@@ -90,7 +94,16 @@ class DashboardActivity : AppCompatActivity() {
                         // Keep remote revocation alive beyond this Activity. The repository
                         // emits a null session only after the encrypted local session is cleared.
                         app.appScope.launch {
-                            app.authRepository.signOut()
+                            val result = app.authRepository.signOut()
+                            if (result is AuthResult.Failure && app.authRepository.session.value != null) {
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(
+                                        applicationContext,
+                                        result.message,
+                                        Toast.LENGTH_LONG,
+                                    ).show()
+                                }
+                            }
                         }
                         lifecycleScope.launch {
                             app.authRepository.session.first { it == null }
