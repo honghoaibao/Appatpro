@@ -26,7 +26,7 @@ import java.net.SocketTimeoutException
  * Supabase Auth implementation for the AT PRO account.
  *
  * Refresh-token rotation means a refresh token should not be exchanged concurrently.
- * A single mutex serializes login, signup, refresh, restore, and logout operations.
+ * A single mutex serializes login, signup, refresh, restore, and the local part of logout.
  * Only encrypted sessions are persisted; passwords are used for the request and
  * discarded immediately afterwards.
  */
