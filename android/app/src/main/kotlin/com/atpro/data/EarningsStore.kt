@@ -54,7 +54,6 @@ object EarningsStore {
         synchronized(lock) {
             val target = context.applicationContext.filesDir
             dir = target
-            initializeDirtyMarkerLocked(target)
         }
     }
 
@@ -69,6 +68,7 @@ object EarningsStore {
 
         try {
             synchronized(lock) {
+                initializeDirtyMarkerLocked(directory)
                 if (!ensureLegacyMigratedLocked(directory)) return
 
                 // Dirty first: a crash can produce a harmless false-positive, never a missed write.

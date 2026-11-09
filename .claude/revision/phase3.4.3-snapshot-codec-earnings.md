@@ -14,11 +14,13 @@
 - Added 7 MiB encoded and 32 MiB decompressed limits. Decode validates Base64/GZIP, checksum, exact schema version, canonical JSON, UUIDs, safe-config keys, duplicate identifiers and basic dataset invariants.
 - Added stable UUID IDs to `EarningEntry`. Legacy `timestamp|kind|reward|account` rows are upgraded to `v2|entryUUID|timestampMs|kind|reward|account` through Android AtomicFile.
 - Added durable `earnings.dirty` generation/acknowledgement marker. Writes mark dirty before append; a captured generation can be acknowledged later without clearing dirtiness from newer writes.
+- Initialized the EarningsStore files directory in `AtProApplication` before automation starts; the init call only configures the directory, while marker I/O and legacy migration remain lazy and lock-protected.
 - Earnings remain file-backed with the original 30,000/25,000 retention behavior; no per-earning Room rows or Outbox events were added.
 
 ## Changed files
 
 - `android/app/src/main/kotlin/com/atpro/db/dao/SessionDao.kt`
+- `android/app/src/main/kotlin/com/atpro/AtProApplication.kt`
 - `android/app/src/main/kotlin/com/atpro/data/EarningsStore.kt`
 - `android/app/src/main/kotlin/com/atpro/sync/BackupSnapshot.kt`
 - `android/app/src/main/kotlin/com/atpro/sync/BackupSnapshotBuilder.kt`

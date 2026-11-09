@@ -40,6 +40,7 @@ object BackupCodec {
         if (snapshot.formatVersion <= 0) {
             throw BackupCodecException("Unsupported snapshot format version")
         }
+        validateSnapshot(snapshot)
 
         val canonical = try {
             json.encodeToString(snapshot).toByteArray(Charsets.UTF_8)
@@ -164,7 +165,7 @@ object BackupCodec {
 
         val sessionIds = snapshot.datasets.closedSessions.map { it.syncId }
         if (sessionIds.distinct().size != sessionIds.size || snapshot.datasets.closedSessions.any {
-                !isUuid(it.syncId) || it.accountId.isBlank() || it.endedAt < it.startedAt ||
+                !isUuid(it.syncId) || it.accountId.isBlank() ||
                     it.durationSecs < 0 || it.likes < 0 || it.follows < 0 ||
                     it.comments < 0 || it.videosWatched < 0
             }

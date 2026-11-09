@@ -21,6 +21,7 @@ The Room Outbox and sync metadata are in place, but there is not yet a bounded, 
 8. Upgrade earnings records to `v2|entryUUID|timestampMs|kind|reward|account`. Legacy rows receive UUIDs and are rewritten via Android AtomicFile so the same earning keeps the same key across retries.
 9. Track earnings with an AtomicFile `earnings.dirty` marker containing current and acknowledged generations. Mark dirty before appending/deleting; acknowledge only a generation included by a later confirmed remote commit. A write after snapshot capture remains dirty.
 10. Do not add one Room Outbox event per earning or expand every earning into a Room row. Keep EarningsStore file-backed and include its generation with the built snapshot result.
+11. Configure EarningsStore's application files directory during Application startup, before an automation service can record rewards. Keep that initialization I/O-free; initialize the durable marker and perform legacy migration lazily under the store lock on the first read/write.
 
 ## Consequences
 
