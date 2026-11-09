@@ -12,8 +12,9 @@
 - Added a session-restore loading state to avoid a blank launcher while the local Keystore session is checked.
 - Kept signup copy neutral; cloud data backup/sync is not presented as active before its later phases.
 - Added a non-exported `AuthActivity`.
-- Updated `MainActivity` to restore the encrypted session and route to Dashboard or Auth.
+- Updated `MainActivity` to restore the encrypted session locally and route to Dashboard or Auth. It performs no network call while opening the app.
 - Added a second session gate to `DashboardActivity` to protect notification/internal launches.
+- Kept session restoration local-only for fast offline startup; the later sync layer must explicitly refresh tokens before cloud calls when needed.
 - Added the current signed-in email and a confirmation-gated sign-out option to Settings.
 - Refined logout ordering so the encrypted local session is cleared before the UI leaves Dashboard; best-effort remote revocation runs after the local mutex is released, so a new login is not blocked by network latency.
 - Added ADR-0017 to record the Auth UI and navigation architecture.
