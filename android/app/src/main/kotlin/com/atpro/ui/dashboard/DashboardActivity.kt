@@ -15,6 +15,7 @@ import com.atpro.ui.logs.LogsViewModel
 import com.atpro.ui.schedule.ScheduleViewModel
 import com.atpro.ui.stats.StatsViewModel
 import com.atpro.ui.theme.AtTheme
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -83,13 +84,17 @@ class DashboardActivity : AppCompatActivity() {
                     logsVm = logsVm,
                     authRepository = app.authRepository,
                     onSignOut = {
-                        // Run sign-out in the application scope so it is not cancelled
-                        // when this Activity is finished and the auth screen is opened.
+                        // Keep remote revocation alive beyond this Activity. The repository
+                        // emits a null session only after the encrypted local session is cleared.
                         app.appScope.launch {
                             app.authRepository.signOut()
                         }
-                        startActivity(Intent(this, AuthActivity::class.java))
-                        finish()
+                        lifecycleScope.launch {
+                            app.authRepository.session.first { it == null }
+                            if (isFinishing || isDestroyed) return@launch
+                            startActivity(Intent(this@DashboardActivity, AuthActivity::class.java))
+                            finish()
+                        }
                     },
                 )
             }
