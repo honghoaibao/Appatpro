@@ -90,6 +90,7 @@ Encoding contract:
 4. Store a lowercase 64-character SHA-256 hex checksum of the canonical, uncompressed UTF-8 JSON bytes.
 5. On restore, Base64-decode, GZIP-decompress, verify the checksum, verify the envelope, then parse datasets.
 6. Enforce an app-side maximum encoded payload of **7 MiB**, leaving headroom below the database's 8 MiB constraint. If the backup exceeds this limit, keep the local data and Outbox unchanged and report a bounded “backup too large” result.
+7. The codec also caps uncompressed JSON at **32 MiB** before encoding and during decoding. Decoder validation checks the checksum, exact schema version, canonical JSON, required identifiers, safe config allowlist and dataset-level invariants before returning a snapshot model.
 
 Do not serialize an entire Room database file, Android SharedPreferences file, token store, or arbitrary object graph.
 
@@ -126,7 +127,7 @@ Rules:
 - A session receives its stable sync UUID when created; closing it changes the same logical record rather than creating a second session.
 - Account/config/schedule deletes are represented by tombstones until a committed remote snapshot acknowledges them.
 - Room cleanup of records older than the existing retention window is handled by snapshot retention policy; it is not interpreted as a user-requested delete of the entire account.
-- The current EarningsStore file needs a format-compatible stable entry ID and a durable dirty marker before it is included. That file integration is part of the Outbox implementation design, not part of this architecture-only round.
+- Phase 3.4.3 adds a versioned line format (`v2|entryUUID|timestampMs|kind|reward|account`), atomically upgrades legacy rows with stable UUIDs, and persists a generation/acknowledged-generation marker in `earnings.dirty`. The backup builder captures the earnings rows and generation together under the file lock. A future sync may acknowledge only the captured generation after the remote snapshot commit; any later append leaves the store dirty.
 
 Do not create one Outbox event for every diagnostic log line. Logs are local-only in snapshot format v1.
 
@@ -206,10 +207,10 @@ The Room database currently survives sign-out and is not partitioned by Supabase
 
 - **3.4.1 (this document):** architecture and data policy only.
 - **3.4.2:** ✅ Room v2 Outbox/metadata entities, additive migration, stable session UUIDs and atomic local mutation recording (not build-verified).
-- **3.4.3:** safe snapshot builder, codec and file-backed earnings integration.
+- **3.4.3:** ✅ Local snapshot builder, deterministic JSON/GZIP/Base64 + SHA-256 codec, bounded decode validation, stable earnings IDs and durable dirty-generation tracking (source-only; no cloud writes).
 - **3.4.4:** installation identity, owner binding and revision metadata.
 - **3.4.5:** source/security/conflict review and fixes.
 - **3.4.6:** WorkManager/network scheduling and batch sync adapter.
 - **4.1 onward:** Supabase RPC/schema/revision write contract, RLS/grants review, and cloud integration.
 
-No Supabase schema, RLS, grants, rows, Auth settings, Room schema, Gradle files or application code are changed by Phase 3.4.1.
+No Supabase schema, RLS, grants, rows, Auth settings, Room schema, Gradle files or application code were changed by Phase 3.4.1.

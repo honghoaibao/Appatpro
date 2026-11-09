@@ -88,6 +88,19 @@ interface SessionDao {
     """)
     suspend fun getTotals(since: Long): TotalsRow
 
+    /** Count the closed rows retained by the backup policy (last 90 days). */
+    @Query("SELECT COUNT(*) FROM sessions WHERE endedAt IS NOT NULL AND startedAt >= :since")
+    suspend fun countClosedForBackup(since: Long): Int
+
+    /** Stable paging keeps a bounded Room cursor/result in memory during snapshot creation. */
+    @Query("""
+        SELECT * FROM sessions
+        WHERE endedAt IS NOT NULL AND startedAt >= :since
+        ORDER BY syncId ASC
+        LIMIT :limit OFFSET :offset
+    """)
+    suspend fun getClosedForBackup(since: Long, limit: Int, offset: Int): List<SessionEntity>
+
     /** Dọn sessions cũ để không phình DB vô hạn. */
     @Query("DELETE FROM sessions WHERE startedAt < :before")
     suspend fun deleteOlderThan(before: Long)

@@ -3,11 +3,12 @@
 ## Supabase portability track (updated 2026-11-09)
 
 - Active branch: feature/atpro-supabase-phase3-1-foundation. main is unchanged and not merged.
-- Phases 3.1–3.3: source implementation added (foundation, Auth lifecycle, Auth UI and protected routing); these changes have not yet been Android-build-verified or device-tested.
-- Phase 3.4.1: architecture/data policy documented in context/cloud_sync_architecture.md and ADR-0018. No sync code or Supabase schema was changed.
-- Phase 3.4.2: Room v2 Outbox + Sync Metadata and atomic mutation recording implemented on the feature branch; not yet build-verified or device-tested. No sync worker, cloud writes, or GitHub Actions were run.
-- Next step: 3.4.3 — snapshot builder, backup codec, stable earnings IDs and earnings dirty tracking.
-- Constraints: keep Room local-first; never upload secrets or Auth/F4F tokens; bind local data to one Auth owner; do not run GitHub Actions until the single final build run; do not modify main.
+- Phases 3.1–3.3: Auth foundation, lifecycle, UI and protected routing implemented in source; not Android-build-verified or device-tested.
+- Phase 3.4.1: Room-first snapshot architecture/data policy documented in context/cloud_sync_architecture.md and ADR-0018.
+- Phase 3.4.2: Room v2 Outbox + Sync Metadata, additive migration, stable session UUIDs and atomic local mutation recording implemented; not build-verified.
+- Phase 3.4.3: deterministic local snapshot builder, JSON/GZIP/Base64 + SHA-256 codec, bounded decode validation, stable earnings entry IDs and durable earnings dirty generations implemented in source; not build-verified. No cloud writes or restore operations.
+- Next step: **3.4.4 — installation identity, Auth owner binding and remote revision metadata lifecycle**.
+- Constraints: Room remains local-first; no credentials/tokens in backup; different Auth owners must be blocked until explicit resolution; do not run GitHub Actions until the single final build run; do not modify main.
 
 ## Trạng thái: v1.12.0 — nhận nhiệm vụ theo `f4f.py` v2.8, chọn tài khoản nhiệm vụ riêng, thông báo nâng cấp (trên nền v1.11.0); chờ build thật + QA thiết bị
 

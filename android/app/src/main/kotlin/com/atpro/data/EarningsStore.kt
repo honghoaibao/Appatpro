@@ -1,73 +1,330 @@
 package com.atpro.data
 
 import android.content.Context
+import android.util.AtomicFile
 import java.io.File
+import java.io.FileOutputStream
+import java.nio.charset.StandardCharsets
+import java.util.UUID
 
 /**
- * Một lần nhận thưởng khi hoàn thành job (v1.10.0).
- * @param kind    "LIKE" hoặc "FOLLOW"
- * @param reward  số xu server trả về khi báo cáo job
+ * A single earning entry returned by the F4F provider.
+ * The persisted ID keeps the same logical earning identifiable across snapshot retries.
  */
-data class EarningEntry(val atMs: Long, val kind: String, val reward: Double, val account: String)
+data class EarningEntry(
+    val atMs: Long,
+    val kind: String,
+    val reward: Double,
+    val account: String,
+    val id: String = UUID.randomUUID().toString(),
+)
+
+data class EarningsDirtyState(
+    val generation: Long = 0,
+    val acknowledgedGeneration: Long = 0,
+) {
+    val isDirty: Boolean get() = generation > acknowledgedGeneration
+}
+
+data class EarningsStoreSnapshot(
+    val entries: List<EarningEntry>,
+    val dirtyState: EarningsDirtyState,
+)
 
 /**
- * Nhật ký thu nhập theo từng job — nguồn dữ liệu cho tab "Kiếm tiền" của Thống kê.
+ * Earnings history remains file-backed to avoid inflating Room with per-job rows.
  *
- * Lưu dạng văn bản mỗi job một dòng `thờiĐiểmMs|LOẠI|xu|tàiKhoản` trong `filesDir/earnings.log`:
- * không cần Room/migration, ghi nối thêm (O(1)), tự cắt bớt khi vượt [MAX_LINES].
- * `record()` không làm gì nếu chưa `init()` (unit test / chưa bật dịch vụ) và không bao giờ ném lỗi.
+ * Current format: v2|entryUUID|timestampMs|kind|reward|account
+ * Legacy rows are migrated atomically and receive a stored UUID. A small AtomicFile
+ * generation marker gives the future sync worker a durable dirty signal without
+ * requiring a Room transaction for this file-backed dataset.
  */
 object EarningsStore {
-    private const val FILE      = "earnings.log"
+    private const val FILE = "earnings.log"
+    private const val DIRTY_FILE = "earnings.dirty"
     private const val MAX_LINES = 30_000
-    private const val KEEP      = 25_000
+    private const val KEEP = 25_000
+    private const val DIRTY_FORMAT = "v1"
 
     @Volatile private var dir: File? = null
     private val lock = Any()
     private var appendsSinceTrim = 0
 
     fun init(context: Context) {
-        if (dir == null) dir = context.applicationContext.filesDir
+        synchronized(lock) {
+            val target = context.applicationContext.filesDir
+            dir = target
+            initializeDirtyMarkerLocked(target)
+        }
     }
 
-    fun record(kind: String, reward: Double, account: String, atMs: Long = System.currentTimeMillis()) {
-        val d = dir ?: return
-        if (reward.isNaN() || reward < 0.0) return
-        val safeAccount = account.replace('|', '_').replace('\n', ' ')
+    fun record(
+        kind: String,
+        reward: Double,
+        account: String,
+        atMs: Long = System.currentTimeMillis(),
+    ) {
+        val directory = dir ?: return
+        if (!reward.isFinite() || reward < 0.0) return
+
         try {
             synchronized(lock) {
-                val f = File(d, FILE)
-                f.appendText("$atMs|$kind|$reward|$safeAccount\n")
-                if (++appendsSinceTrim >= 200) { appendsSinceTrim = 0; trim(f) }
+                if (!ensureLegacyMigratedLocked(directory)) return
+
+                // Dirty first: a crash can produce a harmless false-positive, never a missed write.
+                markDirtyLocked(directory)
+                val entry = EarningEntry(
+                    atMs = atMs,
+                    kind = sanitize(kind),
+                    reward = reward,
+                    account = sanitize(account),
+                )
+                FileOutputStream(File(directory, FILE), true).use { output ->
+                    output.write((toStorageLine(entry) + "\n").toByteArray(StandardCharsets.UTF_8))
+                    output.flush()
+                    output.fd.sync()
+                }
+
+                if (++appendsSinceTrim >= 200) {
+                    appendsSinceTrim = 0
+                    trimLocked(File(directory, FILE))
+                }
             }
-        } catch (_: Exception) { /* ghi thu nhập là phụ — không được làm hỏng luồng chạy */ }
+        } catch (_: Exception) {
+            // Earnings are auxiliary; storage failures must not crash the service.
+        }
     }
 
-    fun readAll(): List<EarningEntry> {
-        val d = dir ?: return emptyList()
-        return try {
-            synchronized(lock) {
-                val f = File(d, FILE)
-                if (!f.exists()) emptyList() else f.useLines { lines -> lines.mapNotNull(::parseLine).toList() }
+    /** Consistent file contents + dirty generation under a single process lock. */
+    fun readSnapshot(): EarningsStoreSnapshot {
+        val directory = dir ?: return EarningsStoreSnapshot(emptyList(), EarningsDirtyState())
+        synchronized(lock) {
+            initializeDirtyMarkerLocked(directory)
+            if (!ensureLegacyMigratedLocked(directory)) {
+                throw IllegalStateException("Could not safely migrate the earnings file")
             }
-        } catch (_: Exception) { emptyList() }
+
+            val file = File(directory, FILE)
+            val entries = if (!file.exists()) {
+                emptyList()
+            } else {
+                file.useLines { lines -> lines.mapNotNull(::parseLine).toList() }
+            }
+            return EarningsStoreSnapshot(entries, readDirtyStateLocked(directory))
+        }
+    }
+
+    fun readAll(): List<EarningEntry> =
+        runCatching { readSnapshot().entries }.getOrDefault(emptyList())
+
+    fun dirtyState(): EarningsDirtyState {
+        val directory = dir ?: return EarningsDirtyState()
+        synchronized(lock) {
+            initializeDirtyMarkerLocked(directory)
+            return readDirtyStateLocked(directory)
+        }
+    }
+
+    fun isDirty(): Boolean = dirtyState().isDirty
+
+    /**
+     * Future sync calls this only after a committed remote snapshot.
+     * Writes made after the captured generation remain dirty.
+     */
+    fun acknowledgeThrough(snapshotGeneration: Long): Boolean {
+        val directory = dir ?: return false
+        return runCatching {
+            synchronized(lock) {
+                initializeDirtyMarkerLocked(directory)
+                val current = readDirtyStateLocked(directory)
+                if (snapshotGeneration < current.acknowledgedGeneration ||
+                    snapshotGeneration > current.generation
+                ) {
+                    false
+                } else {
+                    writeDirtyStateLocked(
+                        directory,
+                        current.copy(acknowledgedGeneration = snapshotGeneration),
+                    )
+                    true
+                }
+            }
+        }.getOrDefault(false)
     }
 
     fun clear() {
-        val d = dir ?: return
-        try { synchronized(lock) { File(d, FILE).delete() } } catch (_: Exception) {}
+        val directory = dir ?: return
+        try {
+            synchronized(lock) {
+                val file = File(directory, FILE)
+                if (file.exists() && file.length() > 0L) {
+                    markDirtyLocked(directory)
+                    AtomicFile(file).delete()
+                }
+            }
+        } catch (_: Exception) {
+            // Preserve best-effort local clear behavior.
+        }
     }
 
     internal fun parseLine(line: String): EarningEntry? {
-        val p = line.split('|')
-        if (p.size < 4) return null
-        val at = p[0].toLongOrNull() ?: return null
-        val reward = p[2].toDoubleOrNull() ?: return null
-        return EarningEntry(at, p[1], reward, p.drop(3).joinToString("|"))
+        val fields = line.split('|')
+        if (fields.firstOrNull() == "v2") {
+            if (fields.size != 6) return null
+            val id = runCatching { UUID.fromString(fields[1]).toString() }.getOrNull() ?: return null
+            val at = fields[2].toLongOrNull() ?: return null
+            val reward = fields[4].toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0.0 } ?: return null
+            return EarningEntry(at, fields[3], reward, fields[5], id)
+        }
+
+        // Legacy four-column form. The read path migrates and persists UUIDs before backup.
+        if (fields.size < 4) return null
+        val at = fields[0].toLongOrNull() ?: return null
+        val reward = fields[2].toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0.0 } ?: return null
+        val id = UUID.nameUUIDFromBytes(line.toByteArray(StandardCharsets.UTF_8)).toString()
+        return EarningEntry(at, fields[1], reward, fields.drop(3).joinToString("|"), id)
     }
 
-    private fun trim(f: File) {
-        val lines = f.readLines()
-        if (lines.size > MAX_LINES) f.writeText(lines.takeLast(KEEP).joinToString("\n", postfix = "\n"))
+    private fun sanitize(value: String): String =
+        value.replace('|', '_').replace('\n', ' ').replace('\r', ' ')
+
+    private fun toStorageLine(entry: EarningEntry): String =
+        "v2|${entry.id}|${entry.atMs}|${sanitize(entry.kind)}|${entry.reward}|${sanitize(entry.account)}"
+
+    private fun initializeDirtyMarkerLocked(directory: File) {
+        val marker = File(directory, DIRTY_FILE)
+        if (!marker.exists()) {
+            val hasExistingEntries = File(directory, FILE).let { it.exists() && it.length() > 0L }
+            val initial = if (hasExistingEntries) {
+                EarningsDirtyState(generation = 1, acknowledgedGeneration = 0)
+            } else {
+                EarningsDirtyState()
+            }
+            writeDirtyStateLocked(directory, initial)
+        } else if (readDirtyStateOrNullLocked(directory) == null) {
+            // Corrupt/missing metadata must never be interpreted as clean.
+            writeDirtyStateLocked(
+                directory,
+                EarningsDirtyState(generation = 1, acknowledgedGeneration = 0),
+            )
+        }
+    }
+
+    private fun readDirtyStateLocked(directory: File): EarningsDirtyState =
+        readDirtyStateOrNullLocked(directory)
+            ?: EarningsDirtyState(generation = 1, acknowledgedGeneration = 0)
+
+    private fun readDirtyStateOrNullLocked(directory: File): EarningsDirtyState? {
+        return try {
+            val atomic = AtomicFile(File(directory, DIRTY_FILE))
+            val raw = atomic.openRead().bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
+            val fields = raw.trim().split('|')
+            if (fields.size != 3 || fields[0] != DIRTY_FORMAT) return null
+            val generation = fields[1].toLongOrNull()?.takeIf { it >= 0 } ?: return null
+            val acknowledged = fields[2].toLongOrNull()?.takeIf { it >= 0 && it <= generation } ?: return null
+            EarningsDirtyState(generation, acknowledged)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun writeDirtyStateLocked(directory: File, state: EarningsDirtyState) {
+        val atomic = AtomicFile(File(directory, DIRTY_FILE))
+        var output: FileOutputStream? = null
+        try {
+            output = atomic.startWrite()
+            val text = "$DIRTY_FORMAT|${state.generation}|${state.acknowledgedGeneration}"
+            output.write(text.toByteArray(StandardCharsets.UTF_8))
+            output.flush()
+            output.fd.sync()
+            atomic.finishWrite(output)
+        } catch (error: Exception) {
+            output?.let { atomic.failWrite(it) }
+            throw error
+        }
+    }
+
+    /** Atomically migrate legacy rows while retaining malformed lines for local inspection. */
+    private fun ensureLegacyMigratedLocked(directory: File): Boolean {
+        val file = File(directory, FILE)
+        if (!file.exists() || file.length() == 0L) return true
+
+        val lines = try {
+            file.readLines(StandardCharsets.UTF_8)
+        } catch (_: Exception) {
+            return false
+        }
+
+        var changed = false
+        val migrated = lines.map { line ->
+            if (line.startsWith("v2|")) {
+                line
+            } else {
+                val fields = line.split('|')
+                val at = fields.getOrNull(0)?.toLongOrNull()
+                val reward = fields.getOrNull(2)?.toDoubleOrNull()
+                if (fields.size < 4 || at == null || reward == null ||
+                    !reward.isFinite() || reward < 0.0
+                ) {
+                    line
+                } else {
+                    changed = true
+                    toStorageLine(
+                        EarningEntry(
+                            atMs = at,
+                            kind = sanitize(fields[1]),
+                            reward = reward,
+                            account = sanitize(fields.drop(3).joinToString("|")),
+                        ),
+                    )
+                }
+            }
+        }
+        if (!changed) return true
+
+        return try {
+            markDirtyLocked(directory)
+            val atomic = AtomicFile(file)
+            var output: FileOutputStream? = null
+            try {
+                output = atomic.startWrite()
+                output.write(migrated.joinToString("\n", postfix = "\n").toByteArray(StandardCharsets.UTF_8))
+                output.flush()
+                output.fd.sync()
+                atomic.finishWrite(output)
+            } catch (error: Exception) {
+                output?.let { atomic.failWrite(it) }
+                throw error
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun markDirtyLocked(directory: File): Long {
+        val current = readDirtyStateLocked(directory)
+        val next = current.copy(generation = current.generation + 1L)
+        writeDirtyStateLocked(directory, next)
+        return next.generation
+    }
+
+    private fun trimLocked(file: File) {
+        if (!file.exists()) return
+        val lines = file.readLines(StandardCharsets.UTF_8)
+        if (lines.size <= MAX_LINES) return
+
+        val retained = lines.takeLast(KEEP)
+        val atomic = AtomicFile(file)
+        var output: FileOutputStream? = null
+        try {
+            output = atomic.startWrite()
+            output.write(retained.joinToString("\n", postfix = "\n").toByteArray(StandardCharsets.UTF_8))
+            output.flush()
+            output.fd.sync()
+            atomic.finishWrite(output)
+        } catch (error: Exception) {
+            output?.let { atomic.failWrite(it) }
+        }
     }
 }
