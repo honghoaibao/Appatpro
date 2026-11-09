@@ -6,7 +6,7 @@ package com.atpro.sync
  */
 internal object BackupSnapshotValidator {
     fun validate(snapshot: BackupSnapshot) {
-        if (snapshot.formatVersion <= 0 ||
+        if (snapshot.formatVersion != BackupSnapshot.CURRENT_FORMAT_VERSION ||
             snapshot.createdAt < 0L ||
             snapshot.appVersion.isBlank() ||
             !BackupMetadataRules.isCanonicalUuid(snapshot.sourceInstallId)
@@ -17,18 +17,35 @@ internal object BackupSnapshotValidator {
         val accountNames = snapshot.datasets.accounts.map { it.username }
         if (accountNames.any { it.isBlank() || it != it.trim() } ||
             accountNames.distinct().size != accountNames.size ||
-            snapshot.datasets.accounts.any { it.createdAt < 0L || it.updatedAt < 0L }
+            snapshot.datasets.accounts.any {
+                it.createdAt < 0L || it.statusUpdatedAt < 0L ||
+                    it.statsUpdatedAt < 0L || it.status.isBlank()
+            }
         ) {
             throw BackupCodecException("Backup contains invalid or duplicate accounts")
         }
 
-        if (snapshot.datasets.accountStats.keys.any { it !in accountNames } ||
-            snapshot.datasets.accountStats.values.any {
-                it.sessionsCount < 0 || it.totalLikes < 0 || it.totalFollows < 0 ||
-                    it.totalVideos < 0 || it.updatedAt < 0L
+        val contributionsByAccount = snapshot.datasets.accountStatContributions.groupBy { it.accountId }
+        val accountByName = snapshot.datasets.accounts.associateBy { it.username }
+        val contributionKeys = snapshot.datasets.accountStatContributions.map {
+            it.accountId to it.installationId
+        }
+        if (contributionKeys.distinct().size != contributionKeys.size ||
+            snapshot.datasets.accountStatContributions.any {
+                it.accountId !in accountNames ||
+                    !BackupMetadataRules.isCanonicalUuid(it.installationId) ||
+                    it.sessionsCount < 0L || it.totalLikes < 0L ||
+                    it.totalFollows < 0L || it.totalVideos < 0L || it.updatedAt < 0L
+            } ||
+            accountNames.any { name ->
+                val contributions = contributionsByAccount[name].orEmpty()
+                val latestContributionAt = contributions.maxOfOrNull { it.updatedAt }
+                latestContributionAt == null ||
+                    latestContributionAt != accountByName[name]?.statsUpdatedAt ||
+                    contributions.none { it.installationId == snapshot.sourceInstallId }
             }
         ) {
-            throw BackupCodecException("Backup contains invalid account statistics")
+            throw BackupCodecException("Backup contains invalid or duplicate per-installation account statistics")
         }
 
         val sessionIds = snapshot.datasets.closedSessions.map { it.syncId }

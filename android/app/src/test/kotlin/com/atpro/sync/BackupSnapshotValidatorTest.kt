@@ -9,7 +9,7 @@ class BackupSnapshotValidatorTest {
     private val earningId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 
     private fun validSnapshot() = BackupSnapshot(
-        formatVersion = 1,
+        formatVersion = BackupSnapshot.CURRENT_FORMAT_VERSION,
         createdAt = 1_700_000_000_000L,
         appVersion = "1.12.0",
         sourceInstallId = installationId,
@@ -20,7 +20,8 @@ class BackupSnapshotValidatorTest {
                     status = "active",
                     checkpoint = false,
                     createdAt = 1_700_000_000_000L,
-                    updatedAt = 1_700_000_000_000L,
+                    statusUpdatedAt = 1_700_000_000_000L,
+                    statsUpdatedAt = 1_700_000_001_000L,
                 )
             ),
             closedSessions = listOf(
@@ -59,12 +60,14 @@ class BackupSnapshotValidatorTest {
                     account = "sample_account",
                 )
             ),
-            accountStats = mapOf(
-                "sample_account" to BackupAccountStats(
-                    sessionsCount = 1,
-                    totalLikes = 1,
-                    totalFollows = 0,
-                    totalVideos = 2,
+            accountStatContributions = listOf(
+                BackupAccountStatContribution(
+                    accountId = "sample_account",
+                    installationId = installationId,
+                    sessionsCount = 1L,
+                    totalLikes = 1L,
+                    totalFollows = 0L,
+                    totalVideos = 2L,
                     updatedAt = 1_700_000_001_000L,
                 )
             ),
@@ -86,6 +89,11 @@ class BackupSnapshotValidatorTest {
     }
 
     @Test
+    fun rejectsUnsupportedFormatVersion() {
+        assertRejected(validSnapshot().copy(formatVersion = 1))
+    }
+
+    @Test
     fun rejectsNonCanonicalIdentifiers() {
         val base = validSnapshot()
         assertRejected(base.copy(sourceInstallId = "1-1-1-1-1"))
@@ -95,6 +103,14 @@ class BackupSnapshotValidatorTest {
             )
         )
         assertRejected(invalidSession)
+        val invalidContribution = base.copy(
+            datasets = base.datasets.copy(
+                accountStatContributions = listOf(
+                    base.datasets.accountStatContributions.single().copy(installationId = "1-1-1-1-1")
+                )
+            )
+        )
+        assertRejected(invalidContribution)
         val invalidEarning = base.copy(
             datasets = base.datasets.copy(
                 earnings = listOf(base.datasets.earnings.single().copy(id = "1-1-1-1-1"))
@@ -107,34 +123,120 @@ class BackupSnapshotValidatorTest {
     fun rejectsNegativeOrReversedTimestamps() {
         val base = validSnapshot()
         assertRejected(base.copy(createdAt = -1L))
-        val reversed = base.copy(
-            datasets = base.datasets.copy(
-                closedSessions = listOf(base.datasets.closedSessions.single().copy(endedAt = 0L))
+        assertRejected(
+            base.copy(
+                datasets = base.datasets.copy(
+                    accounts = listOf(base.datasets.accounts.single().copy(statusUpdatedAt = -1L))
+                )
             )
         )
-        assertRejected(reversed)
-        val negativeEarningTime = base.copy(
-            datasets = base.datasets.copy(
-                earnings = listOf(base.datasets.earnings.single().copy(atMs = -1L))
+        assertRejected(
+            base.copy(
+                datasets = base.datasets.copy(
+                    accounts = listOf(base.datasets.accounts.single().copy(statsUpdatedAt = -1L))
+                )
             )
         )
-        assertRejected(negativeEarningTime)
+        assertRejected(
+            base.copy(
+                datasets = base.datasets.copy(
+                    closedSessions = listOf(base.datasets.closedSessions.single().copy(endedAt = 0L))
+                )
+            )
+        )
+        assertRejected(
+            base.copy(
+                datasets = base.datasets.copy(
+                    earnings = listOf(base.datasets.earnings.single().copy(atMs = -1L))
+                )
+            )
+        )
+        assertRejected(
+            base.copy(
+                datasets = base.datasets.copy(
+                    accountStatContributions = listOf(
+                        base.datasets.accountStatContributions.single().copy(updatedAt = -1L)
+                    )
+                )
+            )
+        )
     }
 
     @Test
-    fun rejectsInvalidScheduleAndStatsTimestamps() {
+    fun rejectsStatsTimestampThatDoesNotMatchTheContributionWatermark() {
         val base = validSnapshot()
-        val duplicateDays = base.copy(
-            datasets = base.datasets.copy(
-                schedules = listOf(base.datasets.schedules.single().copy(daysOfWeek = listOf(1, 1)))
+        assertRejected(
+            base.copy(
+                datasets = base.datasets.copy(
+                    accounts = listOf(base.datasets.accounts.single().copy(statsUpdatedAt = 1L))
+                )
             )
         )
-        assertRejected(duplicateDays)
-        val invalidStats = base.copy(
-            datasets = base.datasets.copy(
-                accountStats = mapOf("sample_account" to base.datasets.accountStats.getValue("sample_account").copy(updatedAt = -1L))
+    }
+
+    @Test
+    fun requiresTheSourceInstallationContributionForEveryAccount() {
+        val base = validSnapshot()
+        assertRejected(
+            base.copy(
+                datasets = base.datasets.copy(
+                    accountStatContributions = listOf(
+                        base.datasets.accountStatContributions.single().copy(
+                            installationId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+                        )
+                    )
+                )
             )
         )
-        assertRejected(invalidStats)
+    }
+
+    @Test
+    fun rejectsDuplicateOrUnknownAccountContributions() {
+        val base = validSnapshot()
+        val contribution = base.datasets.accountStatContributions.single()
+        assertRejected(
+            base.copy(
+                datasets = base.datasets.copy(
+                    accountStatContributions = listOf(contribution, contribution)
+                )
+            )
+        )
+        assertRejected(
+            base.copy(
+                datasets = base.datasets.copy(
+                    accountStatContributions = listOf(contribution.copy(accountId = "missing_account"))
+                )
+            )
+        )
+    }
+
+    @Test
+    fun rejectsNegativeContributionCountersAndMissingContribution() {
+        val base = validSnapshot()
+        val contribution = base.datasets.accountStatContributions.single()
+        assertRejected(
+            base.copy(
+                datasets = base.datasets.copy(
+                    accountStatContributions = listOf(contribution.copy(totalLikes = -1L))
+                )
+            )
+        )
+        assertRejected(
+            base.copy(
+                datasets = base.datasets.copy(accountStatContributions = emptyList())
+            )
+        )
+    }
+
+    @Test
+    fun rejectsInvalidSchedule() {
+        val base = validSnapshot()
+        assertRejected(
+            base.copy(
+                datasets = base.datasets.copy(
+                    schedules = listOf(base.datasets.schedules.single().copy(daysOfWeek = listOf(1, 1)))
+                )
+            )
+        )
     }
 }

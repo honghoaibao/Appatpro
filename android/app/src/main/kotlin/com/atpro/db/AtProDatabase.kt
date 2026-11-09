@@ -22,8 +22,9 @@ import com.atpro.db.entity.*
         ConfigEntity::class,
         SyncMetadataEntity::class,
         SyncOutboxEntity::class,
+        AccountStatContributionEntity::class,
     ],
-    version  = 3,
+    version  = 4,
     exportSchema = false,
 )
 abstract class AtProDatabase : RoomDatabase() {
@@ -34,6 +35,7 @@ abstract class AtProDatabase : RoomDatabase() {
     abstract fun configDao():  ConfigDao
     abstract fun syncMetadataDao(): SyncMetadataDao
     abstract fun syncOutboxDao(): SyncOutboxDao
+    abstract fun accountStatContributionDao(): AccountStatContributionDao
 
     companion object {
         /**
@@ -106,6 +108,45 @@ abstract class AtProDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Split account status/stat timestamps and seed the current installation's
+         * monotonic contribution from each existing local aggregate exactly once.
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE accounts ADD COLUMN statusUpdatedAt INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE accounts ADD COLUMN statsUpdatedAt INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("UPDATE accounts SET statusUpdatedAt = updatedAt, statsUpdatedAt = updatedAt")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS account_stat_contributions (
+                        accountId TEXT NOT NULL,
+                        installationId TEXT NOT NULL,
+                        sessionsCount INTEGER NOT NULL,
+                        totalLikes INTEGER NOT NULL,
+                        totalFollows INTEGER NOT NULL,
+                        totalVideos INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        PRIMARY KEY(accountId, installationId),
+                        FOREIGN KEY(accountId) REFERENCES accounts(username)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_account_stat_contributions_accountId ON account_stat_contributions(accountId)")
+                db.execSQL("""
+                    INSERT OR IGNORE INTO account_stat_contributions (
+                        accountId, installationId, sessionsCount, totalLikes,
+                        totalFollows, totalVideos, updatedAt
+                    )
+                    SELECT accounts.username, sync_metadata.installationId,
+                           accounts.sessionsCount, accounts.totalLikes,
+                           accounts.totalFollows, accounts.totalVideos, accounts.updatedAt
+                    FROM accounts
+                    CROSS JOIN sync_metadata
+                    WHERE sync_metadata.id = 1
+                """.trimIndent())
+            }
+        }
+
         @Volatile
         private var INSTANCE: AtProDatabase? = null
 
@@ -116,7 +157,7 @@ abstract class AtProDatabase : RoomDatabase() {
                     AtProDatabase::class.java,
                     "atpro.db",
                 )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .addCallback(object : RoomDatabase.Callback() {
                     override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                         // Fresh installs do not execute migrations; seed the singleton row here too.

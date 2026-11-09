@@ -5,6 +5,7 @@ import androidx.room.withTransaction
 import com.atpro.data.EarningsStore
 import com.atpro.db.AtProDatabase
 import com.atpro.db.entity.AccountEntity
+import com.atpro.db.entity.AccountStatContributionEntity
 import com.atpro.db.entity.ConfigEntity
 import com.atpro.db.entity.SessionEntity
 import com.atpro.scheduler.ScheduledFarmManager
@@ -34,6 +35,7 @@ class BackupSnapshotBuilder(context: Context) {
     private data class RoomRows(
         val installationId: String,
         val accounts: List<AccountEntity>,
+        val accountStatContributions: List<AccountStatContributionEntity>,
         val sessions: List<SessionEntity>,
         val configs: List<ConfigEntity>,
     )
@@ -84,6 +86,7 @@ class BackupSnapshotBuilder(context: Context) {
                 RoomRows(
                     installationId = metadata.installationId,
                     accounts = accounts,
+                    accountStatContributions = database.accountStatContributionDao().getAll(),
                     sessions = sessions,
                     configs = database.configDao().getAll(),
                 )
@@ -115,18 +118,23 @@ class BackupSnapshotBuilder(context: Context) {
                 status = it.status,
                 checkpoint = it.checkpoint,
                 createdAt = it.createdAt,
-                updatedAt = it.updatedAt,
+                statusUpdatedAt = it.statusUpdatedAt,
+                statsUpdatedAt = it.statsUpdatedAt,
             )
         }
-        val accountStats = orderedAccounts.associate { account ->
-            account.username to BackupAccountStats(
-                sessionsCount = account.sessionsCount,
-                totalLikes = account.totalLikes,
-                totalFollows = account.totalFollows,
-                totalVideos = account.totalVideos,
-                updatedAt = account.updatedAt,
-            )
-        }.toSortedMap()
+        val accountContributions = roomRows.accountStatContributions
+            .sortedWith(compareBy({ it.accountId }, { it.installationId }))
+            .map {
+                BackupAccountStatContribution(
+                    accountId = it.accountId,
+                    installationId = it.installationId,
+                    sessionsCount = it.sessionsCount,
+                    totalLikes = it.totalLikes,
+                    totalFollows = it.totalFollows,
+                    totalVideos = it.totalVideos,
+                    updatedAt = it.updatedAt,
+                )
+            }
 
         val closedSessions = roomRows.sessions
             .asSequence()
@@ -170,7 +178,7 @@ class BackupSnapshotBuilder(context: Context) {
                 safeConfigs = safeConfigs,
                 schedules = schedules,
                 earnings = earningModels,
-                accountStats = accountStats,
+                accountStatContributions = accountContributions,
             ),
         )
 
@@ -219,7 +227,7 @@ class BackupSnapshotBuilder(context: Context) {
         }.getOrNull()?.takeIf { it.isNotBlank() } ?: "unknown"
 
     private companion object {
-        const val FORMAT_VERSION = 1
+        const val FORMAT_VERSION = BackupSnapshot.CURRENT_FORMAT_VERSION
         const val SCHEDULE_PREFIX = "sched_"
         const val SESSION_PAGE_SIZE = 500
         const val MAX_CLOSED_SESSIONS = 100_000

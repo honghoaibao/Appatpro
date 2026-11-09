@@ -67,7 +67,7 @@ Logical envelope:
 
 ~~~json
 {
-  "formatVersion": 1,
+  "formatVersion": 2,
   "createdAt": 0,
   "appVersion": "1.12.0",
   "sourceInstallId": "uuid",
@@ -77,7 +77,8 @@ Logical envelope:
     "safeConfigs": [],
     "schedules": [],
     "earnings": [],
-    "accountStats": {}
+    "accountStatContributions": []
+
   }
 }
 ~~~
@@ -181,7 +182,7 @@ Because the current REST transport deliberately does not implement HTTP PATCH, P
 
 ## 8. Merge and conflict policy
 
-- **Accounts:** key by normalized username. The current Room model is not yet safe for a multi-device merge: one `updatedAt` is shared by status changes and aggregate-stat updates, while counters are complete cumulative totals. Do not use generic LWW for status or sum snapshot totals. Before account sync is enabled, add independent `statusUpdatedAt`/`statsUpdatedAt` fields and per-installation cumulative contributions keyed by installation UUID; derive displayed totals from distinct contributions. See ADR-0022.
+- **Accounts:** key by normalized username. Room v4 stores independent `statusUpdatedAt` and `statsUpdatedAt` fields. Status/checkpoint resolves by `statusUpdatedAt`; equal timestamps with different status values are unresolved. Note that this is currently a device wall-clock timestamp, not a causal clock: material clock skew can misorder cross-device changes. Before automatic remote status LWW is enabled, the server/integration design must provide a server-authoritative ordering signal or surface uncertain ordering for user resolution. Cumulative counters are represented by `accountStatContributions`, keyed by (accountId, installationId), with Long counters and per-installation updatedAt. For the same installation, merge each counter by component-wise MAX (idempotent replay); across distinct installations, sum the contributions using saturating arithmetic. Display values clamp to the existing Int UI range. Never sum two whole snapshots or apply generic LWW to counters. See ADR-0022.
 - **Sessions:** merge as a set by stable session UUID; only closed sessions are uploaded. The same UUID is an update to one logical session, never a duplicate insert.
 - **Configs:** merge by allowlisted key and updatedAt; unknown keys are ignored. Device-local preferences and credentials never enter the shared snapshot.
 - **Schedules:** preserve their definitions, but import with enabled = false; require the user to review and manually enable them on a target installation.
@@ -192,7 +193,7 @@ Because the current REST transport deliberately does not implement HTTP PATCH, P
 
 ### Account merge gate
 
-The account merge model in ADR-0022 is a hard prerequisite for enabling multi-device writes or acknowledging account Outbox events. A worker may prepare/read data, but it must not upload a merged account dataset, overwrite account status/counters, or acknowledge an unresolved account batch until the additive local contribution model and its tests exist.
+The local account conflict model in ADR-0022 is implemented in Phase 3.4.7: Room v4 additive migration, legacy baseline seeding, independent timestamps, per-installation contribution storage, pure merge/aggregate rules and tests. This removes the earlier local-model gate, but does **not** enable cloud writes. A worker must still not upload or acknowledge account events until Phase 4.1 provides a verified server-side revision CAS/RLS contract and a later integration phase implements a tested merge/restore coordinator.
 
 ## 9. Auth ownership boundary
 
@@ -236,7 +237,7 @@ The Room database currently survives sign-out and is not partitioned by Supabase
 - **3.4.4:** ✅ Room v3 owner-binding timestamps, explicit Settings confirmation, signed-in-owner matching/blocking, and local CAS revision-checkpoint contract (source-only; no cloud calls).
 - **3.4.5:** ✅ source/security/conflict review; strict local metadata and snapshot validation added. ADR-0022 documents the unresolved account merge gate (source-only, not build-verified).
 - **3.4.6:** ✅ unique connected-network WorkManager preflight, mutation/startup/auth triggers, metadata-only Outbox head projection and bounded 50-event / 512 KiB planner. No cloud operation or Outbox acknowledgement (source-only, not build-verified).
-- **3.4.7:** required account conflict model from ADR-0022: separate status/stat timestamps and per-installation cumulative contributions, additive migration and tests.
-- **4.1 onward:** Supabase RPC/schema/revision write contract, RLS/grants review and cloud integration. Remote writes remain disabled until both ADR-0022 and the Phase 4.1 server contract are implemented and verified.
+- **3.4.7:** ✅ Room v4 account conflict model: independent status/stat timestamps, migration 3→4 with exactly-once legacy baseline contribution, per-installation Long counters, component-wise MAX merge policy, saturating aggregate and snapshot format v2. Pure tests added; not build-verified.
+- **4.1 onward:** Supabase RPC/schema/revision write contract, RLS/grants review, then a separately approved remote merge/restore integration. Remote writes remain disabled until the server contract and integration are implemented and verified.
 
-Phase 3.4.1 itself changed architecture documentation only. Phases 3.4.2–3.4.6 add local Room/application code, validation, preflight scheduling and documentation only; no Supabase schema, RLS, grants, rows, Auth settings or cloud requests were changed.
+Phase 3.4.1 itself changed architecture documentation only. Phases 3.4.2–3.4.7 add local Room/application code, validation, preflight scheduling, account conflict handling and documentation only; no Supabase schema, RLS, grants, rows, Auth settings or cloud requests were changed.

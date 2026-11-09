@@ -4,7 +4,7 @@ import kotlinx.serialization.Serializable
 
 /**
  * Versioned, deterministic logical backup. Credentials, logs and device-local UI state
- * are intentionally absent from this model.
+ * are intentionally absent.
  */
 @Serializable
 data class BackupSnapshot(
@@ -13,7 +13,11 @@ data class BackupSnapshot(
     val appVersion: String,
     val sourceInstallId: String,
     val datasets: BackupSnapshotDatasets,
-)
+) {
+    companion object {
+        const val CURRENT_FORMAT_VERSION = 2
+    }
+}
 
 @Serializable
 data class BackupSnapshotDatasets(
@@ -22,7 +26,7 @@ data class BackupSnapshotDatasets(
     val safeConfigs: List<BackupSafeConfig>,
     val schedules: List<BackupSchedule>,
     val earnings: List<BackupEarning>,
-    val accountStats: Map<String, BackupAccountStats>,
+    val accountStatContributions: List<BackupAccountStatContribution>,
 )
 
 @Serializable
@@ -31,15 +35,18 @@ data class BackupAccount(
     val status: String,
     val checkpoint: Boolean,
     val createdAt: Long,
-    val updatedAt: Long,
+    val statusUpdatedAt: Long,
+    val statsUpdatedAt: Long,
 )
 
 @Serializable
-data class BackupAccountStats(
-    val sessionsCount: Int,
-    val totalLikes: Int,
-    val totalFollows: Int,
-    val totalVideos: Int,
+data class BackupAccountStatContribution(
+    val accountId: String,
+    val installationId: String,
+    val sessionsCount: Long,
+    val totalLikes: Long,
+    val totalFollows: Long,
+    val totalVideos: Long,
     val updatedAt: Long,
 )
 

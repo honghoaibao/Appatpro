@@ -3,10 +3,13 @@ package com.atpro.data
 import android.content.Context
 import android.util.Log
 import androidx.room.withTransaction
+import org.json.JSONArray
 import org.json.JSONObject
 import com.atpro.db.AtProDatabase
 import com.atpro.db.dao.TotalsRow
 import com.atpro.db.entity.*
+import com.atpro.sync.AccountStatContributionPolicy
+import com.atpro.sync.BackupAccountStatContribution
 import com.atpro.sync.BackupConfigPolicy
 import com.atpro.sync.SyncWorkScheduler
 import kotlinx.coroutines.CancellationException
@@ -51,6 +54,7 @@ class LocalRepository(context: Context) : IFarmRepository {
     private val logs     = db.logDao()
     private val configs  = db.configDao()
     private val syncOutbox = db.syncOutboxDao()
+    private val statContributions = db.accountStatContributionDao()
 
     /**
      * Schedule only after the Room mutation/Outbox transaction has committed.
@@ -90,17 +94,56 @@ class LocalRepository(context: Context) : IFarmRepository {
         )
     }
 
+    /**
+     * Legacy databases are seeded by MIGRATION_3_4. This fallback adopts the existing
+     * aggregate only when the account has no contribution rows at all.
+     */
+    private suspend fun ensureCurrentInstallationContribution(account: AccountEntity) {
+        val metadata = db.syncMetadataDao().get()
+            ?: error("Sync metadata row is missing; cannot identify this installation")
+        val existing = statContributions.getForAccount(account.username)
+        val baseline = if (existing.isEmpty()) {
+            AccountStatContributionEntity(
+                accountId = account.username,
+                installationId = metadata.installationId,
+                sessionsCount = account.sessionsCount.toLong().coerceAtLeast(0L),
+                totalLikes = account.totalLikes.toLong().coerceAtLeast(0L),
+                totalFollows = account.totalFollows.toLong().coerceAtLeast(0L),
+                totalVideos = account.totalVideos.toLong().coerceAtLeast(0L),
+                updatedAt = account.statsUpdatedAt,
+            )
+        } else {
+            AccountStatContributionEntity(
+                accountId = account.username,
+                installationId = metadata.installationId,
+                updatedAt = account.statsUpdatedAt,
+            )
+        }
+        statContributions.ensureBaseline(baseline)
+    }
+
     private suspend fun enqueueAccountUpsert(account: AccountEntity) {
+        ensureCurrentInstallationContribution(account)
+        val contributionArray = JSONArray()
+        statContributions.getForAccount(account.username).forEach { row ->
+            contributionArray.put(
+                JSONObject()
+                    .put("installationId", row.installationId)
+                    .put("sessionsCount", row.sessionsCount)
+                    .put("totalLikes", row.totalLikes)
+                    .put("totalFollows", row.totalFollows)
+                    .put("totalVideos", row.totalVideos)
+                    .put("updatedAt", row.updatedAt)
+            )
+        }
         val payload = JSONObject()
             .put("username", account.username)
             .put("status", account.status)
             .put("checkpoint", account.checkpoint)
-            .put("sessionsCount", account.sessionsCount)
-            .put("totalLikes", account.totalLikes)
-            .put("totalFollows", account.totalFollows)
-            .put("totalVideos", account.totalVideos)
             .put("createdAt", account.createdAt)
-            .put("updatedAt", account.updatedAt)
+            .put("statusUpdatedAt", account.statusUpdatedAt)
+            .put("statsUpdatedAt", account.statsUpdatedAt)
+            .put("statContributions", contributionArray)
             .toString()
         enqueueUpsert("accounts", account.username, payload)
     }
@@ -135,8 +178,11 @@ class LocalRepository(context: Context) : IFarmRepository {
     override suspend fun addAccount(username: String) {
         val account = AccountEntity(username = username.trim().removePrefix("@"))
         db.withTransaction {
-            accounts.upsert(account)
-            enqueueAccountUpsert(account)
+            accounts.insertIfAbsent(account)
+            accounts.getByUsername(account.username)?.let {
+                ensureCurrentInstallationContribution(it)
+                enqueueAccountUpsert(it)
+            }
         }
         requestBackupPreflight()
     }
@@ -197,6 +243,9 @@ class LocalRepository(context: Context) : IFarmRepository {
         videos:     Int,
         comments:   Int,
     ) {
+        require(likes >= 0 && follows >= 0 && videos >= 0 && comments >= 0) {
+            "Session counters must be non-negative before they can be accumulated"
+        }
         val now     = System.currentTimeMillis()
         val started = sessionStartMap.remove(sessionId) ?: now
         val durationSecs = ((now - started) / 1000).toInt().coerceAtLeast(0)
@@ -204,8 +253,45 @@ class LocalRepository(context: Context) : IFarmRepository {
         db.withTransaction {
             sessions.close(sessionId, now, durationSecs, likes, follows, comments, videos)
             sessions.getById(sessionId)?.let { enqueueClosedSessionUpsert(it) }
-            accounts.addStats(accountId, likes, follows, videos)
-            accounts.getByUsername(accountId)?.let { enqueueAccountUpsert(it) }
+
+            accounts.getByUsername(accountId)?.let { account ->
+                ensureCurrentInstallationContribution(account)
+                val metadata = db.syncMetadataDao().get()
+                    ?: error("Sync metadata row is missing; cannot identify this installation")
+                val changed = statContributions.addSessionContribution(
+                    accountId = accountId,
+                    installationId = metadata.installationId,
+                    likes = likes.toLong(),
+                    follows = follows.toLong(),
+                    videos = videos.toLong(),
+                    updatedAt = now,
+                )
+                check(changed == 1) { "Could not update the current installation account contribution" }
+
+                val totals = AccountStatContributionPolicy.aggregate(
+                    statContributions.getForAccount(accountId).map {
+                        BackupAccountStatContribution(
+                            accountId = it.accountId,
+                            installationId = it.installationId,
+                            sessionsCount = it.sessionsCount,
+                            totalLikes = it.totalLikes,
+                            totalFollows = it.totalFollows,
+                            totalVideos = it.totalVideos,
+                            updatedAt = it.updatedAt,
+                        )
+                    }
+                )
+                accounts.updateAggregatedStats(
+                    username = accountId,
+                    sessionsCount = AccountStatContributionPolicy.toDisplayInt(totals.sessionsCount),
+                    totalLikes = AccountStatContributionPolicy.toDisplayInt(totals.totalLikes),
+                    totalFollows = AccountStatContributionPolicy.toDisplayInt(totals.totalFollows),
+                    totalVideos = AccountStatContributionPolicy.toDisplayInt(totals.totalVideos),
+                    statsUpdatedAt = totals.updatedAt,
+                    updatedAt = now,
+                )
+                accounts.getByUsername(accountId)?.let { enqueueAccountUpsert(it) }
+            }
         }
         requestBackupPreflight()
 
