@@ -2,9 +2,12 @@ package com.atpro.data
 
 import android.content.Context
 import android.util.Log
+import androidx.room.withTransaction
+import org.json.JSONObject
 import com.atpro.db.AtProDatabase
 import com.atpro.db.dao.TotalsRow
 import com.atpro.db.entity.*
+import com.atpro.sync.BackupConfigPolicy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -44,6 +47,62 @@ class LocalRepository(context: Context) : IFarmRepository {
     private val sessions = db.sessionDao()
     private val logs     = db.logDao()
     private val configs  = db.configDao()
+    private val syncOutbox = db.syncOutboxDao()
+
+    /** Call only from the same Room transaction as the domain mutation. */
+    private suspend fun enqueueUpsert(dataset: String, entityKey: String, payloadJson: String) {
+        syncOutbox.deletePendingUpserts(dataset, entityKey)
+        syncOutbox.insert(
+            SyncOutboxEntity(
+                dataset = dataset,
+                entityKey = entityKey,
+                operation = SyncOutboxOperation.UPSERT,
+                payloadJson = payloadJson,
+            )
+        )
+    }
+
+    /** Tombstones are intentionally not coalesced away. */
+    private suspend fun enqueueDelete(dataset: String, entityKey: String) {
+        syncOutbox.insert(
+            SyncOutboxEntity(
+                dataset = dataset,
+                entityKey = entityKey,
+                operation = SyncOutboxOperation.DELETE,
+            )
+        )
+    }
+
+    private suspend fun enqueueAccountUpsert(account: AccountEntity) {
+        val payload = JSONObject()
+            .put("username", account.username)
+            .put("status", account.status)
+            .put("checkpoint", account.checkpoint)
+            .put("sessionsCount", account.sessionsCount)
+            .put("totalLikes", account.totalLikes)
+            .put("totalFollows", account.totalFollows)
+            .put("totalVideos", account.totalVideos)
+            .put("createdAt", account.createdAt)
+            .put("updatedAt", account.updatedAt)
+            .toString()
+        enqueueUpsert("accounts", account.username, payload)
+    }
+
+    private suspend fun enqueueClosedSessionUpsert(session: SessionEntity) {
+        if (session.endedAt == null) return
+        val payload = JSONObject()
+            .put("syncId", session.syncId)
+            .put("accountId", session.accountId)
+            .put("startedAt", session.startedAt)
+            .put("endedAt", session.endedAt)
+            .put("likes", session.likes)
+            .put("follows", session.follows)
+            .put("comments", session.comments)
+            .put("videosWatched", session.videosWatched)
+            .put("durationSecs", session.durationSecs)
+            .toString()
+        enqueueUpsert("closedSessions", session.syncId, payload)
+    }
 
     // ── Accounts ─────────────────────────────────────────────
 
@@ -57,19 +116,34 @@ class LocalRepository(context: Context) : IFarmRepository {
         accounts.getActive()
 
     override suspend fun addAccount(username: String) {
-        accounts.upsert(AccountEntity(username = username.trim().removePrefix("@")))
+        val account = AccountEntity(username = username.trim().removePrefix("@"))
+        db.withTransaction {
+            accounts.upsert(account)
+            enqueueAccountUpsert(account)
+        }
     }
 
-    suspend fun deleteAccount(username: String) =
-        accounts.delete(username)
+    suspend fun deleteAccount(username: String) {
+        val normalized = username.trim().removePrefix("@")
+        db.withTransaction {
+            accounts.delete(normalized)
+            enqueueDelete("accounts", normalized)
+        }
+    }
 
     /** Update account status directly (e.g. "banned") from AccountsScreen actions. */
-    suspend fun updateStatus(username: String, status: String) =
-        db.accountDao().updateStatus(
-            username   = username,
-            status     = status,
-            checkpoint = status == "checkpoint",
-        )
+    suspend fun updateStatus(username: String, status: String) {
+        val now = System.currentTimeMillis()
+        db.withTransaction {
+            accounts.updateStatus(
+                username = username,
+                status = status,
+                checkpoint = status == "checkpoint",
+                now = now,
+            )
+            accounts.getByUsername(username)?.let { enqueueAccountUpsert(it) }
+        }
+    }
 
     override suspend fun setCheckpoint(username: String, isCheckpoint: Boolean) {
         val status = if (isCheckpoint) "checkpoint" else "active"
@@ -107,8 +181,12 @@ class LocalRepository(context: Context) : IFarmRepository {
         val started = sessionStartMap.remove(sessionId) ?: now
         val durationSecs = ((now - started) / 1000).toInt().coerceAtLeast(0)
 
-        sessions.close(sessionId, now, durationSecs, likes, follows, comments, videos)  // [v1.1.4 FIX]
-        accounts.addStats(accountId, likes, follows, videos)  // dùng accountId được truyền vào
+        db.withTransaction {
+            sessions.close(sessionId, now, durationSecs, likes, follows, comments, videos)
+            sessions.getById(sessionId)?.let { enqueueClosedSessionUpsert(it) }
+            accounts.addStats(accountId, likes, follows, videos)
+            accounts.getByUsername(accountId)?.let { enqueueAccountUpsert(it) }
+        }
 
         Log.i(TAG, "Session $sessionId @$accountId closed — " +
             "likes=$likes follows=$follows videos=$videos duration=${durationSecs}s")
@@ -175,8 +253,47 @@ class LocalRepository(context: Context) : IFarmRepository {
     suspend fun getConfig(key: String, default: String = ""): String =
         configs.get(key) ?: default
 
-    suspend fun setConfig(key: String, value: String) =
-        configs.set(ConfigEntity(key = key, value = value))
+    suspend fun setConfig(key: String, value: String) {
+        val now = System.currentTimeMillis()
+        db.withTransaction {
+            configs.set(ConfigEntity(key = key, value = value, updatedAt = now))
+            when (val dataset = BackupConfigPolicy.datasetFor(key)) {
+                "safeConfigs" -> {
+                    val payload = JSONObject()
+                        .put("key", key)
+                        .put("value", value)
+                        .put("updatedAt", now)
+                        .toString()
+                    enqueueUpsert(dataset, key, payload)
+                }
+                "schedules" -> {
+                    val scheduleId = key.removePrefix("sched_")
+                    if (value.isEmpty()) {
+                        enqueueDelete(dataset, scheduleId)
+                    } else {
+                        val payload = JSONObject()
+                            .put("scheduleId", scheduleId)
+                            .put("value", value)
+                            .put("updatedAt", now)
+                            .toString()
+                        enqueueUpsert(dataset, scheduleId, payload)
+                    }
+                }
+                else -> Unit
+            }
+        }
+    }
+
+    suspend fun deleteConfig(key: String) {
+        db.withTransaction {
+            configs.delete(key)
+            when (val dataset = BackupConfigPolicy.datasetFor(key)) {
+                "safeConfigs" -> enqueueDelete(dataset, key)
+                "schedules" -> enqueueDelete(dataset, key.removePrefix("sched_"))
+                else -> Unit
+            }
+        }
+    }
 
     suspend fun getConfigInt(key: String, default: Int): Int =
         configs.get(key)?.toIntOrNull() ?: default

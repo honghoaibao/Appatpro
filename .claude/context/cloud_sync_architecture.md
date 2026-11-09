@@ -1,6 +1,6 @@
 # Cloud Sync Architecture — Appatpro
 
-- **Status:** Design approved for implementation planning; no sync code yet
+- **Status:** Architecture approved; Phase 3.4.2 Room journal implementation added (source-only, not build-verified)
 - **Date:** 2026-11-09
 - **Scope:** Phase 3.4 design baseline
 - **Related ADRs:** ADR-0015, ADR-0016, ADR-0017, ADR-0018
@@ -205,7 +205,7 @@ The Room database currently survives sign-out and is not partitioned by Supabase
 ## 12. Phase boundaries
 
 - **3.4.1 (this document):** architecture and data policy only.
-- **3.4.2:** Room Outbox/metadata entities, migration and durable local mutation recording.
+- **3.4.2:** ✅ Room v2 Outbox/metadata entities, additive migration, stable session UUIDs and atomic local mutation recording (not build-verified).
 - **3.4.3:** safe snapshot builder, codec and file-backed earnings integration.
 - **3.4.4:** installation identity, owner binding and revision metadata.
 - **3.4.5:** source/security/conflict review and fixes.

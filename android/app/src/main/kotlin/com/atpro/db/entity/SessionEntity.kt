@@ -1,6 +1,7 @@
 package com.atpro.db.entity
 
 import androidx.room.*
+import java.util.UUID
 
 /**
  * SessionEntity — một lượt farm của một tài khoản.
@@ -17,11 +18,13 @@ import androidx.room.*
     indices = [
         Index("accountId"),
         Index("startedAt"),
+        Index(value = ["syncId"], unique = true),
     ]
 )
 data class SessionEntity(
     @PrimaryKey(autoGenerate = true)
     val id:            Long    = 0,
+    @ColumnInfo(defaultValue = "''") val syncId: String = UUID.randomUUID().toString(),
     val accountId:     String,
     val startedAt:     Long    = System.currentTimeMillis(),
     val endedAt:       Long?   = null,

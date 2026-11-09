@@ -20,6 +20,9 @@ interface SessionDao {
     @Insert
     suspend fun insert(session: SessionEntity): Long
 
+    @Query("SELECT * FROM sessions WHERE id = :id LIMIT 1")
+    suspend fun getById(id: Long): SessionEntity?
+
     /**
      * Đóng session: ghi endedAt, tính durationSecs và lưu stats.
      * v1.1.4 FIX: Thêm likes/follows/comments/videosWatched — trước đây
