@@ -5,6 +5,17 @@ import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.atpro.auth.SupabaseConfig
+import com.atpro.backup.BackupStateStore
+import com.atpro.ui.auth.AuthScreen
+import com.atpro.ui.auth.AuthViewModel
 import com.atpro.notification.NotificationNavigator
 import com.atpro.ui.theme.AtTheme
 import com.atpro.ui.MainScreen
@@ -39,6 +50,9 @@ class DashboardActivity : AppCompatActivity() {
     private val logsVm: LogsViewModel by viewModels {
         LogsViewModel.Factory(applicationContext)
     }
+    private val authVm: AuthViewModel by viewModels {
+        AuthViewModel.Factory(applicationContext)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -54,14 +68,40 @@ class DashboardActivity : AppCompatActivity() {
         window.navigationBarColor = android.graphics.Color.TRANSPARENT
         handleNotificationIntent(intent)
         setContent {
-            AtTheme() {
-                MainScreen(
-                    dashboardVm = dashboardVm,
-                    statsVm     = statsVm,
-                    accountsVm  = accountsVm,
-                    scheduleVm  = scheduleVm,
-                    logsVm      = logsVm,
-                )
+            AtTheme {
+                val authState by authVm.state.collectAsStateWithLifecycle()
+                var cloudAccountOpen by remember { mutableStateOf(false) }
+                val requiresCloudLogin = SupabaseConfig.isConfigured &&
+                    !BackupStateStore.isOfflineMode(applicationContext) &&
+                    !authState.isSignedIn
+
+                if (requiresCloudLogin) {
+                    AuthScreen(
+                        viewModel = authVm,
+                        onContinueOffline = { authVm.continueOffline() },
+                    )
+                } else {
+                    Box(Modifier.fillMaxSize()) {
+                        MainScreen(
+                            dashboardVm = dashboardVm,
+                            statsVm = statsVm,
+                            accountsVm = accountsVm,
+                            scheduleVm = scheduleVm,
+                            logsVm = logsVm,
+                            onOpenCloudAccount = { cloudAccountOpen = true },
+                        )
+                        if (cloudAccountOpen) {
+                            AuthScreen(
+                                viewModel = authVm,
+                                onContinueOffline = {
+                                    authVm.continueOffline()
+                                    cloudAccountOpen = false
+                                },
+                                onClose = { cloudAccountOpen = false },
+                            )
+                        }
+                    }
+                }
             }
         }
     }

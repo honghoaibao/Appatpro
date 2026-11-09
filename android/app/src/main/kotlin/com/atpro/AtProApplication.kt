@@ -21,6 +21,7 @@ class AtProApplication : MultiDexApplication() {
     override fun onCreate() {
         super.onCreate()
         _ctx = applicationContext
+        com.atpro.data.EarningsStore.init(this)
         // v1.7.0: nạp chế độ giao diện Sáng/Tối TRƯỚC mọi Activity để khung đầu tiên đã đúng màu.
         AtThemeState.load(this)
         com.atpro.ui.theme.AtWindowBackground.install(this)

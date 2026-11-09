@@ -89,6 +89,7 @@ fun MainScreen(
     accountsVm:  AccountsViewModel,
     scheduleVm:  ScheduleViewModel,
     logsVm:      LogsViewModel,
+    onOpenCloudAccount: () -> Unit,
 ) {
     val context = LocalContext.current
     var selectedTab by remember { mutableStateOf(Tab.DASHBOARD) }
@@ -186,6 +187,7 @@ fun MainScreen(
                         onOpenConfig   = { section -> context.startActivity(ConfigActivity.intent(context, section)) },
                         onOpenStats    = { openOverlay(Overlay.STATS) },
                         onOpenSchedule = { openOverlay(Overlay.SCHEDULE) },
+                        onOpenCloudAccount = onOpenCloudAccount,
                     )
                 }
             }

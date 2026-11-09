@@ -176,6 +176,16 @@ object AtThemeState {
     }
 
     fun set(context: Context, newMode: AtThemeMode) {
+        persist(context, newMode)
+        com.atpro.backup.BackupStateStore.markDirty(context.applicationContext)
+    }
+
+    /** Apply a cloud-restored theme without creating a new local dirty generation. */
+    fun restore(context: Context, newMode: AtThemeMode) {
+        persist(context, newMode)
+    }
+
+    private fun persist(context: Context, newMode: AtThemeMode) {
         mode = newMode
         context.applicationContext
             .getSharedPreferences(PREFS, Context.MODE_PRIVATE)

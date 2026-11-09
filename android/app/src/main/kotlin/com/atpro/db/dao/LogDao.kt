@@ -11,11 +11,14 @@ interface LogDao {
     @Query("SELECT * FROM farm_logs ORDER BY timestamp DESC LIMIT :limit")
     fun observeRecent(limit: Int = 200): Flow<List<FarmLogEntity>>
 
+    @Query("SELECT * FROM farm_logs ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getRecent(limit: Int = 200): List<FarmLogEntity>
+
     @Insert
     suspend fun insert(log: FarmLogEntity)
 
     /** v1.10.0 — ghi nhiều dòng trong một giao dịch (LocalRepository.log gom lô). */
-    @Insert
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(logs: List<FarmLogEntity>)
 
     /** Dọn log cũ — gọi từ LocalRepository.cleanup() (7-day retention). */

@@ -159,7 +159,11 @@ class LocalRepository(context: Context) : IFarmRepository {
         if (batch.isNotEmpty()) logs.insertAll(batch)
     }
 
-    suspend fun clearLogs() { logQueue.clear(); logs.clearAll() }
+    suspend fun clearLogs() {
+        logQueue.clear()
+        logs.clearAll()
+        com.atpro.backup.BackupStateStore.markDirty(appContext)
+    }
 
     /** Dọn log cũ hơn 7 ngày và session cũ hơn 90 ngày */
     suspend fun cleanup() = withContext(Dispatchers.IO) {

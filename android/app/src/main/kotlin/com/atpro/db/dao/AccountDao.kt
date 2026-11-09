@@ -64,6 +64,9 @@ interface AccountDao {
     @Query("DELETE FROM accounts WHERE username = :username")
     suspend fun delete(username: String)
 
+    @Query("DELETE FROM accounts")
+    suspend fun deleteAll()
+
     @Query("SELECT COUNT(*) FROM accounts")
     suspend fun count(): Int
 }

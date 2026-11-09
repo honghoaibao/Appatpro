@@ -3,31 +3,47 @@ package com.atpro.data
 import android.content.Context
 import java.io.File
 
-/**
- * Một lần nhận thưởng khi hoàn thành job (v1.10.0).
- * @param kind    "LIKE" hoặc "FOLLOW"
- * @param reward  số xu server trả về khi báo cáo job
- */
 data class EarningEntry(val atMs: Long, val kind: String, val reward: Double, val account: String)
 
 /**
- * Nhật ký thu nhập theo từng job — nguồn dữ liệu cho tab "Kiếm tiền" của Thống kê.
- *
- * Lưu dạng văn bản mỗi job một dòng `thờiĐiểmMs|LOẠI|xu|tàiKhoản` trong `filesDir/earnings.log`:
- * không cần Room/migration, ghi nối thêm (O(1)), tự cắt bớt khi vượt [MAX_LINES].
- * `record()` không làm gì nếu chưa `init()` (unit test / chưa bật dịch vụ) và không bao giờ ném lỗi.
+ * Compact append-only earnings journal. Cloud sync reads only this bounded local file.
  */
 object EarningsStore {
-    private const val FILE      = "earnings.log"
+    private const val FILE = "earnings.log"
     private const val MAX_LINES = 30_000
-    private const val KEEP      = 25_000
+    private const val KEEP = 25_000
 
     @Volatile private var dir: File? = null
+    @Volatile private var appContext: Context? = null
     private val lock = Any()
     private var appendsSinceTrim = 0
 
     fun init(context: Context) {
-        if (dir == null) dir = context.applicationContext.filesDir
+        val app = context.applicationContext
+        if (dir == null) dir = app.filesDir
+        appContext = app
+    }
+
+    private fun markBackupDirty() {
+        appContext?.let { com.atpro.backup.BackupStateStore.markDirty(it) }
+    }
+
+    /** Replace the journal during restore without scheduling a second upload. */
+    fun replaceAll(entries: List<EarningEntry>) {
+        val d = dir ?: return
+        try {
+            synchronized(lock) {
+                val lines = entries.takeLast(KEEP).map { entry ->
+                    val safeAccount = entry.account.replace('|', '_').replace('\n', ' ')
+                    "${entry.atMs}|${entry.kind}|${entry.reward}|$safeAccount"
+                }
+                val content = if (lines.isEmpty()) "" else lines.joinToString("\n", postfix = "\n")
+                File(d, FILE).writeText(content)
+                appendsSinceTrim = 0
+            }
+        } catch (_: Exception) {
+            // Restore is best-effort for this secondary statistics file.
+        }
     }
 
     fun record(kind: String, reward: Double, account: String, atMs: Long = System.currentTimeMillis()) {
@@ -36,38 +52,53 @@ object EarningsStore {
         val safeAccount = account.replace('|', '_').replace('\n', ' ')
         try {
             synchronized(lock) {
-                val f = File(d, FILE)
-                f.appendText("$atMs|$kind|$reward|$safeAccount\n")
-                if (++appendsSinceTrim >= 200) { appendsSinceTrim = 0; trim(f) }
+                val file = File(d, FILE)
+                file.appendText("$atMs|$kind|$reward|$safeAccount\n")
+                if (++appendsSinceTrim >= 200) {
+                    appendsSinceTrim = 0
+                    trim(file)
+                }
+                markBackupDirty()
             }
-        } catch (_: Exception) { /* ghi thu nhập là phụ — không được làm hỏng luồng chạy */ }
+        } catch (_: Exception) {
+            // Earnings are auxiliary and must never interrupt the automation flow.
+        }
     }
 
     fun readAll(): List<EarningEntry> {
         val d = dir ?: return emptyList()
         return try {
             synchronized(lock) {
-                val f = File(d, FILE)
-                if (!f.exists()) emptyList() else f.useLines { lines -> lines.mapNotNull(::parseLine).toList() }
+                val file = File(d, FILE)
+                if (!file.exists()) emptyList()
+                else file.useLines { lines -> lines.mapNotNull(::parseLine).toList() }
             }
-        } catch (_: Exception) { emptyList() }
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     fun clear() {
         val d = dir ?: return
-        try { synchronized(lock) { File(d, FILE).delete() } } catch (_: Exception) {}
+        try {
+            synchronized(lock) {
+                if (File(d, FILE).delete()) markBackupDirty()
+            }
+        } catch (_: Exception) {}
     }
 
     internal fun parseLine(line: String): EarningEntry? {
-        val p = line.split('|')
-        if (p.size < 4) return null
-        val at = p[0].toLongOrNull() ?: return null
-        val reward = p[2].toDoubleOrNull() ?: return null
-        return EarningEntry(at, p[1], reward, p.drop(3).joinToString("|"))
+        val parts = line.split('|')
+        if (parts.size < 4) return null
+        val at = parts[0].toLongOrNull() ?: return null
+        val reward = parts[2].toDoubleOrNull() ?: return null
+        return EarningEntry(at, parts[1], reward, parts.drop(3).joinToString("|"))
     }
 
-    private fun trim(f: File) {
-        val lines = f.readLines()
-        if (lines.size > MAX_LINES) f.writeText(lines.takeLast(KEEP).joinToString("\n", postfix = "\n"))
+    private fun trim(file: File) {
+        val lines = file.readLines()
+        if (lines.size > MAX_LINES) {
+            file.writeText(lines.takeLast(KEEP).joinToString("\n", postfix = "\n"))
+        }
     }
 }

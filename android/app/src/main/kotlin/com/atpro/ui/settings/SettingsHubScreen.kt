@@ -13,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountCircle
+import androidx.compose.material.icons.rounded.CloudSync
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.BarChart
@@ -54,6 +55,7 @@ fun SettingsHubScreen(
     onOpenConfig:   (section: String) -> Unit,
     onOpenStats:    () -> Unit,
     onOpenSchedule: () -> Unit,
+    onOpenCloudAccount: () -> Unit,
 ) {
     val context = LocalContext.current
     val mode = AtThemeState.mode
@@ -113,6 +115,19 @@ fun SettingsHubScreen(
                 }
                 AtDivider()
                 AtListRow("Dịch vụ khác", subtitle = "X, Instagram, Threads, Snapchat", icon = Icons.Rounded.Apps, tint = AtColors.Sky, onClick = { onOpenConfig("DEMO_X") })
+            }
+
+            // ── Tài khoản đám mây ──
+            Spacer(Modifier.height(20.dp))
+            AtSectionLabel("Tài khoản", Modifier.padding(start = 4.dp, bottom = 8.dp))
+            AtCard(Modifier.fillMaxWidth().staggerIn(3), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
+                AtListRow(
+                    "Tài khoản AT PRO",
+                    subtitle = "Đăng nhập và sao lưu dữ liệu",
+                    icon = Icons.Rounded.CloudSync,
+                    tint = AtColors.Sky,
+                    onClick = onOpenCloudAccount,
+                )
             }
 
             // ── Ứng dụng ──

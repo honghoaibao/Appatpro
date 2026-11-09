@@ -20,6 +20,15 @@ interface SessionDao {
     @Insert
     suspend fun insert(session: SessionEntity): Long
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(sessions: List<SessionEntity>)
+
+    @Query("DELETE FROM sessions")
+    suspend fun deleteAll()
+
+    @Query("SELECT COUNT(*) FROM sessions")
+    suspend fun count(): Int
+
     /**
      * Đóng session: ghi endedAt, tính durationSecs và lưu stats.
      * v1.1.4 FIX: Thêm likes/follows/comments/videosWatched — trước đây
