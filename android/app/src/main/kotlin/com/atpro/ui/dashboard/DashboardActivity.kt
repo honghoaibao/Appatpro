@@ -60,8 +60,8 @@ class DashboardActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             val app = application as AtProApplication
-            // MainActivity has normally restored the session already. Reuse it to
-            // avoid a second token-refresh attempt during a slow/offline cold start.
+            // MainActivity normally restored the local session already. Reuse it
+            // instead of reading the encrypted preferences a second time.
             val session = app.authRepository.session.value
                 ?: app.authRepository.restoreSession()
             if (isFinishing || isDestroyed) return@launch
