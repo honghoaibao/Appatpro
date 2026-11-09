@@ -2,10 +2,13 @@ package com.atpro
 
 import android.content.Intent
 import android.os.Bundle
+import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.atpro.auth.ui.AuthActivity
+import com.atpro.auth.ui.AuthCheckingScreen
 import com.atpro.ui.dashboard.DashboardActivity
+import com.atpro.ui.theme.AtTheme
 import kotlinx.coroutines.launch
 
 /**
@@ -16,6 +19,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        setContent {
+            AtTheme {
+                AuthCheckingScreen()
+            }
+        }
 
         lifecycleScope.launch {
             val session = (application as AtProApplication).authRepository.restoreSession()
