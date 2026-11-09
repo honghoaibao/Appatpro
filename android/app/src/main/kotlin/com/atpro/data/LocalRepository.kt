@@ -147,11 +147,11 @@ class LocalRepository(context: Context) : IFarmRepository {
 
     override suspend fun setCheckpoint(username: String, isCheckpoint: Boolean) {
         val status = if (isCheckpoint) "checkpoint" else "active"
-        accounts.updateStatus(username, status, isCheckpoint)
+        updateStatus(username, status)
     }
 
     suspend fun setBanned(username: String) =
-        accounts.updateStatus(username, "banned", false)
+        updateStatus(username, "banned")
 
     // ── Sessions ─────────────────────────────────────────────
 
