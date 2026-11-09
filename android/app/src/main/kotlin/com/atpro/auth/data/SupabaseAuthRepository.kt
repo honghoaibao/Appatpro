@@ -237,55 +237,62 @@ class SupabaseAuthRepository(
         AuthResult.Success(refreshed)
     }
 
-    override suspend fun signOut(): AuthResult<Unit> = sessionMutex.withLock {
-        val current = try {
-            withContext(ioDispatcher) { sessionStore.read() } ?: mutableSession.value
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            mutableSession.value
-        }
-
-        // Clear this device first. Remote revocation is best-effort and must not
-        // keep the user waiting for the network before the local app signs out.
-        mutableSession.value = null
+    override suspend fun signOut(): AuthResult<Unit> {
         var localClearFailed = false
-        try {
-            withContext(NonCancellable + ioDispatcher) {
-                sessionStore.clear()
+
+        // Serialize only the local mutation. Once the encrypted session is removed,
+        // release the mutex before best-effort remote revocation so a new login is
+        // not blocked by a slow/offline server response.
+        val current = sessionMutex.withLock {
+            val saved = try {
+                withContext(ioDispatcher) { sessionStore.read() } ?: mutableSession.value
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                mutableSession.value
             }
-        } catch (_: Exception) {
-            localClearFailed = true
-        }
 
-        val remoteResult: AuthResult<Unit> = if (current != null) {
-            safely {
-                val response = httpClient.execute(
-                    SupabaseHttpRequest(
-                        method = "POST",
-                        // Revoke only this device's session; do not sign out other devices.
-                        path = SIGN_OUT_LOCAL_PATH,
-                        accessToken = current.accessToken,
-                    ),
-                )
-
-                if (response.isSuccessful) {
-                    AuthResult.Success(Unit)
-                } else {
-                    response.toAuthFailure()
+            try {
+                withContext(NonCancellable + ioDispatcher) {
+                    sessionStore.clear()
                 }
+            } catch (_: Exception) {
+                localClearFailed = true
             }
-        } else {
-            AuthResult.Success(Unit)
+
+            if (!localClearFailed) {
+                // Emit signed-out only after persistent storage has actually been cleared.
+                mutableSession.value = null
+            }
+            saved
         }
 
         if (localClearFailed) {
-            AuthResult.Failure(
+            return AuthResult.Failure(
                 "Không thể xóa phiên đăng nhập đã lưu trên thiết bị.",
                 retryable = false,
             )
-        } else {
-            remoteResult
+        }
+
+        // Network revocation is best-effort and outside the mutex. Local logout
+        // has already completed and a subsequent sign-in can proceed immediately.
+        if (current == null) return AuthResult.Success(Unit)
+
+        return safely {
+            val response = httpClient.execute(
+                SupabaseHttpRequest(
+                    method = "POST",
+                    // Revoke only this device's session; do not sign out other devices.
+                    path = SIGN_OUT_LOCAL_PATH,
+                    accessToken = current.accessToken,
+                ),
+            )
+
+            if (response.isSuccessful) {
+                AuthResult.Success(Unit)
+            } else {
+                response.toAuthFailure()
+            }
         }
     }
 
