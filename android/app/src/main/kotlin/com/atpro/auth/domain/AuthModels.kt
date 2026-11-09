@@ -5,6 +5,12 @@ data class AuthUser(
     val email: String?,
 )
 
+/** Result of registration; a session may be withheld until email confirmation. */
+data class AuthSignUpResult(
+    val user: AuthUser,
+    val emailConfirmationRequired: Boolean,
+)
+
 data class AuthSession(
     val accessToken: String,
     val refreshToken: String,
