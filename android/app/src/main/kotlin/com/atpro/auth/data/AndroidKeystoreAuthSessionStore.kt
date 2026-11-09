@@ -41,7 +41,11 @@ class AndroidKeystoreAuthSessionStore(context: Context) : AuthSessionStore {
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv))
 
-            decodeSession(cipher.doFinal(ciphertext))
+            val session = decodeSession(cipher.doFinal(ciphertext))
+            if (session == null) {
+                preferences.edit().remove(KEY_SESSION).commit()
+            }
+            session
         } catch (_: Exception) {
             // A corrupted or invalidated local session must not block app startup.
             preferences.edit().remove(KEY_SESSION).commit()
@@ -49,25 +53,29 @@ class AndroidKeystoreAuthSessionStore(context: Context) : AuthSessionStore {
         }
     }
 
-    override fun write(session: AuthSession) = synchronized(LOCK) {
-        require(session.accessToken.isNotBlank()) { "Access token must not be blank" }
-        require(session.refreshToken.isNotBlank()) { "Refresh token must not be blank" }
-        require(session.user.id.isNotBlank()) { "User id must not be blank" }
+    override fun write(session: AuthSession) {
+        synchronized(LOCK) {
+            require(session.accessToken.isNotBlank()) { "Access token must not be blank" }
+            require(session.refreshToken.isNotBlank()) { "Refresh token must not be blank" }
+            require(session.user.id.isNotBlank()) { "User id must not be blank" }
 
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
-        val ciphertext = cipher.doFinal(encodeSession(session))
-        val iv = cipher.iv ?: throw IOException("Android Keystore did not return an AES-GCM IV")
-        val packed = Base64.encodeToString(iv + ciphertext, Base64.NO_WRAP)
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+            val ciphertext = cipher.doFinal(encodeSession(session))
+            val iv = cipher.iv ?: throw IOException("Android Keystore did not return an AES-GCM IV")
+            val packed = Base64.encodeToString(iv + ciphertext, Base64.NO_WRAP)
 
-        if (!preferences.edit().putString(KEY_SESSION, packed).commit()) {
-            throw IOException("Unable to persist the encrypted auth session")
+            if (!preferences.edit().putString(KEY_SESSION, packed).commit()) {
+                throw IOException("Unable to persist the encrypted auth session")
+            }
         }
     }
 
-    override fun clear() = synchronized(LOCK) {
-        if (!preferences.edit().remove(KEY_SESSION).commit()) {
-            throw IOException("Unable to clear the local auth session")
+    override fun clear() {
+        synchronized(LOCK) {
+            if (!preferences.edit().remove(KEY_SESSION).commit()) {
+                throw IOException("Unable to clear the local auth session")
+            }
         }
     }
 
