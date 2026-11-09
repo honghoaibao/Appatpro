@@ -297,10 +297,11 @@ class SupabaseAuthRepository(
     }
 
     private suspend fun clearLocalSession() {
-        mutableSession.value = null
+        // Keep the in-memory state consistent if persistent clearing fails.
         withContext(ioDispatcher) {
             sessionStore.clear()
         }
+        mutableSession.value = null
     }
 
     private suspend fun <T> safely(
