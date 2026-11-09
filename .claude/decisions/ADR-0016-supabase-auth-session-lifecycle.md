@@ -20,7 +20,7 @@ Supabase access tokens are short-lived and refresh tokens are rotated. The Auth 
 5. Determine the signup outcome from the response itself. When tokens are returned, persist the encrypted session and report that confirmation is not pending. When only a user is returned, report that email confirmation is required. Do not hard-code the project's current Confirm Email setting.
 6. Serialize signup, sign-in, restore, refresh, and sign-out through one repository mutex to prevent concurrent refresh-token rotation within the repository instance.
 7. Persist only Auth sessions using the existing AES-GCM Android Keystore store. Never persist or log passwords, access tokens, or refresh tokens in plaintext.
-8. Implement sign-out with `scope=local`. Clear this device's local session first, then make a best-effort server revocation request. A network failure must not leave the user signed in locally or affect other devices.
+8. Implement sign-out with `scope=local`. Clear this device's local session first and emit a null session only after persistent storage has been cleared. Release the repository mutex before best-effort server revocation, so network latency does not block a subsequent sign-in. A network failure must not leave the user signed in locally or affect other devices.
 9. Keep HTTP error mapping bounded and avoid implicit request retries. Preserve the saved session after transient refresh failures; clear it when Supabase rejects the refresh token as invalid or unauthorized.
 
 ## Consequences
