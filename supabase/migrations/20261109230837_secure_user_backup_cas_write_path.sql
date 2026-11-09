@@ -42,7 +42,6 @@ BEGIN
 
     -- App payload format: Base64(GZIP(canonical UTF-8 JSON)).
     -- The database validates the Base64 envelope and checksum shape only.
-    PERFORM p_payload::text;
 
     IF p_expected_revision = 0 THEN
         INSERT INTO public.user_backups AS current_backup
