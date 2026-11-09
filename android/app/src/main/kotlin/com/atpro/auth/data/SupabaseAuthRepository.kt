@@ -52,7 +52,11 @@ class SupabaseAuthRepository(
             return@withLock null
         }
 
-        mutableSession.value = saved ?: return@withLock null
+        if (saved == null) {
+            mutableSession.value = null
+            return@withLock null
+        }
+        mutableSession.value = saved
 
         // Refresh slightly before expiry so an API request does not race the expiry edge.
         if (saved.expiresAtEpochSeconds > nowEpochSeconds() + REFRESH_EARLY_SECONDS) {
@@ -107,11 +111,22 @@ class SupabaseAuthRepository(
 
                 val payload = JSONObject(response.body)
                 val sessionPayload = payload.optJSONObject("session") ?: payload
-                val createdSession = sessionPayload.toAuthSessionOrNull()
                 val userPayload = sessionPayload.optJSONObject("user")
                     ?: payload.optJSONObject("user")
                     ?: payload
-                val user = createdSession?.user ?: userPayload.toAuthUserOrNull()
+                val responseUser = userPayload.toAuthUserOrNull()
+                val hasSessionTokens = sessionPayload.optString("access_token").isNotBlank() &&
+                    sessionPayload.optString("refresh_token").isNotBlank()
+
+                val createdSession = if (hasSessionTokens) {
+                    when (val parsed = sessionPayload.toAuthSessionResult(responseUser)) {
+                        is AuthResult.Success -> parsed.value
+                        is AuthResult.Failure -> return@safely parsed
+                    }
+                } else {
+                    null
+                }
+                val user = createdSession?.user ?: responseUser
                     ?: return@safely AuthResult.Failure(
                         "Supabase không trả về thông tin tài khoản hợp lệ.",
                         statusCode = response.statusCode,
@@ -161,11 +176,10 @@ class SupabaseAuthRepository(
                     return@safely response.toAuthFailure()
                 }
 
-                val session = JSONObject(response.body).toAuthSessionOrNull()
-                    ?: return@safely AuthResult.Failure(
-                        "Supabase đăng nhập thành công nhưng không trả về phiên hợp lệ.",
-                        statusCode = response.statusCode,
-                    )
+                val session = when (val parsed = JSONObject(response.body).toAuthSessionResult()) {
+                    is AuthResult.Success -> parsed.value
+                    is AuthResult.Failure -> return@safely parsed
+                }
 
                 persistSession(session)
                 AuthResult.Success(session)
@@ -212,11 +226,12 @@ class SupabaseAuthRepository(
             return@safely failure
         }
 
-        val refreshed = JSONObject(response.body).toAuthSessionOrNull()
-            ?: return@safely AuthResult.Failure(
-                "Supabase không trả về phiên hợp lệ sau khi làm mới.",
-                statusCode = response.statusCode,
-            )
+        val refreshed = when (
+            val parsed = JSONObject(response.body).toAuthSessionResult(fallbackUser = current.user)
+        ) {
+            is AuthResult.Success -> parsed.value
+            is AuthResult.Failure -> return@safely parsed
+        }
 
         persistSession(refreshed)
         AuthResult.Success(refreshed)
@@ -231,38 +246,37 @@ class SupabaseAuthRepository(
             mutableSession.value
         }
 
-        var remoteResult: AuthResult<Unit> = AuthResult.Success(Unit)
+        // Clear this device first. Remote revocation is best-effort and must not
+        // keep the user waiting for the network before the local app signs out.
+        mutableSession.value = null
         var localClearFailed = false
-
         try {
-            if (current != null) {
-                remoteResult = safely {
-                    val response = httpClient.execute(
-                        SupabaseHttpRequest(
-                            method = "POST",
-                            // Revoke only this device's session; do not sign out other devices.
-                            path = SIGN_OUT_LOCAL_PATH,
-                            accessToken = current.accessToken,
-                        ),
-                    )
+            withContext(NonCancellable + ioDispatcher) {
+                sessionStore.clear()
+            }
+        } catch (_: Exception) {
+            localClearFailed = true
+        }
 
-                    if (response.isSuccessful) {
-                        AuthResult.Success(Unit)
-                    } else {
-                        response.toAuthFailure()
-                    }
+        val remoteResult: AuthResult<Unit> = if (current != null) {
+            safely {
+                val response = httpClient.execute(
+                    SupabaseHttpRequest(
+                        method = "POST",
+                        // Revoke only this device's session; do not sign out other devices.
+                        path = SIGN_OUT_LOCAL_PATH,
+                        accessToken = current.accessToken,
+                    ),
+                )
+
+                if (response.isSuccessful) {
+                    AuthResult.Success(Unit)
+                } else {
+                    response.toAuthFailure()
                 }
             }
-        } finally {
-            // Always remove the local session, even when the device is offline.
-            mutableSession.value = null
-            try {
-                withContext(NonCancellable + ioDispatcher) {
-                    sessionStore.clear()
-                }
-            } catch (_: Exception) {
-                localClearFailed = true
-            }
+        } else {
+            AuthResult.Success(Unit)
         }
 
         if (localClearFailed) {
@@ -297,7 +311,7 @@ class SupabaseAuthRepository(
         throw cancelled
     } catch (_: SocketTimeoutException) {
         AuthResult.Failure(
-            message = "Kết nối Supabase quá thời gian chờ. Anh kiểm tra mạng rồi thử lại nhé.",
+            message = "Kết nối Supabase quá thời gian chờ. Kiểm tra mạng rồi thử lại.",
             retryable = true,
         )
     } catch (_: IOException) {
@@ -330,7 +344,7 @@ class SupabaseAuthRepository(
             lower.contains("invalid login credentials") ->
                 "Email hoặc mật khẩu chưa chính xác."
             lower.contains("email not confirmed") ->
-                "Email này chưa được xác nhận. Hãy kiểm tra hộp thư của anh."
+                "Email này chưa được xác nhận. Hãy kiểm tra hộp thư."
             lower.contains("user already registered") ->
                 "Email này đã được đăng ký."
             lower.contains("unable to validate email") ||
@@ -341,7 +355,7 @@ class SupabaseAuthRepository(
                 "Mật khẩu chưa đạt độ dài tối thiểu của hệ thống."
             lower.contains("too many requests") ||
                 lower.contains("rate limit") ->
-                "Anh thao tác hơi nhanh. Vui lòng đợi một chút rồi thử lại."
+                "Thao tác quá nhanh. Vui lòng đợi một chút rồi thử lại."
             else -> normalized.take(MAX_ERROR_MESSAGE_LENGTH)
                 .ifBlank { "Yêu cầu xác thực thất bại (HTTP $statusCode)." }
         }
@@ -353,13 +367,38 @@ class SupabaseAuthRepository(
         )
     }
 
-    private fun JSONObject.toAuthSessionOrNull(): AuthSession? {
+    /**
+     * The Auth token endpoint documents token fields separately from user data.
+     * Fetch the authenticated user when the response does not include one. Refresh
+     * can reuse the already-known user because a refresh does not change identity.
+     */
+    private suspend fun JSONObject.toAuthSessionResult(
+        fallbackUser: AuthUser? = null,
+    ): AuthResult<AuthSession> {
         val accessToken = optString("access_token")
-            .takeIf { it.isNotBlank() && it != "null" } ?: return null
+            .takeIf { it.isNotBlank() && it != "null" }
+            ?: return AuthResult.Failure("Supabase không trả về access token hợp lệ.")
         val refreshToken = optString("refresh_token")
-            .takeIf { it.isNotBlank() && it != "null" } ?: return null
-        val userJson = optJSONObject("user") ?: return null
-        val user = userJson.toAuthUserOrNull() ?: return null
+            .takeIf { it.isNotBlank() && it != "null" }
+            ?: return AuthResult.Failure("Supabase không trả về refresh token hợp lệ.")
+
+        var user = optJSONObject("user")?.toAuthUserOrNull() ?: fallbackUser
+        if (user == null) {
+            val userResponse = httpClient.execute(
+                SupabaseHttpRequest(
+                    method = "GET",
+                    path = CURRENT_USER_PATH,
+                    accessToken = accessToken,
+                ),
+            )
+            if (!userResponse.isSuccessful) {
+                return userResponse.toAuthFailure()
+            }
+            user = JSONObject(userResponse.body).toAuthUserOrNull()
+        }
+
+        val authenticatedUser = user
+            ?: return AuthResult.Failure("Không thể xác minh thông tin người dùng từ Supabase.")
 
         val explicitExpiry = optLong("expires_at", 0L)
         val expiresIn = optLong("expires_in", DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS)
@@ -370,12 +409,14 @@ class SupabaseAuthRepository(
             nowEpochSeconds() + expiresIn
         }
 
-        return AuthSession(
-            accessToken = accessToken,
-            refreshToken = refreshToken,
-            tokenType = optString("token_type", "bearer").ifBlank { "bearer" },
-            expiresAtEpochSeconds = expiresAt,
-            user = user,
+        return AuthResult.Success(
+            AuthSession(
+                accessToken = accessToken,
+                refreshToken = refreshToken,
+                tokenType = optString("token_type", "bearer").ifBlank { "bearer" },
+                expiresAtEpochSeconds = expiresAt,
+                user = authenticatedUser,
+            ),
         )
     }
 
@@ -391,6 +432,7 @@ class SupabaseAuthRepository(
 
     private companion object {
         const val SIGN_UP_PATH = "/auth/v1/signup"
+        const val CURRENT_USER_PATH = "/auth/v1/user"
         const val PASSWORD_TOKEN_PATH = "/auth/v1/token?grant_type=password"
         const val REFRESH_TOKEN_PATH = "/auth/v1/token?grant_type=refresh_token"
         const val SIGN_OUT_LOCAL_PATH = "/auth/v1/logout?scope=local"
