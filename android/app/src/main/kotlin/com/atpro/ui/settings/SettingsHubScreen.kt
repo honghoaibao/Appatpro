@@ -102,6 +102,7 @@ fun SettingsHubScreen(
                     onClick = { showSignOutConfirmation = true },
                 )
             }
+            Spacer(Modifier.height(20.dp))
 
             // ── Giao diện (chỉnh ngay) ──
             AtSectionLabel("Giao diện", Modifier.padding(start = 4.dp, bottom = 8.dp))
