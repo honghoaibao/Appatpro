@@ -1,5 +1,14 @@
 # Current Focus
 
+## Supabase portability track (updated 2026-11-09)
+
+- Active branch: feature/atpro-supabase-phase3-1-foundation. main is unchanged and not merged.
+- Phases 3.1–3.3: source implementation added (foundation, Auth lifecycle, Auth UI and protected routing); these changes have not yet been Android-build-verified or device-tested.
+- Phase 3.4.1: architecture/data policy documented in context/cloud_sync_architecture.md and ADR-0018. No sync code or Supabase schema was changed.
+- Next authorized implementation step: **3.4.2 — Room Outbox + sync metadata and atomic local mutation recording**.
+- Constraints: keep Room local-first; never upload secrets or Auth/F4F tokens; bind local data to one Auth owner; do not start GitHub Actions until the single final build run; do not modify main.
+
+
 _Last updated: 2026-11-05 — v1.12.0 (versionCode 44)_
 
 ## Trạng thái: v1.12.0 — nhận nhiệm vụ theo `f4f.py` v2.8, chọn tài khoản nhiệm vụ riêng, thông báo nâng cấp (trên nền v1.11.0); chờ build thật + QA thiết bị
