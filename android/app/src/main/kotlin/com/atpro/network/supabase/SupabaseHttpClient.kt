@@ -44,9 +44,13 @@ class UrlConnectionSupabaseTransport : SupabaseHttpTransport {
     ): SupabaseHttpResponse = withContext(Dispatchers.IO) {
         val method = request.method.uppercase(Locale.ROOT)
         require(method in ALLOWED_METHODS) { "Unsupported HTTP method" }
-        require(request.path.startsWith("/") &&
-            !request.path.startsWith("//") &&
-            !request.path.contains("..")) {
+
+        val pathOnly = request.path.substringBefore('?')
+        require(
+            request.path.startsWith("/") &&
+                !request.path.startsWith("//") &&
+                pathOnly.split('/').none { it == "." || it == ".." }
+        ) {
             "Supabase path must be a safe relative API path"
         }
 
@@ -97,7 +101,9 @@ class UrlConnectionSupabaseTransport : SupabaseHttpTransport {
     }
 
     private companion object {
-        val ALLOWED_METHODS = setOf("GET", "POST", "PUT", "PATCH", "DELETE")
+        // PATCH is deliberately excluded: the JDK HttpURLConnection implementation
+        // does not support it consistently. The sync layer can use POST/upsert.
+        val ALLOWED_METHODS = setOf("GET", "POST", "PUT", "DELETE")
     }
 }
 
