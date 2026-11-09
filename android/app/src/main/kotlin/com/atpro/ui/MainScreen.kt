@@ -36,7 +36,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.atpro.AtProApplication
 import com.atpro.auth.domain.AuthRepository
 import com.atpro.ui.accounts.AccountsScreen
 import com.atpro.ui.accounts.AccountsViewModel
