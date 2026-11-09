@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 interface AuthRepository {
     val session: StateFlow<AuthSession?>
 
-    /** Restore the encrypted local session and refresh it when it is near expiry. */
+    /** Restore the encrypted local session without a network request; safe for offline startup. */
     suspend fun restoreSession(): AuthSession?
 
     /** A successful signup may still require the user to confirm their email. */
