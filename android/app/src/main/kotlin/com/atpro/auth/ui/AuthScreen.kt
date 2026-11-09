@@ -276,6 +276,7 @@ fun AuthCheckingScreen() {
         modifier = Modifier
             .fillMaxSize()
             .background(AtColors.Bg)
+            .statusBarsPadding()
             .navigationBarsPadding(),
         contentAlignment = Alignment.Center,
     ) {
