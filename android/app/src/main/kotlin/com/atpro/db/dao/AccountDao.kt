@@ -74,6 +74,10 @@ interface AccountDao {
     @Query("DELETE FROM accounts WHERE username = :username")
     suspend fun delete(username: String)
 
+    /** Restore applies a prevalidated merged account set inside one Room transaction. */
+    @Query("DELETE FROM accounts")
+    suspend fun deleteAll()
+
     @Query("SELECT COUNT(*) FROM accounts")
     suspend fun count(): Int
 }

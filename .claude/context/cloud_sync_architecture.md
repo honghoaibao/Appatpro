@@ -1,6 +1,6 @@
 # Cloud Sync Architecture — Appatpro
 
-- **Status:** Phases 3.4.2–3.4.7 and 5.2–5.3 implemented in source (not Android-build-verified); Phases 4.1–4.4 database backup CAS/RLS and public-schema hardening applied and verified in AT App; Android remote sync remains gated
+- **Status:** Phases 3.4.2–3.4.7 and 5.2–5.4 implemented in source (not Android-build-verified); Phases 4.1–4.4 database backup CAS/RLS and public-schema hardening applied and verified in AT App; Android remote sync remains gated
 - **Date:** 2026-11-10
 - **Scope:** Room-first backup architecture and Supabase security contract
 - **Related ADRs:** ADR-0015, ADR-0016, ADR-0017, ADR-0018, ADR-0019, ADR-0020, ADR-0021, ADR-0022, ADR-0023, ADR-0024, ADR-0025
@@ -203,9 +203,9 @@ Do not replace this contract with a blind upsert or grant authenticated direct t
 
 ## 8. Merge and conflict policy
 
-- **Accounts:** key by normalized username. Room v4 stores independent `statusUpdatedAt` and `statsUpdatedAt` fields. Status/checkpoint resolves by `statusUpdatedAt`; equal timestamps with different status values are unresolved. Note that this is currently a device wall-clock timestamp, not a causal clock: material clock skew can misorder cross-device changes. Before automatic remote status LWW is enabled, the server/integration design must provide a server-authoritative ordering signal or surface uncertain ordering for user resolution. Cumulative counters are represented by `accountStatContributions`, keyed by (accountId, installationId), with Long counters and per-installation updatedAt. For the same installation, merge each counter by component-wise MAX (idempotent replay); across distinct installations, sum the contributions using saturating arithmetic. Display values clamp to the existing Int UI range. Never sum two whole snapshots or apply generic LWW to counters. See ADR-0022.
+- **Accounts:** key by normalized username. Room v4 stores independent `statusUpdatedAt` and `statsUpdatedAt` fields. Status/checkpoint disagreement is always unresolved across devices regardless of timestamp; matching values may retain the maximum device timestamp only as metadata. Device wall clocks are not causal ordering. Cumulative counters are represented by `accountStatContributions`, keyed by (accountId, installationId), with Long counters and per-installation updatedAt. For the same installation, merge each counter by component-wise MAX (idempotent replay); across distinct installations, sum the contributions using saturating arithmetic. Display values clamp to the existing Int UI range. Never sum two whole snapshots or apply generic LWW to counters. See ADR-0022.
 - **Sessions:** merge as a set by stable session UUID; only closed sessions are uploaded. The same UUID is an update to one logical session, never a duplicate insert.
-- **Configs:** merge by allowlisted key and updatedAt; unknown keys are ignored. Device-local preferences and credentials never enter the shared snapshot.
+- **Configs:** only keys in `BackupConfigPolicy` are eligible. Equal values merge idempotently; differing same-key values remain conflicts regardless of device timestamps. Unknown keys and device-local settings are preserved locally and never imported. Device-local preferences and credentials never enter the shared snapshot.
 - **Schedules:** preserve their definitions, but import with enabled = false; require the user to review and manually enable them on a target installation.
 - **Earnings:** merge by stable earning-entry UUID; preserve only entries still retained by the local EarningsStore policy.
 - **Deletes:** account/config/schedule deletions use tombstones so a stale device cannot resurrect a deleted item.
@@ -233,8 +233,8 @@ The Room database currently survives sign-out and is not partitioned by Supabase
 2. Verify payload size, checksum, schema version, format version and required fields.
 3. Parse into an isolated staging model; reject the whole snapshot if required sections are malformed or unsupported.
 4. If local data already exists, merge rather than replace it.
-5. Apply Room datasets in a single Room transaction; restore the earnings file through a temporary file + atomic rename.
-6. Restore schedules as disabled definitions; do not enqueue WorkManager jobs or start any service automatically.
+5. Persist the validated merged candidate in a bounded AtomicFile journal under `noBackupFilesDir` before mutation. Apply Room datasets in one transaction; then merge the EarningsStore file by stable UUID using AtomicFile. Startup replays any remaining journal before WorkManager preflight. A crash between Room and earnings is recovered by idempotent replay.
+6. Restore schedules as disabled definitions, cancel existing unique schedule work without enqueueing new work, and make stale/disabled FarmWorker requests no-op successfully. Never start or resume automation automatically.
 7. Update last revision/checksum and clear only those Outbox items proven to be included in the committed state.
 
 ## 11. Scheduling and resource policy
@@ -263,7 +263,11 @@ The Room database currently survives sign-out and is not partitioned by Supabase
 - **4.2–4.4:** ✅ Audited the exposed database surface. All six public base tables have RLS; five operational tables retain their owner-scoped CRUD policies. `daily_stats` is SECURITY INVOKER and SELECT-only. Removed client EXECUTE from trigger-only functions, removed obsolete user_backups write policies, and tightened `postgres` default privileges so new public tables/sequences/functions are not automatically granted to anon/authenticated. Transaction smoke tests confirmed defaults, view isolation and trigger execution.
 - **5.1:** ✅ Merge/Restore domain contract and gap inventory documented.
 - **5.2:** ✅ Local durable tombstones, pending DELETE migration backfill, snapshot v3 and strict v2→v3 compatibility/validation implemented in source; build/JUnit remain unverified. No Supabase or remote executor changes.
-- **5.3–5.7:** Separately implement and test deterministic merge/conflicts, staged restore, bounded CAS transport, exact acknowledgement and only then remote worker activation. Do not enable app-side remote writes before every gate is verified.
+- **5.3:** ✅ Pure deterministic merge engine/conflict model and tests added in source; not build-verified.
+- **5.4:** ✅ Local staged restore coordinator, noBackupFilesDir AtomicFile journal, startup replay, transactional Room apply, idempotent EarningsStore merge and disabled schedule handling added in source. Journal metadata JVM tests added; Room/AtomicFile crash integration and Android build remain unverified. No remote writes.
+- **5.5:** Supabase read/RPC transport + bounded CAS coordinator; fake transport tests first.
+- **5.6:** Exact Outbox/tombstone/earnings acknowledgement + owner/revision checkpoint + crash tests.
+- **5.7:** Enable remote worker only after all prior gates pass; one final GitHub Actions run after code completion. Do not enable app-side remote writes before every gate is verified.
 
 Phase 3.4.1 itself changed architecture documentation only. Phases 3.4.2–3.4.7 changed local Room/application code, validation, preflight scheduling, account conflict handling and documentation only. Phase 4.1 changed only the user_backups write function and its table/function grants. Phases 4.2–4.4 changed only public-schema default privileges, the daily_stats view grants/comment, EXECUTE grants on two trigger functions, obsolete user_backups write policies and documentation. No backup rows, normalized operational rows, Auth settings, Android source or automation behavior were changed.
 
@@ -328,3 +332,25 @@ All datasets are sorted before the candidate is returned. The result metadata us
 - Tightened the shared account status policy so it no longer allows timestamp-based status LWW.
 - Phase 5.3 is pure/local-only. No Room DAO/entity/migration, database contents, EarningsStore file, Supabase object/policy/Auth config, HTTP/RPC transport, Outbox acknowledgement, tombstone acknowledgement, WorkManager or remote worker behavior changed.
 - GitHub Actions were not dispatched. Android/JUnit execution remains unverified and is reserved for the final build gate.
+
+
+## 16. Phase 5.4 — Staged local restore coordinator (2026-11-10)
+
+Phase 5.4 adds `BackupRestoreCoordinator` and a pure bounded `BackupRestoreJournalCodec`. The coordinator accepts only a validated, already merged v3 snapshot whose `sourceInstallId` matches the current Room installation. It never invokes the merge engine implicitly, never accesses Supabase, and does not update the remote revision checkpoint.
+
+### Durable cross-store apply
+
+- Before the first mutation, the coordinator serializes the snapshot as the existing bounded Base64(GZIP(canonical JSON)) payload plus checksum and schema version, then writes a journal with `AtomicFile` into `noBackupFilesDir`. The journal is deliberately excluded from Android device-to-device backup so a pending transaction cannot replay against a different installation identity.
+- Room account, contribution, closed-session, allowlisted-config and tombstone changes are applied in one `RoomDatabase.withTransaction`. Farm logs, active sessions, unknown/device-local config keys, sync metadata, Outbox rows and remote revision/checksum state are not replaced or acknowledged.
+- Accounts are reconciled by identity; local accounts created after staging are retained unless a tombstone wins. Current contribution rows are merged with the candidate using per-installation component-wise MAX and aggregates are recomputed with saturating Long arithmetic before Int display clamping.
+- Closed sessions are inserted by stable sync UUID only when absent. Existing same-ID rows are compared before insertion; a changed row aborts the transaction. Active sessions are never imported or overwritten. UUID lookups are chunked to 500 to remain below SQLite bind-variable limits.
+- Safe configs are limited to the positive allowlist. Unknown/device-local keys remain untouched. Same-key local changes after staging abort rather than being overwritten. Schedules are stored with `enabled=false`; existing schedule work is cancelled only (never enqueued). FarmWorker treats missing, malformed or disabled definitions as successful no-ops so stale periodic work cannot reactivate a restored schedule.
+- Tombstones are retained and inserted idempotently. The coordinator checks both incoming tombstone IDs and current local markers for candidate entity keys, in chunks of 500. A local deletion made after staging therefore blocks a stale candidate from resurrecting that entity. Same-install delete/recreate and UUID reuse fail closed.
+- After Room commits, EarningsStore merges current and restored entries by stable UUID. Conflicting same-ID content or malformed existing file rows aborts; local earnings appended after staging are retained; the final list is sorted and bounded to 25,000. The dirty generation is advanced before AtomicFile replacement.
+- The journal is deleted only after Room and EarningsStore complete and schedule-cancellation requests have been submitted. If the process stops after Room commits but before earnings replacement or journal deletion, startup replays the same journal. Room operations and earnings UUID merge are idempotent. At startup, pending journal recovery runs before sync preflight scheduling; recovery failure fails closed rather than opening the app on a known half-applied restore.
+
+### Verification and boundaries
+
+- Added JVM tests for journal record metadata, unsupported journal/snapshot versions, malformed checksum metadata and journal size limits. These tests were authored but not executed.
+- No Room schema migration or DB version bump was needed. No Supabase read/write, RPC/CAS, Auth owner reassignment, Outbox acknowledgement, tombstone acknowledgement, revision checkpoint update or remote worker activation was added.
+- GitHub Actions were not dispatched. Android build and Room/AtomicFile crash integration remain unverified and are reserved for the single final verification gate.

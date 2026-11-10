@@ -12,6 +12,7 @@ import com.atpro.notification.AtProNotificationManager
 import com.atpro.ui.theme.AtThemeState
 import com.atpro.db.AtProDatabase
 import com.atpro.sync.BackupOwnershipManager
+import com.atpro.sync.BackupRestoreCoordinator
 import com.atpro.sync.SyncWorkScheduler
 import kotlinx.coroutines.*
 
@@ -41,6 +42,20 @@ class AtProApplication : MultiDexApplication() {
         _ctx = applicationContext
         // Configure the file store before any automation service can record a reward.
         EarningsStore.init(this)
+
+        // A staged restore journal is replayed before WorkManager preflight or UI/services
+        // can observe a half-applied Room + Earnings state. Normal startup does no blocking IO.
+        if (BackupRestoreCoordinator.hasPending(this)) {
+            try {
+                runBlocking(Dispatchers.IO) {
+                    BackupRestoreCoordinator(this@AtProApplication).recoverPending()
+                }
+            } catch (error: Exception) {
+                Log.e("AtProApp", "Pending backup restore could not be recovered; failing closed", error)
+                throw IllegalStateException("Pending backup restore recovery failed", error)
+            }
+        }
+
         // v1.7.0: nạp chế độ giao diện Sáng/Tối TRƯỚC mọi Activity để khung đầu tiên đã đúng màu.
         AtThemeState.load(this)
         com.atpro.ui.theme.AtWindowBackground.install(this)

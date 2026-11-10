@@ -73,6 +73,16 @@ object ScheduledFarmManager {
         Log.i(TAG, "Schedule set: ${schedule.label}")
     }
 
+    /** Cancels existing periodic work without scheduling or persisting any new schedule. */
+    fun cancelRestoredSchedules(context: Context, scheduleIds: Collection<String>) {
+        val wm = WorkManager.getInstance(context)
+        scheduleIds.asSequence().filter { it.isNotBlank() }.distinct().forEach { scheduleId ->
+            (1..7).forEach { day ->
+                wm.cancelUniqueWork("${WORK_TAG_PREFIX}${scheduleId}_day$day")
+            }
+        }
+    }
+
     fun cancelSchedule(context: Context, scheduleId: String) {
         cancelScheduledWork(context, scheduleId)
         CoroutineScope(Dispatchers.IO).launch {
@@ -100,10 +110,15 @@ object ScheduledFarmManager {
         val repo = AtProApplication.repo()
         val raw  = repo.getConfig("$SCHEDULE_PREFIX$scheduleId")
         if (raw.isEmpty()) {
-            Log.w(TAG, "Schedule $scheduleId not found"); return false
+            Log.i(TAG, "Ignoring stale scheduled work for missing schedule $scheduleId")
+            return true
         }
         val schedule = runCatching { Json.decodeFromString<FarmSchedule>(raw) }
-            .getOrNull() ?: return false
+            .getOrNull() ?: return true
+        if (!schedule.enabled) {
+            Log.i(TAG, "Ignoring disabled schedule $scheduleId")
+            return true
+        }
 
         val service = TikTokAccessibilityService.instance
         if (service == null)        { Log.w(TAG, "Service not running"); return false }

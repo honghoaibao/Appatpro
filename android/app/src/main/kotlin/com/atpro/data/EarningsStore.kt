@@ -152,6 +152,68 @@ object EarningsStore {
         }.getOrDefault(false)
     }
 
+    /**
+     * Merge a staged restore into the current file by stable UUID. Replaying the same
+     * journal is idempotent, and earnings appended after staging are retained.
+     */
+    fun mergeFromRestore(restoredEntries: List<EarningEntry>) {
+        val directory = dir ?: error("EarningsStore has not been initialized")
+        require(restoredEntries.size <= KEEP) { "Restore earnings exceed the retention bound" }
+        require(restoredEntries.all {
+            it.atMs >= 0L && it.kind.isNotBlank() && it.reward.isFinite() && it.reward >= 0.0 &&
+                sanitize(it.kind) == it.kind && sanitize(it.account) == it.account &&
+                runCatching { UUID.fromString(it.id).toString() == it.id }.getOrDefault(false)
+        }) { "Restore contains invalid earning entries" }
+
+        synchronized(lock) {
+            initializeDirtyMarkerLocked(directory)
+            if (!ensureLegacyMigratedLocked(directory)) {
+                throw IllegalStateException("Could not safely migrate the earnings file")
+            }
+            val currentFile = File(directory, FILE)
+            val current = if (currentFile.exists()) {
+                val rawLines = currentFile.readLines(StandardCharsets.UTF_8).filter { it.isNotBlank() }
+                val parsed = rawLines.map(::parseLine)
+                if (parsed.any { it == null }) {
+                    throw IllegalStateException("Earnings file contains malformed rows; restore will not discard them")
+                }
+                parsed.filterNotNull()
+            } else {
+                emptyList()
+            }
+            val merged = LinkedHashMap<String, EarningEntry>()
+            (current + restoredEntries).forEach { entry ->
+                val previous = merged[entry.id]
+                if (previous != null && previous != entry) {
+                    throw IllegalStateException("Earning UUID content conflict: ${entry.id}")
+                }
+                merged[entry.id] = entry
+            }
+            val retained = merged.values.sortedWith(compareBy({ it.atMs }, { it.id })).takeLast(KEEP)
+            val normalizedCurrent = current.sortedWith(compareBy({ it.atMs }, { it.id })).takeLast(KEEP)
+            if (retained == normalizedCurrent) return
+
+            // Dirty first: if the process stops during the atomic file replacement, the
+            // journal remains and a replay can safely complete the same merge.
+            markDirtyLocked(directory)
+            val atomic = AtomicFile(currentFile)
+            var output: FileOutputStream? = null
+            try {
+                output = atomic.startWrite()
+                val content = retained.joinToString("\n", postfix = if (retained.isEmpty()) "" else "\n") {
+                    toStorageLine(it)
+                }
+                output.write(content.toByteArray(StandardCharsets.UTF_8))
+                output.flush()
+                output.fd.sync()
+                atomic.finishWrite(output)
+            } catch (error: Exception) {
+                output?.let { atomic.failWrite(it) }
+                throw error
+            }
+        }
+    }
+
     fun clear() {
         val directory = dir ?: return
         try {

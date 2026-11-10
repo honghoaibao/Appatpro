@@ -14,6 +14,10 @@ interface BackupTombstoneDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertAll(tombstones: List<BackupTombstoneEntity>)
 
+    /** Idempotent replay of a prepared restore journal. Existing IDs are checked before insert. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAllIgnore(tombstones: List<BackupTombstoneEntity>)
+
     @Query("SELECT * FROM backup_tombstones ORDER BY dataset ASC, entityKey ASC, deletedAt ASC, tombstoneId ASC")
     suspend fun getAll(): List<BackupTombstoneEntity>
 
@@ -27,6 +31,12 @@ interface BackupTombstoneDao {
 
     @Query("SELECT * FROM backup_tombstones WHERE tombstoneId IN (:ids)")
     suspend fun getByIds(ids: List<String>): List<BackupTombstoneEntity>
+
+    @Query("""
+        SELECT * FROM backup_tombstones
+        WHERE dataset = :dataset AND entityKey IN (:entityKeys)
+    """)
+    suspend fun getForDatasetKeys(dataset: String, entityKeys: List<String>): List<BackupTombstoneEntity>
 
     /** Reserved for the later exact-acknowledgement phase; not called by Phase 5.2. */
     @Query("DELETE FROM backup_tombstones WHERE tombstoneId IN (:ids)")

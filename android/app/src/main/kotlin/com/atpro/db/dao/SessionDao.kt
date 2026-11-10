@@ -23,6 +23,13 @@ interface SessionDao {
     @Query("SELECT * FROM sessions WHERE id = :id LIMIT 1")
     suspend fun getById(id: Long): SessionEntity?
 
+    @Query("SELECT * FROM sessions WHERE syncId IN (:syncIds)")
+    suspend fun getBySyncIds(syncIds: List<String>): List<SessionEntity>
+
+    /** Inserts only absent closed-session UUIDs; active local rows are never replaced. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertBackupSessions(sessions: List<SessionEntity>): List<Long>
+
     /**
      * Đóng session: ghi endedAt, tính durationSecs và lưu stats.
      * v1.1.4 FIX: Thêm likes/follows/comments/videosWatched — trước đây

@@ -18,6 +18,12 @@ interface AccountStatContributionDao {
     @Query("SELECT * FROM account_stat_contributions ORDER BY accountId ASC, installationId ASC")
     suspend fun getAll(): List<AccountStatContributionEntity>
 
+    @Query("DELETE FROM account_stat_contributions")
+    suspend fun deleteAll()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(contributions: List<AccountStatContributionEntity>)
+
     /**
      * Monotonic, saturating increments. Inputs must be non-negative and are validated by
      * LocalRepository before entering this transaction.
