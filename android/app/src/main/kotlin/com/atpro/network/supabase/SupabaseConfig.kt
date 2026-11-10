@@ -35,6 +35,6 @@ data class SupabaseClientConfig(
 object AtProSupabaseConfig {
     val current = SupabaseClientConfig(
         projectUrl = "https://sctzyxhwcatngwtjhwlf.supabase.co",
-        publishableKey = "sb_publishable_VTSKHqH2OKwXrAK6ZPphIA_nwh6XDe",
+        publishableKey = "sb_publishable_VTSKHqH2OKwXrAK6zPphIA_nhwh6XDe",
     )
 }
