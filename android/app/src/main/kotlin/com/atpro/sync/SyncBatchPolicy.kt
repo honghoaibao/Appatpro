@@ -91,3 +91,22 @@ object SyncBatchPolicy {
     private const val OPERATION_UPSERT = "UPSERT"
     private const val OPERATION_DELETE = "DELETE"
 }
+
+
+/** Bounded per-event retry delay for a committed batch that cannot yet acknowledge its head. */
+object SyncRetryPolicy {
+    const val BASE_DELAY_MILLIS = 60_000L
+    const val MAX_DELAY_MILLIS = 6L * 60L * 60L * 1_000L
+
+    fun delayMillis(previousAttempts: Int): Long {
+        val exponent = previousAttempts.coerceAtLeast(0).coerceAtMost(9)
+        var delay = BASE_DELAY_MILLIS
+        repeat(exponent) {
+            delay = (delay * 2L).coerceAtMost(MAX_DELAY_MILLIS)
+        }
+        return delay.coerceAtMost(MAX_DELAY_MILLIS)
+    }
+
+    fun nextAttemptAt(nowEpochMillis: Long, previousAttempts: Int): Long =
+        nowEpochMillis + delayMillis(previousAttempts)
+}

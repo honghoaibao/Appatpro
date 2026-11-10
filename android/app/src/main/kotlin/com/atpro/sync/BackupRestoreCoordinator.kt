@@ -272,7 +272,10 @@ class BackupRestoreCoordinator(context: Context) {
 
             // Check existing session identities before the IGNORE insert so a same-UUID
             // content mismatch cannot be silently hidden by SQLite conflict handling.
-            val incomingSessions = snapshot.datasets.closedSessions
+            val restoreSessionCutoff = BackupSessionRetentionPolicy.cutoff(System.currentTimeMillis())
+            val incomingSessions = snapshot.datasets.closedSessions.filter {
+                it.startedAt >= restoreSessionCutoff
+            }
             val existingSessions = incomingSessions.map { it.syncId }
                 .chunked(500)
                 .flatMap { database.sessionDao().getBySyncIds(it) }

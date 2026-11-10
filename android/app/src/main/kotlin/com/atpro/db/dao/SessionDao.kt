@@ -95,21 +95,57 @@ interface SessionDao {
     """)
     suspend fun getTotals(since: Long): TotalsRow
 
-    /** Count the closed rows retained by the backup policy (last 90 days). */
-    @Query("SELECT COUNT(*) FROM sessions WHERE endedAt IS NOT NULL AND startedAt >= :since")
+    /**
+     * Include locally retained sessions plus older sessions whose immutable UPSERT is
+     * still pending. The latter must survive local cleanup until the cloud confirms them.
+     */
+    @Query("""
+        SELECT COUNT(*) FROM sessions
+        WHERE endedAt IS NOT NULL
+          AND (
+              startedAt >= :since
+              OR EXISTS (
+                  SELECT 1 FROM sync_outbox
+                  WHERE sync_outbox.dataset = 'closedSessions'
+                    AND sync_outbox.entityKey = sessions.syncId
+                    AND sync_outbox.operation = 'UPSERT'
+              )
+          )
+    """)
     suspend fun countClosedForBackup(since: Long): Int
 
-    /** Stable paging keeps a bounded Room cursor/result in memory during snapshot creation. */
+    /** Stable paging includes pending old rows without extending normal local retention. */
     @Query("""
         SELECT * FROM sessions
-        WHERE endedAt IS NOT NULL AND startedAt >= :since
+        WHERE endedAt IS NOT NULL
+          AND (
+              startedAt >= :since
+              OR EXISTS (
+                  SELECT 1 FROM sync_outbox
+                  WHERE sync_outbox.dataset = 'closedSessions'
+                    AND sync_outbox.entityKey = sessions.syncId
+                    AND sync_outbox.operation = 'UPSERT'
+              )
+          )
         ORDER BY syncId ASC
         LIMIT :limit OFFSET :offset
     """)
     suspend fun getClosedForBackup(since: Long, limit: Int, offset: Int): List<SessionEntity>
 
-    /** Dọn sessions cũ để không phình DB vô hạn. */
-    @Query("DELETE FROM sessions WHERE startedAt < :before")
+    /**
+     * Local retention is 90 days, but an old session is not removed while its cloud
+     * UPSERT remains pending. The acknowledgement transaction calls this after ack too.
+     */
+    @Query("""
+        DELETE FROM sessions
+        WHERE startedAt < :before
+          AND NOT EXISTS (
+              SELECT 1 FROM sync_outbox
+              WHERE sync_outbox.dataset = 'closedSessions'
+                AND sync_outbox.entityKey = sessions.syncId
+                AND sync_outbox.operation = 'UPSERT'
+          )
+    """)
     suspend fun deleteOlderThan(before: Long)
 }
 

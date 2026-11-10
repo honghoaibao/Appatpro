@@ -21,7 +21,7 @@
 | Local source | Current storage | Existing retention/behavior | Initial backup decision |
 |---|---|---|---|
 | Managed accounts | Room accounts | Retained until user deletes | Include username, status/checkpoint, created/updated timestamps and aggregate stats |
-| Farm sessions | Room sessions | Cleanup removes rows older than 90 days | Include closed sessions within the local retention window; active sessions are excluded |
+| Farm sessions | Room sessions | Device-local cleanup keeps 90 days; pending session UPSERT rows are deferred until confirmed | Cloud retains closed-session history long-term; snapshots include the 90-day local window plus selected pending session payloads; remote history older than 90 days is not restored into Room |
 | Tool configuration | Room configs | Key-value, updated in place | Include only an explicit safe-key allowlist |
 | Scheduled farm definitions | Config keys prefixed sched_ | JSON definitions; WorkManager jobs are separately scheduled | Back up definitions, but restore them disabled; never silently reactivate automation |
 | Earnings | filesDir/earnings.log via EarningsStore | Append-only file; trims to the latest 25,000 lines after crossing 30,000 | Include retained entries after adding stable entry IDs and durable dirty tracking |
@@ -428,3 +428,14 @@ Phase 5.6 completes the local side of a successful remote CAS, without activatin
 - The Room checkpoint update and exact Outbox delete are implemented in one Room transaction. The transaction source is reviewed but not executed in this phase; no Room instrumentation test or Android/JUnit run has been performed.
 - `SyncWorker` remains preflight-only with `remote_executor_disabled`. No production caller invokes the CAS or acknowledgement coordinators.
 - No Supabase SQL, RLS, grant, Auth setting or remote row changed. No GitHub Actions workflow was dispatched. The single final build/CI gate remains reserved until Phase 5.7.
+
+
+## 12. Closed-session retention (Phase 5.7)
+
+- Cloud retention is long-term: closed-session records are not pruned by the client after upload.
+- Device-local retention remains 90 days, using `startedAt` exactly as the existing Room cleanup contract does.
+- Room cleanup excludes a session while a `closedSessions/UPSERT` Outbox event for its `syncId` is pending. Snapshot queries also include those pending rows even when they are older than 90 days.
+- If an earlier app version already pruned a Room row, the snapshot builder can recover the exact immutable `BackupClosedSession` from its selected bounded Outbox payload, after strict JSON, byte-size, UUID and entity-key checks.
+- Restore filters merged cloud history to the device's 90-day local window. Each device therefore avoids accumulating the full long-term cloud history.
+- After server CAS, local restore and exact Outbox acknowledgement succeed, the Room acknowledgement transaction re-runs local session cleanup. The row is pruned only after its pending UPSERT is removed; remote history and tombstones remain untouched.
+- Timestamps are used only for local retention. The merge engine does not use cross-device wall-clock timestamps to choose session versions.

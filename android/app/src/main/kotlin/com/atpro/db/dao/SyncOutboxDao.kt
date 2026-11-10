@@ -56,6 +56,10 @@ interface SyncOutboxDao {
     """)
     suspend fun getPendingAckCandidates(limit: Int): List<SyncOutboxAckRow>
 
+    /** Load payloads only for selected session UPSERTs; other dataset payloads stay untouched. */
+    @Query("SELECT eventId, payloadJson FROM sync_outbox WHERE eventId IN (:eventIds)")
+    suspend fun getPayloadsByEventIds(eventIds: List<String>): List<SyncOutboxPayloadRow>
+
     @Query("SELECT * FROM sync_outbox WHERE eventId IN (:eventIds)")
     suspend fun getByEventIds(eventIds: List<String>): List<SyncOutboxEntity>
 
@@ -97,4 +101,11 @@ data class SyncOutboxHeadRow(
     val operation: String,
     val payloadBytes: Int,
     val nextAttemptAt: Long,
+)
+
+
+/** Narrow projection used to recover a pending closed session after local retention cleanup. */
+data class SyncOutboxPayloadRow(
+    val eventId: String,
+    val payloadJson: String?,
 )

@@ -49,11 +49,18 @@ class BackupSnapshotBuilder(context: Context) {
         val ownerUserId: String?,
         val lastRemoteRevision: Long,
         val outboxEvents: List<BackupOutboxAckCandidate>,
+        val pendingSessionPayloads: List<PendingSessionPayload>,
         val accounts: List<AccountEntity>,
         val accountStatContributions: List<AccountStatContributionEntity>,
         val sessions: List<SessionEntity>,
         val configs: List<ConfigEntity>,
         val tombstones: List<BackupTombstoneEntity>,
+    )
+
+    private data class PendingSessionPayload(
+        val eventId: String,
+        val entityKey: String,
+        val payloadJson: String,
     )
 
     suspend fun build(): BackupSnapshotBuildResult = withContext(Dispatchers.IO) {
@@ -106,6 +113,29 @@ class BackupSnapshotBuilder(context: Context) {
                             operation = it.operation,
                         )
                     }
+                val selectedSessionUpserts = outboxEvents.filter {
+                    it.dataset == "closedSessions" && it.operation == "UPSERT"
+                }
+                val payloadRows = if (selectedSessionUpserts.isEmpty()) {
+                    emptyList()
+                } else {
+                    database.syncOutboxDao().getPayloadsByEventIds(
+                        selectedSessionUpserts.map { it.eventId }
+                    )
+                }
+                if (payloadRows.size != selectedSessionUpserts.size) {
+                    throw BackupSnapshotException("Selected session Outbox payload rows changed during snapshot capture")
+                }
+                val payloadByEventId = payloadRows.associateBy { it.eventId }
+                val pendingSessionPayloads = selectedSessionUpserts.map { event ->
+                    val payload = payloadByEventId[event.eventId]?.payloadJson
+                        ?: throw BackupSnapshotException("Pending session Outbox payload is missing")
+                    PendingSessionPayload(
+                        eventId = event.eventId,
+                        entityKey = event.entityKey,
+                        payloadJson = payload,
+                    )
+                }
 
                 val accounts = database.accountDao().getAll()
                 val closedCount = database.sessionDao().countClosedForBackup(retainedSince)
@@ -146,6 +176,7 @@ class BackupSnapshotBuilder(context: Context) {
                     ownerUserId = metadata.ownerUserId,
                     lastRemoteRevision = metadata.lastRemoteRevision,
                     outboxEvents = outboxEvents,
+                    pendingSessionPayloads = pendingSessionPayloads,
                     accounts = accounts,
                     accountStatContributions = database.accountStatContributionDao().getAll(),
                     sessions = sessions,
@@ -198,12 +229,12 @@ class BackupSnapshotBuilder(context: Context) {
                 )
             }
 
-        val closedSessions = roomRows.sessions
+        val closedSessionsById = LinkedHashMap<String, BackupClosedSession>()
+        roomRows.sessions
             .asSequence()
             .filter { it.endedAt != null }
-            .sortedBy { it.syncId }
-            .map { session ->
-                BackupClosedSession(
+            .forEach { session ->
+                closedSessionsById[session.syncId] = BackupClosedSession(
                     syncId = session.syncId,
                     accountId = session.accountId,
                     startedAt = session.startedAt,
@@ -215,7 +246,25 @@ class BackupSnapshotBuilder(context: Context) {
                     durationSecs = session.durationSecs,
                 )
             }
-            .toList()
+        roomRows.pendingSessionPayloads.forEach { pending ->
+            val recovered = BackupPendingSessionPayloadDecoder.decode(
+                entityKey = pending.entityKey,
+                payloadJson = pending.payloadJson,
+            )
+            val existing = closedSessionsById[recovered.syncId]
+            if (existing != null && existing != recovered) {
+                throw BackupSnapshotException(
+                    "Pending session payload conflicts with its retained local row: " + pending.eventId
+                )
+            }
+            closedSessionsById[recovered.syncId] = recovered
+        }
+        val closedSessions = closedSessionsById.values.sortedBy { it.syncId }
+        if (closedSessions.size > MAX_CLOSED_SESSIONS) {
+            throw BackupSnapshotException(
+                "Cloud session history candidate exceeds the bounded snapshot limit: " + closedSessions.size
+            )
+        }
 
         val earningModels = earningsSnapshot.entries
             .sortedWith(compareBy({ it.atMs }, { it.id }))

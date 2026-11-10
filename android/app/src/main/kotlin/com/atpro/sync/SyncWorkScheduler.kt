@@ -1,6 +1,7 @@
 package com.atpro.sync
 
 import android.content.Context
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
@@ -11,7 +12,7 @@ import com.atpro.db.AtProDatabase
 import java.util.concurrent.TimeUnit
 
 /**
- * Enqueues one debounced, network-constrained preflight job when durable backup data exists.
+ * Enqueues one debounced, network-constrained backup job when durable backup data exists.
  * KEEP coalesces rapid local writes into one pending request; this is not periodic polling.
  */
 object SyncWorkScheduler {
@@ -34,6 +35,7 @@ object SyncWorkScheduler {
         val request = OneTimeWorkRequestBuilder<SyncWorker>()
             .setConstraints(constraints)
             .setInitialDelay(DEBOUNCE_SECONDS, TimeUnit.SECONDS)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30L, TimeUnit.SECONDS)
             .addTag(UNIQUE_WORK_NAME)
             .build()
 

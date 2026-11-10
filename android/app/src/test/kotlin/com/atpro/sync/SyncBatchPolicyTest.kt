@@ -77,6 +77,18 @@ class SyncBatchPolicyTest {
     }
 
     @Test
+    fun retryDelayGrowsExponentiallyAndCapsAtSixHours() {
+        assertEquals(60_000L, SyncRetryPolicy.delayMillis(0))
+        assertEquals(120_000L, SyncRetryPolicy.delayMillis(1))
+        assertEquals(240_000L, SyncRetryPolicy.delayMillis(2))
+        assertEquals(6L * 60L * 60L * 1_000L, SyncRetryPolicy.delayMillis(9))
+        assertEquals(
+            1_060_000L,
+            SyncRetryPolicy.nextAttemptAt(nowEpochMillis = 1_000_000L, previousAttempts = 0),
+        )
+    }
+
+    @Test
     fun capsCombinedPayloadBytes() {
         val max = SyncBatchPolicy.MAX_BATCH_PAYLOAD_BYTES
         val plan = SyncBatchPolicy.plan(

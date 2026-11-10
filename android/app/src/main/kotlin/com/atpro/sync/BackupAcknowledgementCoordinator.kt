@@ -342,6 +342,11 @@ private class RoomBackupAcknowledgementPort(
                 if (deleted != currentRows.size) {
                     throw AcknowledgementTransactionConflict("outbox_exact_delete_count_mismatch")
                 }
+                // The merged candidate is server-confirmed. Prune expired rows only when
+                // no pending session UPSERT remains; this is atomic with acknowledgement.
+                database.sessionDao().deleteOlderThan(
+                    BackupSessionRetentionPolicy.cutoff(System.currentTimeMillis())
+                )
                 BackupRoomAcknowledgementResult.Applied(deleted)
             }
         } catch (cancelled: CancellationException) {
