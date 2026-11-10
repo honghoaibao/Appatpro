@@ -7,6 +7,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
@@ -110,10 +111,10 @@ class SupabaseBackupRemoteStore(
         }
         return try {
             val body = kotlinx.serialization.json.buildJsonObject {
-                    put("p_expected_revision", expectedRevision)
-                    put("p_schema_version", encoded.schemaVersion)
-                    put("p_payload", encoded.payload)
-                    put("p_checksum", encoded.checksum)
+                    put("p_expected_revision", JsonPrimitive(expectedRevision))
+                    put("p_schema_version", JsonPrimitive(encoded.schemaVersion))
+                    put("p_payload", JsonPrimitive(encoded.payload))
+                    put("p_checksum", JsonPrimitive(encoded.checksum))
                 }.toString()
             val response = httpClient.execute(
                 SupabaseHttpRequest(
