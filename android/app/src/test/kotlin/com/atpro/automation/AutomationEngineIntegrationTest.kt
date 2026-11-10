@@ -14,6 +14,9 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.*
 import org.junit.*
 import org.junit.Assert.*
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * AutomationEngineIntegrationTest — farm loop behavior tests.
@@ -37,6 +40,8 @@ import org.junit.Assert.*
  *   → TASK-011: Robolectric tests cho các path cần AccessibilityNodeInfo tree thật
  */
 @OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class AutomationEngineIntegrationTest {
 
     // ── Doubles ───────────────────────────────────────────────
