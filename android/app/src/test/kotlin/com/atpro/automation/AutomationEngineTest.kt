@@ -3,6 +3,7 @@ package com.atpro.automation
 import com.atpro.network.LanWebSocketServer
 import com.atpro.data.FarmConfig
 import com.atpro.data.IFarmRepository
+import com.atpro.data.OverlayFarmMonitor
 import com.atpro.db.entity.AccountEntity
 import com.atpro.notification.AtProNotificationManager
 import io.mockk.*
@@ -51,7 +52,7 @@ class AutomationEngineTest {
     private lateinit var repo:   IFarmRepository
     private lateinit var engine: AutomationEngine
 
-    // UnconfinedTestDispatcher: coroutines run eagerly without needing advanceUntilIdle()
+    // TestScope controls retry delays deterministically through advanceUntilIdle().
     private val testDispatcher = UnconfinedTestDispatcher()
     private val testScope      = TestScope(testDispatcher)
 
@@ -60,6 +61,9 @@ class AutomationEngineTest {
         // Silence static singletons — these aren't the subject under test
         mockkObject(LanWebSocketServer)
         every { LanWebSocketServer.broadcast(any(), any()) } just Runs
+
+        mockkObject(OverlayFarmMonitor)
+        every { OverlayFarmMonitor.setStartupStatus(any()) } just Runs
 
         mockkObject(AtProNotificationManager)
         every { AtProNotificationManager.notifyFarmStarted(any())            } just Runs
