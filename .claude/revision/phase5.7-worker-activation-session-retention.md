@@ -33,13 +33,15 @@ Date: 2026-11-10
 
 ## Verification
 
-- The single final GitHub Actions run was triggered via draft PR #18: [run #264](https://github.com/honghoaibao/Appatpro/actions/runs/42787687650), commit `1749494b53165ab6a1e5a20a4753dc1f0092f628`.
-- Gradle setup, JDK 17 setup and workflow preparation succeeded. `testDebugUnitTest` reached `:app:compileDebugKotlin` and failed on two compile issues:
-  1. The restore-created `BackupAccountStatContribution` baseline omitted four required counters.
-  2. `SupabaseBackupRemoteStore` passed raw Kotlin primitives to the JSON object builder instead of `JsonPrimitive`.
-- The release APK build was skipped because the JUnit task failed.
-- Both source issues were corrected afterward: commits `ad7be894eff746fecac22ff24b6e92ff4e925240` and `60ecf122f6eb3e6d7ba921af71740b241351c6ba`.
-- At the user's later request, the draft PR was reopened to recheck. GitHub emitted two pull-request runs: run `42789289419` on the older, pre-fix commit `1749494b53165ab6a1e5a20a4753dc1f0092f628`, and run `42789290607` on the fixed source commit `09eeb2a385e7254981cd926df26afdc4e1fcec5d`. The old-head run failed as expected; the fixed-source run passed `:app:compileDebugKotlin` and then failed `:app:compileDebugUnitTestKotlin` on stale test-source call sites/types (`AutomationEngineTest`, `AutomationEngineIntegrationTest`, `BackupTombstoneMigrationTest`, `Follow4FollowProviderTest`). Release APK build was skipped.
-- Test-source alignment fixes were committed in `b1739045f90b117d3c83975800ada970dc9f59c2`, `089c0271925bcd75688cada81e19f35e2e7044bc`, `51dba57cdf6fd92962458b0a8f29052144211fd6`, and `59becd5de2e8357cbb88786cb91d05c6cc74f7c4`. These corrections have not yet been verified by another build/test run.
-- The draft PR was closed unmerged after the two runs appeared. Current Actions runs attributable to this attempt: one initial run, plus one old-head and one latest-head run from the PR reopen event. Do not trigger another run without explicit user authorization.
-- Current source has passed application Kotlin compilation on `09eeb2a`, but the latest test fixes and the release APK remain **not build/JUnit-verified**.
+- CI run #264 ([run ID 42787687650](https://github.com/honghoaibao/Appatpro/actions/runs/42787687650), commit `1749494`) failed at production Kotlin compilation on two issues: restore-created `BackupAccountStatContribution` missed required counters, and JSON builder calls passed raw primitives. Fixed in `ad7be89` and `60ecf12`.
+- CI run #265 ([run ID 42789289419](https://github.com/honghoaibao/Appatpro/actions/runs/42789289419)) was an old-head run on `1749494` triggered while reopening draft PR #18; it repeated the pre-fix production compile failure.
+- CI run #266 ([run ID 42789290607](https://github.com/honghoaibao/Appatpro/actions/runs/42789290607), commit `09eeb2a`) passed `:app:compileDebugKotlin`, then failed `:app:compileDebugUnitTestKotlin` on stale `startFarm` test call signatures, ambiguous Room query matchers and unsupported F4F `currentTime` references. Fixed by `b173904`, `089c027`, `51dba57` and `59becd5`.
+- CI run #267 ([run ID 42791353515](https://github.com/honghoaibao/Appatpro/actions/runs/42791353515), commit `167bf72`) passed production and test Kotlin compilation, then executed 348 tests with 22 failures. Failures clustered in Android framework calls under plain JVM tests (`Rect`/accessibility nodes and `Looper` in AutomationEngine tests), the obsolete expectation that `hasNavBar` needs two labels, and strict MockK test doubles in `BackupTombstoneMigrationTest`. The release APK task was skipped.
+- Follow-up test harness changes are committed on the feature branch:
+  - `8253694`: enable Android resources for local unit tests and add Robolectric 4.11.1.
+  - `a86433e`: run `NodeTraverserTest` under Robolectric and align the single-label nav test with current implementation.
+  - `f061ff8`: run `AutomationEngineTest` under Robolectric and replace the invalid empty-list expectation with a deterministic launch-retry cleanup test.
+  - `5f9f7c6`: run `AutomationEngineIntegrationTest` under Robolectric.
+  - `5488515`: make migration database/cursor mocks relaxed for incidental SQL/close calls.
+- Latest branch head after these test-only changes: `5488515b697fcdae4a0dbab6190d314e75d6a6bf`. These changes are source-reviewed but **not build- or test-verified**. No CI has been triggered after them.
+- Draft PR #18 and #19 are both closed unmerged. `main` remains at `e8ce98fac9c6e49b817fe04d785a400746b9b1d8`. Do not trigger additional Actions runs without explicit user authorization.
