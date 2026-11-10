@@ -8,6 +8,7 @@ import org.json.JSONObject
 import com.atpro.db.AtProDatabase
 import com.atpro.db.dao.TotalsRow
 import com.atpro.db.entity.*
+import java.util.UUID
 import com.atpro.sync.AccountStatContributionPolicy
 import com.atpro.sync.BackupAccountStatContribution
 import com.atpro.sync.BackupConfigPolicy
@@ -37,6 +38,7 @@ class LocalRepository(context: Context) : IFarmRepository {
 
     companion object {
         const val TAG = "LocalRepo"
+        private val TOMBSTONE_DATASETS = setOf("accounts", "safeConfigs", "schedules")
 
         @Volatile
         private var INSTANCE: LocalRepository? = null
@@ -83,8 +85,21 @@ class LocalRepository(context: Context) : IFarmRepository {
         )
     }
 
-    /** Tombstones are intentionally not coalesced away. */
-    private suspend fun enqueueDelete(dataset: String, entityKey: String) {
+    /** Persist a durable tombstone and its Outbox event in the same Room transaction as deletion. */
+    private suspend fun recordTombstone(dataset: String, entityKey: String) {
+        require(dataset in TOMBSTONE_DATASETS) { "Dataset is not eligible for tombstones" }
+        require(entityKey.isNotBlank() && entityKey == entityKey.trim()) { "Invalid tombstone entity key" }
+        val metadata = db.syncMetadataDao().get()
+            ?: error("Sync metadata row is missing; cannot identify this installation")
+        db.backupTombstoneDao().insert(
+            BackupTombstoneEntity(
+                tombstoneId = UUID.randomUUID().toString(),
+                dataset = dataset,
+                entityKey = entityKey,
+                sourceInstallId = metadata.installationId,
+                deletedAt = System.currentTimeMillis(),
+            )
+        )
         syncOutbox.insert(
             SyncOutboxEntity(
                 dataset = dataset,
@@ -191,7 +206,7 @@ class LocalRepository(context: Context) : IFarmRepository {
         val normalized = username.trim().removePrefix("@")
         db.withTransaction {
             accounts.delete(normalized)
-            enqueueDelete("accounts", normalized)
+            recordTombstone("accounts", normalized)
         }
         requestBackupPreflight()
     }
@@ -376,7 +391,7 @@ class LocalRepository(context: Context) : IFarmRepository {
                 "schedules" -> {
                     val scheduleId = key.removePrefix("sched_")
                     if (value.isEmpty()) {
-                        enqueueDelete(dataset, scheduleId)
+                        recordTombstone(dataset, scheduleId)
                     } else {
                         val payload = JSONObject()
                             .put("scheduleId", scheduleId)
@@ -396,8 +411,8 @@ class LocalRepository(context: Context) : IFarmRepository {
         db.withTransaction {
             configs.delete(key)
             when (val dataset = BackupConfigPolicy.datasetFor(key)) {
-                "safeConfigs" -> enqueueDelete(dataset, key)
-                "schedules" -> enqueueDelete(dataset, key.removePrefix("sched_"))
+                "safeConfigs" -> recordTombstone(dataset, key)
+                "schedules" -> recordTombstone(dataset, key.removePrefix("sched_"))
                 else -> Unit
             }
         }

@@ -23,8 +23,9 @@ import com.atpro.db.entity.*
         SyncMetadataEntity::class,
         SyncOutboxEntity::class,
         AccountStatContributionEntity::class,
+        BackupTombstoneEntity::class,
     ],
-    version  = 4,
+    version  = 5,
     exportSchema = false,
 )
 abstract class AtProDatabase : RoomDatabase() {
@@ -36,6 +37,7 @@ abstract class AtProDatabase : RoomDatabase() {
     abstract fun syncMetadataDao(): SyncMetadataDao
     abstract fun syncOutboxDao(): SyncOutboxDao
     abstract fun accountStatContributionDao(): AccountStatContributionDao
+    abstract fun backupTombstoneDao(): BackupTombstoneDao
 
     companion object {
         /**
@@ -147,6 +149,24 @@ abstract class AtProDatabase : RoomDatabase() {
             }
         }
 
+        /** Durable delete markers; never garbage-collected until a causal watermark protocol exists. */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS backup_tombstones (
+                        tombstoneId TEXT NOT NULL PRIMARY KEY,
+                        dataset TEXT NOT NULL,
+                        entityKey TEXT NOT NULL,
+                        sourceInstallId TEXT NOT NULL,
+                        deletedAt INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_backup_tombstones_dataset_entityKey ON backup_tombstones(dataset, entityKey)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_backup_tombstones_sourceInstallId ON backup_tombstones(sourceInstallId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_backup_tombstones_deletedAt ON backup_tombstones(deletedAt)")
+            }
+        }
+
         @Volatile
         private var INSTANCE: AtProDatabase? = null
 
@@ -157,7 +177,7 @@ abstract class AtProDatabase : RoomDatabase() {
                     AtProDatabase::class.java,
                     "atpro.db",
                 )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .addCallback(object : RoomDatabase.Callback() {
                     override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                         // Fresh installs do not execute migrations; seed the singleton row here too.
