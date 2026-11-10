@@ -34,11 +34,13 @@ class BackupTombstoneMigrationTest {
             })
         }
         verify {
-            database.execSQL(match {
-                it.contains("index_backup_tombstones_dataset_entityKey") &&
-                    it.contains("index_backup_tombstones_sourceInstallId") &&
-                    it.contains("index_backup_tombstones_deletedAt")
-            })
+            database.execSQL(match { it.contains("index_backup_tombstones_dataset_entityKey") })
+        }
+        verify {
+            database.execSQL(match { it.contains("index_backup_tombstones_sourceInstallId") })
+        }
+        verify {
+            database.execSQL(match { it.contains("index_backup_tombstones_deletedAt") })
         }
         verify {
             database.execSQL(match {
