@@ -1,6 +1,6 @@
 # Cloud Sync Architecture — Appatpro
 
-- **Status:** Phases 3.4.2–3.4.7 and 5.2–5.6 implemented in source (not Android-build-verified); Phases 4.1–4.4 database backup CAS/RLS and public-schema hardening applied and verified in AT App; Android remote sync remains gated
+- **Status:** Phases 3.4.2–3.4.7 and 5.2–5.7 implemented in source (not Android-build-verified); Phases 4.1–4.4 database backup CAS/RLS and public-schema hardening applied and verified in AT App; SyncWorker remote CAS/restore/ack flow is integrated in source but not production-verified until the final Android build/JUnit/CI gate
 - **Date:** 2026-11-10
 - **Scope:** Room-first backup architecture and Supabase security contract
 - **Related ADRs:** ADR-0015, ADR-0016, ADR-0017, ADR-0018, ADR-0019, ADR-0020, ADR-0021, ADR-0022, ADR-0023, ADR-0024, ADR-0025
