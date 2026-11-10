@@ -12,8 +12,8 @@ import org.robolectric.annotation.Config
 /**
  * NodeTraverserTest — unit tests cho NodeTraverser traversal + detection logic.
  *
- * Kỹ thuật: MockK để tạo AccessibilityNodeInfo fake trees.
- * Không cần Robolectric — tất cả Android class calls đều được mock.
+ * Kỹ thuật: Robolectric API 34 cung cấp Android framework trên JVM; MockK
+ * tạo các AccessibilityNodeInfo fake để dựng cây node độc lập với thiết bị.
  *
  * Cây node được xây dựng bằng helper [node()] — tạo một MockK
  * AccessibilityNodeInfo với text, resourceId, clickable, children.
