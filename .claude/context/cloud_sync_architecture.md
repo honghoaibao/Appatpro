@@ -258,3 +258,30 @@ The Room database currently survives sign-out and is not partitioned by Supabase
 - **5.x onward:** Separately implement and test the remote merge/restore coordinator, bounded revision-conflict retry, owner binding and exact Outbox acknowledgement. Do not enable app-side remote writes before this gate is verified.
 
 Phase 3.4.1 itself changed architecture documentation only. Phases 3.4.2–3.4.7 changed local Room/application code, validation, preflight scheduling, account conflict handling and documentation only. Phase 4.1 changed only the user_backups write function and its table/function grants. Phases 4.2–4.4 changed only public-schema default privileges, the daily_stats view grants/comment, EXECUTE grants on two trigger functions, obsolete user_backups write policies and documentation. No backup rows, normalized operational rows, Auth settings, Android source or automation behavior were changed.
+
+
+## 13. Phase 5.1 — Merge/Restore domain contract (2026-11-10)
+
+The detailed contract and gap inventory are recorded in `.claude/revision/phase5.1-merge-restore-domain-contract.md`.
+
+Important implementation findings:
+
+- The current Room schema has no durable tombstone table/DAO, and snapshot format v2 has no tombstone dataset. Outbox DELETE rows alone cannot prevent resurrection after acknowledgement. A tombstone schema + snapshot version step is mandatory before remote merge/acknowledgement.
+- Account `statusUpdatedAt` is a device wall-clock value. Cross-device status LWW is disabled until a server-authoritative per-entity version exists; differing status/checkpoint values remain unresolved.
+- Session/earning same-ID content mismatches are integrity conflicts. Config/schedule conflicts must not be resolved by arrival order; device timestamps are not causal proof.
+- Restore must stage and validate the merged model before any mutation. The coordinator should commit the candidate with server CAS first, then apply the already validated model locally; if local apply fails after cloud commit, leave local acknowledgements pending and re-apply idempotently from the committed remote snapshot.
+- CAS retry target is bounded to 3 total attempts per worker run. On conflict, re-read and re-merge; on exhaustion, preserve Outbox and dirty generations.
+- Exact Outbox event IDs, earnings generation and tombstone IDs/generation are acknowledged only after confirmed CAS success. Newer local writes remain pending.
+- Imported schedules are always disabled; restore never starts automation or enqueues schedule work.
+
+Phase 5.1 is documentation-only. No remote executor, network call, local schema change, Supabase change, data mutation or GitHub Actions run is enabled by this contract.
+
+### Phase 5 implementation gates
+
+- **5.1:** ✅ Domain contract and gap inventory documented.
+- **5.2:** Room tombstone persistence + snapshot v3 compatibility/validation; local-only.
+- **5.3:** Pure deterministic merge engine + conflict model; no mutation/network.
+- **5.4:** Staged restore coordinator + atomic Room/Earnings apply; no remote write.
+- **5.5:** Supabase read/RPC transport + bounded CAS coordinator; fake transport tests first.
+- **5.6:** Exact Outbox/tombstone/earnings acknowledgement + owner/revision checkpoint + crash tests.
+- **5.7:** Enable remote worker only after all prior gates pass; one final GitHub Actions run after code completion.
