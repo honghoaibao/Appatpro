@@ -248,6 +248,10 @@ class BackupRestoreCoordinator(context: Context) {
                     val baseline = BackupAccountStatContribution(
                         accountId = accountId,
                         installationId = metadata.installationId,
+                        sessionsCount = 0L,
+                        totalLikes = 0L,
+                        totalFollows = 0L,
+                        totalVideos = 0L,
                         updatedAt = rows.maxOfOrNull { it.updatedAt } ?: 0L,
                     )
                     contributionsByAccount[accountId] = rows + baseline
