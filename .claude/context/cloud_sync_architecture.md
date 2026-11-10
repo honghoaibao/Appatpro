@@ -1,6 +1,6 @@
 # Cloud Sync Architecture — Appatpro
 
-- **Status:** Phases 3.4.2–3.4.7 and 5.2 implemented in source (not Android-build-verified); Phases 4.1–4.4 database backup CAS/RLS and public-schema hardening applied and verified in AT App; Android remote sync remains gated
+- **Status:** Phases 3.4.2–3.4.7 and 5.2–5.3 implemented in source (not Android-build-verified); Phases 4.1–4.4 database backup CAS/RLS and public-schema hardening applied and verified in AT App; Android remote sync remains gated
 - **Date:** 2026-11-10
 - **Scope:** Room-first backup architecture and Supabase security contract
 - **Related ADRs:** ADR-0015, ADR-0016, ADR-0017, ADR-0018, ADR-0019, ADR-0020, ADR-0021, ADR-0022, ADR-0023, ADR-0024, ADR-0025
@@ -300,8 +300,31 @@ Phase 5.2 completes the Room tombstone work and adds snapshot format v3. Room sc
 
 New local account/config/schedule deletes record a tombstone and a matching Outbox DELETE in one Room transaction. The tombstone ID is reused as the Outbox event ID. Nonexistent rows do not create redundant markers. Schedule WorkManager cancellation is separated from logical schedule deletion so replacing an enabled schedule does not create a false delete tombstone.
 
-Snapshot writers emit v3 and include a deterministic, bounded tombstone dataset. Validation permits only the three supported datasets, requires canonical tombstone/source-install UUIDs, normalized non-empty keys, safe-config allowlist membership, non-negative deletion timestamps, unique IDs and at most 100,000 retained tombstones. Multiple tombstones for the same key remain valid; causal merge and recreation resolution belong to Phase 5.3.
+Snapshot writers emit v3 and include a deterministic, bounded tombstone dataset. Validation permits only the three supported datasets, requires canonical tombstone/source-install UUIDs, normalized non-empty keys, safe-config allowlist membership, non-negative deletion timestamps, unique IDs and at most 100,000 retained tombstones. Multiple tombstones for the same key remain valid; their cross-device application and same-install recreation handling are implemented by the Phase 5.3 merge contract.
 
 The decoder preserves the exact v2 wire model. It validates legacy v2 data with the old dataset shape, confirms canonical JSON byte-for-byte, then converts it to a v3 staging model with an empty tombstone list. New encoding is v3 only; unknown future formats, expected-version mismatches and non-canonical JSON fail closed.
 
 Phase 5.2 is local-only. No Supabase schema, policies, Auth settings, data, HTTP/RPC transport, remote worker activation, restore application, Outbox acknowledgement, tombstone acknowledgement or tombstone garbage collection was added. GitHub Actions were not dispatched. The APK build workflow only triggers push for `main`, `dev`, `release/*`, tags and manual dispatch; the feature branch is outside its branch push filter. Android/JUnit execution remains unverified and is reserved for the final build gate.
+
+
+## 15. Phase 5.3 — Pure deterministic merge engine (2026-11-10)
+
+Phase 5.3 adds `BackupMergeEngine`, `BackupMergeResult`, and a stable conflict model under `com.atpro.sync`. The engine validates both v3 inputs, works only in memory, never mutates Room/files, and has no transport, worker, scheduler or Supabase dependency. A successful result is validated again before it is returned; a conflicted result is a sorted, deduplicated list of dataset/key/reason codes and must not be applied.
+
+### Dataset policy
+
+- **Accounts:** identity is the repository-normalized username (trim and remove a leading @). Status + checkpoint is one value. Any disagreement is a conflict regardless of device timestamps; matching values may keep the maximum timestamp only as metadata. Different creation timestamps are also explicit conflicts. Contributions are normalized by account/install key and merged component-wise MAX. A remote-only account receives a zero-valued local-install contribution baseline so the local-authored v3 candidate satisfies the existing per-account source-install contribution invariant; this does not import aggregate totals.
+- **Closed sessions:** union by stable sync UUID; identical rows are idempotent; differing content under one UUID is a conflict. Active sessions are absent from the snapshot type and are never imported. More than 100,000 merged rows produces a bounded-limit conflict rather than silent truncation.
+- **Safe configs:** only prevalidated allowlisted keys enter. Identical values merge with the maximum timestamp metadata. Different values always conflict; a larger device timestamp is not accepted as causal proof.
+- **Schedules:** union by stable schedule ID. Definition disagreement conflicts. Identical definitions merge, and every resulting schedule is forced disabled, irrespective of either source's enabled flag.
+- **Earnings:** union by stable UUID; identical rows are idempotent and differing content conflicts. The candidate is sorted deterministically and bounded to the existing 25,000-entry retained window.
+- **Tombstones:** union by stable tombstone ID; reusing an ID for different delete metadata conflicts. A marker from another installation suppresses a stale entity with the same dataset/key. If the same installation snapshot contains both the marker and the entity, the result is an explicit delete/recreate conflict because v3 has no logical-generation ID. Tombstones are never garbage-collected.
+
+All datasets are sorted before the candidate is returned. The result metadata uses the local install ID/app version and max source creation time. There is no automatic conflict resolution UI in this phase.
+
+### Verification and boundaries
+
+- Added JVM unit coverage for deterministic output, stats merge, timestamp-skew status/config conflicts, session and earning identity conflicts, schedule definition conflicts/disabled restore, tombstone behavior/ID reuse, remote-only account baseline, earnings retention and deterministic conflict ordering.
+- Tightened the shared account status policy so it no longer allows timestamp-based status LWW.
+- Phase 5.3 is pure/local-only. No Room DAO/entity/migration, database contents, EarningsStore file, Supabase object/policy/Auth config, HTTP/RPC transport, Outbox acknowledgement, tombstone acknowledgement, WorkManager or remote worker behavior changed.
+- GitHub Actions were not dispatched. Android/JUnit execution remains unverified and is reserved for the final build gate.

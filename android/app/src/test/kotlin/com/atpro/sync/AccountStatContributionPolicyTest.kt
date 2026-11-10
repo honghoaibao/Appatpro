@@ -26,13 +26,22 @@ class AccountStatContributionPolicyTest {
     )
 
     @Test
-    fun newerStatusWinsWithoutLookingAtStatsTimestamp() {
+    fun differentStatusRemainsUnresolvedEvenWhenOneDeviceTimestampIsMuchNewer() {
         val result = AccountStatContributionPolicy.mergeStatus(
-            AccountStatusValue("banned", false, 20L),
+            AccountStatusValue("banned", false, Long.MAX_VALUE),
+            AccountStatusValue("active", false, 1L),
+        )
+        assertTrue(result is AccountStatusMergeResult.Conflict)
+    }
+
+    @Test
+    fun identicalStatusMayKeepTheLatestTimestampOnlyAsMetadata() {
+        val result = AccountStatContributionPolicy.mergeStatus(
+            AccountStatusValue("active", false, 20L),
             AccountStatusValue("active", false, 10L),
         )
         assertEquals(
-            AccountStatusMergeResult.Resolved(AccountStatusValue("banned", false, 20L)),
+            AccountStatusMergeResult.Resolved(AccountStatusValue("active", false, 20L)),
             result,
         )
     }

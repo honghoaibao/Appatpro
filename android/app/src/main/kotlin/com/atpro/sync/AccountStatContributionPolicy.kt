@@ -15,7 +15,8 @@ sealed interface AccountStatusMergeResult {
 /**
  * Pure multi-installation account merge rules.
  *
- * Status uses its own timestamp and equal-timestamp disagreement is unresolved.
+ * Status/checkpoint disagreement is always unresolved across snapshots: device wall clocks
+ * are not causal ordering. Matching values may retain the maximum timestamp as metadata.
  * Cumulative counters merge by component-wise MAX for the same installation key,
  * never by summing two snapshots of the same installation.
  */
@@ -31,13 +32,14 @@ object AccountStatContributionPolicy {
     fun mergeStatus(
         local: AccountStatusValue,
         remote: AccountStatusValue,
-    ): AccountStatusMergeResult = when {
-        local.updatedAt > remote.updatedAt -> AccountStatusMergeResult.Resolved(local)
-        remote.updatedAt > local.updatedAt -> AccountStatusMergeResult.Resolved(remote)
-        local.status == remote.status && local.checkpoint == remote.checkpoint ->
-            AccountStatusMergeResult.Resolved(local)
-        else -> AccountStatusMergeResult.Conflict
-    }
+    ): AccountStatusMergeResult =
+        if (local.status == remote.status && local.checkpoint == remote.checkpoint) {
+            AccountStatusMergeResult.Resolved(
+                local.copy(updatedAt = maxOf(local.updatedAt, remote.updatedAt))
+            )
+        } else {
+            AccountStatusMergeResult.Conflict
+        }
 
     fun mergeContributions(
         local: List<BackupAccountStatContribution>,
