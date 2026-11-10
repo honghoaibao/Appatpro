@@ -67,7 +67,17 @@ class BackupRestoreCoordinator(context: Context) {
                     throw BackupRestoreException("Merged snapshot belongs to a different local installation")
                 }
 
-                val journalText = BackupRestoreJournalCodec.encode(mergedSnapshot, ownerId)
+                // The remote snapshot may contain years of cloud history. Only stage the
+                // device-local retention window in the crash-recovery journal.
+                val localSnapshot = mergedSnapshot.copy(
+                    datasets = mergedSnapshot.datasets.copy(
+                        closedSessions = BackupSessionRetentionPolicy.retainLocally(
+                            mergedSnapshot.datasets.closedSessions,
+                            System.currentTimeMillis(),
+                        )
+                    )
+                )
+                val journalText = BackupRestoreJournalCodec.encode(localSnapshot, ownerId)
                 writeJournal(journalText)
                 applyJournalText(journalText)
             } catch (cancelled: CancellationException) {
