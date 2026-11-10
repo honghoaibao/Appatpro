@@ -33,7 +33,11 @@ Date: 2026-11-10
 
 ## Verification
 
-- Source files and prior branch state reviewed on GitHub.
-- Android build and JUnit tests were not run.
-- GitHub Actions were not dispatched; keep the single final CI/build run for the end of the implementation track.
-- SyncWorker integration is present in source but is not production-verified until the final Android build/JUnit/CI gate succeeds.
+- The single final GitHub Actions run was triggered via draft PR #18: [run #264](https://github.com/honghoaibao/Appatpro/actions/runs/42787687650), commit `1749494b53165ab6a1e5a20a4753dc1f0092f628`.
+- Gradle setup, JDK 17 setup and workflow preparation succeeded. `testDebugUnitTest` reached `:app:compileDebugKotlin` and failed on two compile issues:
+  1. The restore-created `BackupAccountStatContribution` baseline omitted four required counters.
+  2. `SupabaseBackupRemoteStore` passed raw Kotlin primitives to the JSON object builder instead of `JsonPrimitive`.
+- The release APK build was skipped because the JUnit task failed.
+- Both source issues were corrected afterward: commits `ad7be894eff746fecac22ff24b6e92ff4e925240` and `60ecf122f6eb3e6d7ba921af71740b241351c6ba`.
+- The draft PR was closed unmerged to prevent subsequent pushes from triggering extra Actions runs. No rerun was dispatched, respecting the one-run limit.
+- Consequently, the fixes and the worker integration remain **not build/JUnit-verified**. A further CI run requires explicit authorization.
