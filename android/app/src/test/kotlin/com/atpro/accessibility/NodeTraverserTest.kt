@@ -591,7 +591,7 @@ class NodeTraverserTest {
     @Test
     fun `findSwitchAccountRow tim dung hang chuyen doi tai khoan`() {
         val add    = node(text = "Thêm tài khoản", clickable = true)
-        val switch = node(text = "Chuyển đổi tài khoản", clickable = true)
+        val switch = node(text = "Chuyển đổi tài khoản", clickable = true, bounds = Rect(0, 100, 400, 180))
         val logout = node(text = "Đăng xuất", clickable = true)
         val root   = node(children = listOf(add, switch, logout))
 
@@ -613,7 +613,7 @@ class NodeTraverserTest {
 
     @Test
     fun `findSwitchAccountRow ho tro nhan tieng Anh`() {
-        val root = node(children = listOf(node(text = "Switch account", clickable = true), node(text = "Log out", clickable = true)))
+        val root = node(children = listOf(node(text = "Switch account", clickable = true, bounds = Rect(0, 100, 400, 180)), node(text = "Log out", clickable = true)))
         val row = NodeTraverser.findSwitchAccountRow(root, screenHeight = 2400)
         assertNotNull(row)
         assertEquals("Switch account", row!!.label.text)
