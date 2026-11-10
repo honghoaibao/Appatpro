@@ -232,10 +232,10 @@ class Follow4FollowProviderTest {
             if (n++ == 0) FakeReply(429, envelope("""{"retry_after":4}""", code = 429, message = "Bạn thao tác hơi nhanh"))
             else FakeReply(200, earn(jobs = "[${job(1, "like")}]"))
         }
-        val before = currentTime
+        val before = testScheduler.currentTime
         val r = provider(t).nextJob(acc, setOf(TaskJobKind.LIKE)) as TaskResult.Success
         assertEquals("1", r.data!!.id)
-        assertTrue("phải chờ ≥ 4s, thực tế ${currentTime - before}ms", currentTime - before >= 4_000)
+        assertTrue("phải chờ ≥ 4s, thực tế ${testScheduler.currentTime - before}ms", testScheduler.currentTime - before >= 4_000)
         assertEquals(2, t.seen.size)
     }
 
@@ -410,9 +410,9 @@ class Follow4FollowProviderTest {
             nowMs = { now }, minDwellMs = 40L,
         )
         p.onJobOpening(acc, followJob)
-        val before = currentTime                 // thời gian ẢO của runTest — delay() không đợi thật
+        val before = testScheduler.currentTime                 // thời gian ẢO của runTest — delay() không đợi thật
         p.complete(acc, followJob)
-        val waitedMs = currentTime - before
+        val waitedMs = testScheduler.currentTime - before
         assertTrue("phải đợi đủ 40ms kể từ lúc mở link, thực tế $waitedMs", waitedMs >= 40)
     }
 
