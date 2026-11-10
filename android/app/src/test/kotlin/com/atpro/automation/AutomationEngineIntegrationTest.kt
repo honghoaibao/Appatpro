@@ -29,15 +29,16 @@ import org.robolectric.annotation.Config
  *   ✅ Multiple accounts: all processed in order
  *
  * Kỹ thuật:
+ *   - Robolectric API 34 cung cấp Android framework trên JVM.
  *   - mockkObject(NodeTraverser): mock toàn bộ static-like calls
  *   - mockkObject(AtProNotificationManager / OverlayFarmMonitor): silence side-effects
- *   - mockk<AccessibilityNodeInfo>(relaxed=true): tạo NodeResult mà không cần Android runtime
+ *   - mockk<AccessibilityNodeInfo>(relaxed=true): tạo NodeResult giả cho các luồng kiểm soát
  *   - UnconfinedTestDispatcher: coroutines chạy eager, delay() không block
  *
  * Giới hạn:
  *   ❌ doLike(), doFollow() — không thể test vì phụ thuộc Random + clickSuspend sequence
  *   ❌ recoverToFeed() detail — covered riêng khi có thêm fixtures
- *   → TASK-011: Robolectric tests cho các path cần AccessibilityNodeInfo tree thật
+ *   → TASK-011: bổ sung fixture cây AccessibilityNodeInfo thực tế cho các path còn thiếu
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
