@@ -229,6 +229,97 @@ class BackupSnapshotValidatorTest {
     }
 
     @Test
+    fun acceptsMultipleDurableTombstonesForTheSameLogicalKey() {
+        val base = validSnapshot()
+        val updated = base.copy(
+            datasets = base.datasets.copy(
+                tombstones = listOf(
+                    BackupTombstone(
+                        tombstoneId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                        dataset = BackupTombstoneDataset.ACCOUNTS,
+                        entityKey = "deleted_account",
+                        sourceInstallId = installationId,
+                        deletedAt = 1_700_000_002_000L,
+                    ),
+                    BackupTombstone(
+                        tombstoneId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+                        dataset = BackupTombstoneDataset.ACCOUNTS,
+                        entityKey = "deleted_account",
+                        sourceInstallId = "ffffffff-ffff-4fff-8fff-ffffffffffff",
+                        deletedAt = 1_700_000_003_000L,
+                    ),
+                )
+            )
+        )
+        BackupSnapshotValidator.validate(updated)
+    }
+
+    @Test
+    fun rejectsInvalidTombstoneIdentityAndTimestamp() {
+        val base = validSnapshot()
+        val valid = BackupTombstone(
+            tombstoneId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            dataset = BackupTombstoneDataset.ACCOUNTS,
+            entityKey = "deleted_account",
+            sourceInstallId = installationId,
+            deletedAt = 1L,
+        )
+        assertRejected(base.copy(datasets = base.datasets.copy(tombstones = listOf(valid.copy(tombstoneId = "bad")))))
+        assertRejected(base.copy(datasets = base.datasets.copy(tombstones = listOf(valid.copy(sourceInstallId = "bad")))))
+        assertRejected(base.copy(datasets = base.datasets.copy(tombstones = listOf(valid.copy(deletedAt = -1L)))))
+    }
+
+    @Test
+    fun rejectsUnsupportedDatasetsAndUnsafeKeys() {
+        val base = validSnapshot()
+        val valid = BackupTombstone(
+            tombstoneId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            dataset = BackupTombstoneDataset.ACCOUNTS,
+            entityKey = "deleted_account",
+            sourceInstallId = installationId,
+            deletedAt = 1L,
+        )
+        assertRejected(base.copy(datasets = base.datasets.copy(
+            tombstones = listOf(valid.copy(dataset = "closedSessions"))
+        )))
+        assertRejected(base.copy(datasets = base.datasets.copy(
+            tombstones = listOf(valid.copy(entityKey = "@deleted_account"))
+        )))
+        assertRejected(base.copy(datasets = base.datasets.copy(
+            tombstones = listOf(valid.copy(dataset = BackupTombstoneDataset.SAFE_CONFIGS, entityKey = "discord_webhook_url"))
+        )))
+        assertRejected(base.copy(datasets = base.datasets.copy(
+            tombstones = listOf(valid.copy(dataset = BackupTombstoneDataset.SCHEDULES, entityKey = " schedule "))
+        )))
+    }
+
+    @Test
+    fun rejectsDuplicateTombstoneIdsAndExcessiveTombstoneCount() {
+        val base = validSnapshot()
+        val tombstone = BackupTombstone(
+            tombstoneId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            dataset = BackupTombstoneDataset.ACCOUNTS,
+            entityKey = "deleted_account",
+            sourceInstallId = installationId,
+            deletedAt = 1L,
+        )
+        assertRejected(base.copy(datasets = base.datasets.copy(tombstones = listOf(tombstone, tombstone))))
+        assertRejected(
+            base.copy(
+                datasets = base.datasets.copy(
+                    tombstones = List(BackupSnapshotValidator.MAX_TOMBSTONES + 1) { index ->
+                        tombstone.copy(
+                            tombstoneId = java.util.UUID.nameUUIDFromBytes(
+                                "tombstone-$index".toByteArray()
+                            ).toString()
+                        )
+                    }
+                )
+            )
+        )
+    }
+
+    @Test
     fun rejectsInvalidSchedule() {
         val base = validSnapshot()
         assertRejected(

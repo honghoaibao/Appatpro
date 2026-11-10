@@ -17,6 +17,14 @@ interface BackupTombstoneDao {
     @Query("SELECT * FROM backup_tombstones ORDER BY dataset ASC, entityKey ASC, deletedAt ASC, tombstoneId ASC")
     suspend fun getAll(): List<BackupTombstoneEntity>
 
+    /** Bounded deterministic read for backup construction. */
+    @Query("""
+        SELECT * FROM backup_tombstones
+        ORDER BY dataset ASC, entityKey ASC, tombstoneId ASC
+        LIMIT :limit
+    """)
+    suspend fun getForBackup(limit: Int): List<BackupTombstoneEntity>
+
     @Query("SELECT * FROM backup_tombstones WHERE tombstoneId IN (:ids)")
     suspend fun getByIds(ids: List<String>): List<BackupTombstoneEntity>
 

@@ -9,6 +9,9 @@ import java.util.zip.GZIPOutputStream
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 data class EncodedBackupPayload(
     val schemaVersion: Int,
@@ -23,6 +26,9 @@ class BackupCodecException(message: String, cause: Throwable? = null) : Exceptio
 /**
  * Deterministic JSON -> UTF-8 -> GZIP -> Base64 codec.
  * SHA-256 is calculated over canonical uncompressed JSON, not compressed bytes.
+ *
+ * New payloads are written as v3. Legacy v2 payloads are decoded using their original wire
+ * model and converted into a v3 staging model with an empty tombstone set.
  */
 object BackupCodec {
     const val MAX_ENCODED_PAYLOAD_BYTES = 7 * 1024 * 1024
@@ -36,9 +42,6 @@ object BackupCodec {
     }
 
     fun encode(snapshot: BackupSnapshot): EncodedBackupPayload {
-        if (snapshot.formatVersion <= 0) {
-            throw BackupCodecException("Unsupported snapshot format version")
-        }
         validateSnapshot(snapshot)
 
         val canonical = try {
@@ -78,16 +81,18 @@ object BackupCodec {
     }
 
     /**
-     * Validates the encoded limit, checksum, decompressed size, canonical JSON and version
-     * before returning a model. No local state is modified by this method.
+     * Verifies bounds/checksum before parsing. The returned model is always the current v3
+     * staging shape, even when the remote row contains a legacy v2 payload.
      */
     fun decode(
         payload: String,
         expectedChecksum: String,
         expectedSchemaVersion: Int,
     ): BackupSnapshot {
-        if (expectedSchemaVersion <= 0) {
-            throw BackupCodecException("Invalid expected schema version")
+        if (expectedSchemaVersion != BackupSnapshot.LEGACY_FORMAT_VERSION &&
+            expectedSchemaVersion != BackupSnapshot.CURRENT_FORMAT_VERSION
+        ) {
+            throw BackupCodecException("Unsupported expected snapshot schema version")
         }
         val encodedBytes = payload.toByteArray(Charsets.UTF_8).size
         if (encodedBytes > MAX_ENCODED_PAYLOAD_BYTES) {
@@ -117,29 +122,71 @@ object BackupCodec {
         } catch (error: Exception) {
             throw BackupCodecException("Backup JSON is not valid UTF-8", error)
         }
-        val snapshot = try {
-            json.decodeFromString<BackupSnapshot>(jsonText)
-        } catch (error: Exception) {
-            throw BackupCodecException("Backup JSON is malformed or uses an unsupported shape", error)
-        }
-
-        if (snapshot.formatVersion != expectedSchemaVersion) {
-            throw BackupCodecException(
-                "Snapshot format ${snapshot.formatVersion} does not match database schema $expectedSchemaVersion"
-            )
-        }
-        validateSnapshot(snapshot)
-        val canonicalAgain = try {
-            json.encodeToString(snapshot).toByteArray(Charsets.UTF_8)
-        } catch (error: Exception) {
-            throw BackupCodecException("Could not validate canonical backup JSON", error)
-        }
-        if (!canonical.contentEquals(canonicalAgain)) {
-            throw BackupCodecException("Backup JSON is valid but not in canonical form")
-        }
-        return snapshot
+        return decodeCanonicalJson(jsonText, expectedSchemaVersion)
     }
 
+    /**
+     * Pure JSON decoder shared by the bounded transport codec and local JVM compatibility tests.
+     * It rejects future versions and non-canonical encodings before exposing a staging model.
+     */
+    internal fun decodeCanonicalJson(
+        jsonText: String,
+        expectedSchemaVersion: Int,
+    ): BackupSnapshot {
+        if (expectedSchemaVersion != BackupSnapshot.LEGACY_FORMAT_VERSION &&
+            expectedSchemaVersion != BackupSnapshot.CURRENT_FORMAT_VERSION
+        ) {
+            throw BackupCodecException("Unsupported expected snapshot schema version")
+        }
+
+        val actualVersion = try {
+            json.parseToJsonElement(jsonText)
+                .jsonObject["formatVersion"]
+                ?.jsonPrimitive
+                ?.intOrNull
+                ?: throw BackupCodecException("Backup format version is missing or invalid")
+        } catch (error: BackupCodecException) {
+            throw error
+        } catch (error: Exception) {
+            throw BackupCodecException("Backup JSON envelope is malformed", error)
+        }
+
+        if (actualVersion != expectedSchemaVersion) {
+            throw BackupCodecException(
+                "Snapshot format $actualVersion does not match expected schema $expectedSchemaVersion"
+            )
+        }
+
+        return when (actualVersion) {
+            BackupSnapshot.LEGACY_FORMAT_VERSION -> {
+                val legacy = try {
+                    json.decodeFromString<BackupSnapshotV2>(jsonText)
+                } catch (error: Exception) {
+                    throw BackupCodecException("Legacy v2 backup JSON is malformed or unsupported", error)
+                }
+                BackupSnapshotValidator.validateV2(legacy)
+                ensureCanonical(jsonText, json.encodeToString(legacy))
+                legacy.toCurrentSnapshot()
+            }
+            BackupSnapshot.CURRENT_FORMAT_VERSION -> {
+                val current = try {
+                    json.decodeFromString<BackupSnapshot>(jsonText)
+                } catch (error: Exception) {
+                    throw BackupCodecException("Backup JSON is malformed or uses an unsupported shape", error)
+                }
+                validateSnapshot(current)
+                ensureCanonical(jsonText, json.encodeToString(current))
+                current
+            }
+            else -> throw BackupCodecException("Unsupported snapshot format version")
+        }
+    }
+
+    private fun ensureCanonical(original: String, encoded: String) {
+        if (original != encoded) {
+            throw BackupCodecException("Backup JSON is valid but not in canonical form")
+        }
+    }
 
     private fun validateSnapshot(snapshot: BackupSnapshot) =
         BackupSnapshotValidator.validate(snapshot)

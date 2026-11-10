@@ -34,8 +34,13 @@ object ScheduledFarmManager {
     )
 
     fun setSchedule(context: Context, schedule: FarmSchedule) {
-        cancelSchedule(context, schedule.id)
-        if (!schedule.enabled) return
+        cancelScheduledWork(context, schedule.id)
+        if (!schedule.enabled) {
+            CoroutineScope(Dispatchers.IO).launch {
+                AtProApplication.repo().deleteConfig("$SCHEDULE_PREFIX${schedule.id}")
+            }
+            return
+        }
 
         val wm = WorkManager.getInstance(context)
         schedule.daysOfWeek.forEach { day ->
@@ -69,12 +74,16 @@ object ScheduledFarmManager {
     }
 
     fun cancelSchedule(context: Context, scheduleId: String) {
+        cancelScheduledWork(context, scheduleId)
+        CoroutineScope(Dispatchers.IO).launch {
+            AtProApplication.repo().deleteConfig("$SCHEDULE_PREFIX$scheduleId")
+        }
+    }
+
+    private fun cancelScheduledWork(context: Context, scheduleId: String) {
         val wm = WorkManager.getInstance(context)
         (1..7).forEach { day ->
             wm.cancelUniqueWork("${WORK_TAG_PREFIX}${scheduleId}_day$day")
-        }
-        CoroutineScope(Dispatchers.IO).launch {
-            AtProApplication.repo().setConfig("$SCHEDULE_PREFIX$scheduleId", "")
         }
     }
 

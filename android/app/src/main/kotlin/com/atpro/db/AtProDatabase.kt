@@ -164,6 +164,37 @@ abstract class AtProDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_backup_tombstones_dataset_entityKey ON backup_tombstones(dataset, entityKey)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_backup_tombstones_sourceInstallId ON backup_tombstones(sourceInstallId)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_backup_tombstones_deletedAt ON backup_tombstones(deletedAt)")
+
+                // Preserve pending legacy deletes before the new snapshot format is enabled.
+                val pendingDeleteCount = db.query("""
+                    SELECT COUNT(*) FROM sync_outbox
+                    WHERE operation = 'DELETE'
+                      AND dataset IN ('accounts', 'safeConfigs', 'schedules')
+                """.trimIndent()).use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getLong(0) else 0L
+                }
+
+                db.execSQL("""
+                    INSERT INTO backup_tombstones (
+                        tombstoneId, dataset, entityKey, sourceInstallId, deletedAt
+                    )
+                    SELECT outbox.eventId, outbox.dataset, outbox.entityKey,
+                           metadata.installationId, outbox.createdAt
+                    FROM sync_outbox AS outbox
+                    CROSS JOIN sync_metadata AS metadata
+                    WHERE metadata.id = 1
+                      AND outbox.operation = 'DELETE'
+                      AND outbox.dataset IN ('accounts', 'safeConfigs', 'schedules')
+                """.trimIndent())
+
+                val migratedDeleteCount = db.query("SELECT changes()").use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getLong(0) else 0L
+                }
+                if (migratedDeleteCount != pendingDeleteCount) {
+                    throw IllegalStateException(
+                        "Could not safely backfill all pending Outbox DELETE events into backup_tombstones"
+                    )
+                }
             }
         }
 

@@ -15,9 +15,47 @@ data class BackupSnapshot(
     val datasets: BackupSnapshotDatasets,
 ) {
     companion object {
-        const val CURRENT_FORMAT_VERSION = 2
+        const val CURRENT_FORMAT_VERSION = 3
+        const val LEGACY_FORMAT_VERSION = 2
     }
 }
+
+/** Exact v2 wire shape, retained for safe decoding of old remote backups. */
+@Serializable
+internal data class BackupSnapshotV2(
+    val formatVersion: Int,
+    val createdAt: Long,
+    val appVersion: String,
+    val sourceInstallId: String,
+    val datasets: BackupSnapshotDatasetsV2,
+)
+
+@Serializable
+internal data class BackupSnapshotDatasetsV2(
+    val accounts: List<BackupAccount>,
+    val closedSessions: List<BackupClosedSession>,
+    val safeConfigs: List<BackupSafeConfig>,
+    val schedules: List<BackupSchedule>,
+    val earnings: List<BackupEarning>,
+    val accountStatContributions: List<BackupAccountStatContribution>,
+)
+
+internal fun BackupSnapshotV2.toCurrentSnapshot(): BackupSnapshot =
+    BackupSnapshot(
+        formatVersion = BackupSnapshot.CURRENT_FORMAT_VERSION,
+        createdAt = createdAt,
+        appVersion = appVersion,
+        sourceInstallId = sourceInstallId,
+        datasets = BackupSnapshotDatasets(
+            accounts = datasets.accounts,
+            closedSessions = datasets.closedSessions,
+            safeConfigs = datasets.safeConfigs,
+            schedules = datasets.schedules,
+            earnings = datasets.earnings,
+            accountStatContributions = datasets.accountStatContributions,
+            tombstones = emptyList(),
+        ),
+    )
 
 @Serializable
 data class BackupSnapshotDatasets(
@@ -27,7 +65,23 @@ data class BackupSnapshotDatasets(
     val schedules: List<BackupSchedule>,
     val earnings: List<BackupEarning>,
     val accountStatContributions: List<BackupAccountStatContribution>,
+    val tombstones: List<BackupTombstone> = emptyList(),
 )
+
+@Serializable
+data class BackupTombstone(
+    val tombstoneId: String,
+    val dataset: String,
+    val entityKey: String,
+    val sourceInstallId: String,
+    val deletedAt: Long,
+)
+
+object BackupTombstoneDataset {
+    const val ACCOUNTS = "accounts"
+    const val SAFE_CONFIGS = "safeConfigs"
+    const val SCHEDULES = "schedules"
+}
 
 @Serializable
 data class BackupAccount(

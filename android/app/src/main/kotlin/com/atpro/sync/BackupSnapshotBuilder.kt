@@ -8,6 +8,7 @@ import com.atpro.db.entity.AccountEntity
 import com.atpro.db.entity.AccountStatContributionEntity
 import com.atpro.db.entity.ConfigEntity
 import com.atpro.db.entity.SessionEntity
+import com.atpro.db.entity.BackupTombstoneEntity
 import com.atpro.scheduler.ScheduledFarmManager
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -38,6 +39,7 @@ class BackupSnapshotBuilder(context: Context) {
         val accountStatContributions: List<AccountStatContributionEntity>,
         val sessions: List<SessionEntity>,
         val configs: List<ConfigEntity>,
+        val tombstones: List<BackupTombstoneEntity>,
     )
 
     suspend fun build(): BackupSnapshotBuildResult = withContext(Dispatchers.IO) {
@@ -83,12 +85,21 @@ class BackupSnapshotBuilder(context: Context) {
                     )
                 }
 
+                val tombstones = database.backupTombstoneDao()
+                    .getForBackup(BackupSnapshotValidator.MAX_TOMBSTONES + 1)
+                if (tombstones.size > BackupSnapshotValidator.MAX_TOMBSTONES) {
+                    throw BackupSnapshotException(
+                        "Too many retained tombstones for a bounded snapshot: ${tombstones.size}"
+                    )
+                }
+
                 RoomRows(
                     installationId = metadata.installationId,
                     accounts = accounts,
                     accountStatContributions = database.accountStatContributionDao().getAll(),
                     sessions = sessions,
                     configs = database.configDao().getAll(),
+                    tombstones = tombstones,
                 )
             }
         } catch (error: BackupSnapshotException) {
@@ -167,6 +178,18 @@ class BackupSnapshotBuilder(context: Context) {
                 )
             }
 
+        val tombstoneModels = roomRows.tombstones
+            .sortedWith(compareBy({ it.dataset }, { it.entityKey }, { it.tombstoneId }))
+            .map {
+                BackupTombstone(
+                    tombstoneId = it.tombstoneId,
+                    dataset = it.dataset,
+                    entityKey = it.entityKey,
+                    sourceInstallId = it.sourceInstallId,
+                    deletedAt = it.deletedAt,
+                )
+            }
+
         val snapshot = BackupSnapshot(
             formatVersion = FORMAT_VERSION,
             createdAt = now,
@@ -179,6 +202,7 @@ class BackupSnapshotBuilder(context: Context) {
                 schedules = schedules,
                 earnings = earningModels,
                 accountStatContributions = accountContributions,
+                tombstones = tombstoneModels,
             ),
         )
 

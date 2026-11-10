@@ -1,6 +1,6 @@
 # Cloud Sync Architecture — Appatpro
 
-- **Status:** Phases 3.4.2–3.4.7 implemented in source (not Android-build-verified); Phases 4.1–4.4 database backup CAS/RLS and public-schema hardening applied and verified in AT App; Android remote sync remains gated
+- **Status:** Phases 3.4.2–3.4.7 and 5.2 implemented in source (not Android-build-verified); Phases 4.1–4.4 database backup CAS/RLS and public-schema hardening applied and verified in AT App; Android remote sync remains gated
 - **Date:** 2026-11-10
 - **Scope:** Room-first backup architecture and Supabase security contract
 - **Related ADRs:** ADR-0015, ADR-0016, ADR-0017, ADR-0018, ADR-0019, ADR-0020, ADR-0021, ADR-0022, ADR-0023, ADR-0024, ADR-0025
@@ -69,7 +69,7 @@ Logical envelope:
 
 ~~~json
 {
-  "formatVersion": 2,
+  "formatVersion": 3,
   "createdAt": 0,
   "appVersion": "1.12.0",
   "sourceInstallId": "uuid",
@@ -79,8 +79,8 @@ Logical envelope:
     "safeConfigs": [],
     "schedules": [],
     "earnings": [],
-    "accountStatContributions": []
-
+    "accountStatContributions": [],
+    "tombstones": []
   }
 }
 ~~~
@@ -136,6 +136,12 @@ Rules:
 - Phase 3.4.3 adds a versioned line format (`v2|entryUUID|timestampMs|kind|reward|account`), atomically upgrades legacy rows with stable UUIDs, and persists a generation/acknowledged-generation marker in `earnings.dirty`. The backup builder captures the earnings rows and generation together under the file lock. A future sync may acknowledge only the captured generation after the remote snapshot commit; any later append leaves the store dirty.
 
 Do not create one Outbox event for every diagnostic log line. Logs are local-only in snapshot format v1.
+
+### backup_tombstones (Room schema v5)
+
+An append-only local delete-marker table keyed by a stable tombstone UUID. Each row stores one supported dataset (`accounts`, `safeConfigs` or `schedules`), its normalized logical entity key, source installation UUID and deletion timestamp. The table has no foreign key to the deleted row, so deleting an account/config cannot cascade away its marker.
+
+Migration 4→5 backfills supported pending Outbox DELETE rows using the existing Outbox event ID, installation UUID and creation timestamp. New local deletes write a durable tombstone and matching Outbox DELETE in the same Room transaction; the two share one stable UUID. Tombstones are read into snapshot v3 in deterministic order, have a bounded snapshot read, and are retained without garbage collection until a safe multi-device causal/watermark protocol exists.
 
 ### Owner binding state machine
 
@@ -255,7 +261,9 @@ The Room database currently survives sign-out and is not partitioned by Supabase
 - **3.4.7:** ✅ Room v4 account conflict model: independent status/stat timestamps, migration 3→4 with exactly-once legacy baseline contribution, per-installation Long counters, component-wise MAX merge policy, saturating aggregate and snapshot format v2. Pure tests added; not build-verified.
 - **4.1:** ✅ Applied the authenticated server-side revision CAS/RLS contract to AT App. Authenticated table access is SELECT-only; writes go through the owner-scoped save_user_backup RPC. Transaction smoke tests passed with all synthetic rows rolled back. Android remote writes remain disabled. See ADR-0024.
 - **4.2–4.4:** ✅ Audited the exposed database surface. All six public base tables have RLS; five operational tables retain their owner-scoped CRUD policies. `daily_stats` is SECURITY INVOKER and SELECT-only. Removed client EXECUTE from trigger-only functions, removed obsolete user_backups write policies, and tightened `postgres` default privileges so new public tables/sequences/functions are not automatically granted to anon/authenticated. Transaction smoke tests confirmed defaults, view isolation and trigger execution.
-- **5.x onward:** Separately implement and test the remote merge/restore coordinator, bounded revision-conflict retry, owner binding and exact Outbox acknowledgement. Do not enable app-side remote writes before this gate is verified.
+- **5.1:** ✅ Merge/Restore domain contract and gap inventory documented.
+- **5.2:** ✅ Local durable tombstones, pending DELETE migration backfill, snapshot v3 and strict v2→v3 compatibility/validation implemented in source; build/JUnit remain unverified. No Supabase or remote executor changes.
+- **5.3–5.7:** Separately implement and test deterministic merge/conflicts, staged restore, bounded CAS transport, exact acknowledgement and only then remote worker activation. Do not enable app-side remote writes before every gate is verified.
 
 Phase 3.4.1 itself changed architecture documentation only. Phases 3.4.2–3.4.7 changed local Room/application code, validation, preflight scheduling, account conflict handling and documentation only. Phase 4.1 changed only the user_backups write function and its table/function grants. Phases 4.2–4.4 changed only public-schema default privileges, the daily_stats view grants/comment, EXECUTE grants on two trigger functions, obsolete user_backups write policies and documentation. No backup rows, normalized operational rows, Auth settings, Android source or automation behavior were changed.
 
@@ -285,3 +293,15 @@ Phase 5.1 is documentation-only. No remote executor, network call, local schema 
 - **5.5:** Supabase read/RPC transport + bounded CAS coordinator; fake transport tests first.
 - **5.6:** Exact Outbox/tombstone/earnings acknowledgement + owner/revision checkpoint + crash tests.
 - **5.7:** Enable remote worker only after all prior gates pass; one final GitHub Actions run after code completion.
+
+## 14. Phase 5.2 — Durable tombstones and snapshot v3 (2026-11-10)
+
+Phase 5.2 completes the Room tombstone work and adds snapshot format v3. Room schema v5 uses the existing `backup_tombstones` entity/table with indexes on dataset/entity key, source installation and deletion timestamp. Migration 4→5 now backfills every still-pending supported Outbox DELETE (`accounts`, `safeConfigs`, `schedules`) by preserving its Outbox event UUID as the tombstone ID, taking the source installation from `sync_metadata` and the deletion time from the Outbox row. The migration compares eligible and inserted row counts and fails closed if any eligible DELETE cannot be preserved.
+
+New local account/config/schedule deletes record a tombstone and a matching Outbox DELETE in one Room transaction. The tombstone ID is reused as the Outbox event ID. Nonexistent rows do not create redundant markers. Schedule WorkManager cancellation is separated from logical schedule deletion so replacing an enabled schedule does not create a false delete tombstone.
+
+Snapshot writers emit v3 and include a deterministic, bounded tombstone dataset. Validation permits only the three supported datasets, requires canonical tombstone/source-install UUIDs, normalized non-empty keys, safe-config allowlist membership, non-negative deletion timestamps, unique IDs and at most 100,000 retained tombstones. Multiple tombstones for the same key remain valid; causal merge and recreation resolution belong to Phase 5.3.
+
+The decoder preserves the exact v2 wire model. It validates legacy v2 data with the old dataset shape, confirms canonical JSON byte-for-byte, then converts it to a v3 staging model with an empty tombstone list. New encoding is v3 only; unknown future formats, expected-version mismatches and non-canonical JSON fail closed.
+
+Phase 5.2 is local-only. No Supabase schema, policies, Auth settings, data, HTTP/RPC transport, remote worker activation, restore application, Outbox acknowledgement, tombstone acknowledgement or tombstone garbage collection was added. GitHub Actions were not dispatched. The APK build workflow only triggers push for `main`, `dev`, `release/*`, tags and manual dispatch; the feature branch is outside its branch push filter. Android/JUnit execution remains unverified and is reserved for the final build gate.

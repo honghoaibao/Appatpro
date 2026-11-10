@@ -91,20 +91,24 @@ class LocalRepository(context: Context) : IFarmRepository {
         require(entityKey.isNotBlank() && entityKey == entityKey.trim()) { "Invalid tombstone entity key" }
         val metadata = db.syncMetadataDao().get()
             ?: error("Sync metadata row is missing; cannot identify this installation")
+        val now = System.currentTimeMillis()
+        val tombstoneId = UUID.randomUUID().toString()
         db.backupTombstoneDao().insert(
             BackupTombstoneEntity(
-                tombstoneId = UUID.randomUUID().toString(),
+                tombstoneId = tombstoneId,
                 dataset = dataset,
                 entityKey = entityKey,
                 sourceInstallId = metadata.installationId,
-                deletedAt = System.currentTimeMillis(),
+                deletedAt = now,
             )
         )
         syncOutbox.insert(
             SyncOutboxEntity(
+                eventId = tombstoneId,
                 dataset = dataset,
                 entityKey = entityKey,
                 operation = SyncOutboxOperation.DELETE,
+                createdAt = now,
             )
         )
     }
@@ -205,8 +209,10 @@ class LocalRepository(context: Context) : IFarmRepository {
     suspend fun deleteAccount(username: String) {
         val normalized = username.trim().removePrefix("@")
         db.withTransaction {
-            accounts.delete(normalized)
-            recordTombstone("accounts", normalized)
+            if (accounts.getByUsername(normalized) != null) {
+                accounts.delete(normalized)
+                recordTombstone("accounts", normalized)
+            }
         }
         requestBackupPreflight()
     }
@@ -378,6 +384,7 @@ class LocalRepository(context: Context) : IFarmRepository {
     suspend fun setConfig(key: String, value: String) {
         val now = System.currentTimeMillis()
         db.withTransaction {
+            val previousValue = configs.get(key)
             configs.set(ConfigEntity(key = key, value = value, updatedAt = now))
             when (val dataset = BackupConfigPolicy.datasetFor(key)) {
                 "safeConfigs" -> {
@@ -391,7 +398,9 @@ class LocalRepository(context: Context) : IFarmRepository {
                 "schedules" -> {
                     val scheduleId = key.removePrefix("sched_")
                     if (value.isEmpty()) {
-                        recordTombstone(dataset, scheduleId)
+                        if (!previousValue.isNullOrEmpty()) {
+                            recordTombstone(dataset, scheduleId)
+                        }
                     } else {
                         val payload = JSONObject()
                             .put("scheduleId", scheduleId)
@@ -409,10 +418,17 @@ class LocalRepository(context: Context) : IFarmRepository {
 
     suspend fun deleteConfig(key: String) {
         db.withTransaction {
+            val existingValue = configs.get(key)
             configs.delete(key)
             when (val dataset = BackupConfigPolicy.datasetFor(key)) {
-                "safeConfigs" -> recordTombstone(dataset, key)
-                "schedules" -> recordTombstone(dataset, key.removePrefix("sched_"))
+                "safeConfigs" -> {
+                    if (existingValue != null) recordTombstone(dataset, key)
+                }
+                "schedules" -> {
+                    if (!existingValue.isNullOrEmpty()) {
+                        recordTombstone(dataset, key.removePrefix("sched_"))
+                    }
+                }
                 else -> Unit
             }
         }
