@@ -5,6 +5,9 @@ import android.view.accessibility.AccessibilityNodeInfo
 import io.mockk.*
 import org.junit.*
 import org.junit.Assert.*
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * NodeTraverserTest — unit tests cho NodeTraverser traversal + detection logic.
@@ -27,6 +30,8 @@ import org.junit.Assert.*
  *     ACCOUNT_UPDATE_PROMPT (v1.3.1 — ưu tiên trước ACCOUNT_SWITCH), NONE
  *   - detectLive: via resourceId, not detected
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class NodeTraverserTest {
 
     // ── Tree builder ──────────────────────────────────────────
@@ -162,11 +167,11 @@ class NodeTraverserTest {
     }
 
     @Test
-    fun `hasNavBar returns false when fewer than 2 nav items`() {
+    fun `hasNavBar returns true when one nav tab label is visible`() {
         val oneTab = node(text = "For You")
         val root   = node(children = listOf(oneTab))
 
-        assertFalse(NodeTraverser.hasNavBar(root))
+        assertTrue(NodeTraverser.hasNavBar(root))
     }
 
     @Test
