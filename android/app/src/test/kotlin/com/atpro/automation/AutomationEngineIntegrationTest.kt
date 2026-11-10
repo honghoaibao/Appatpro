@@ -189,7 +189,7 @@ class AutomationEngineIntegrationTest {
     @Test
     fun `farmLoop when switch succeeds and minutesPerAccount is 0 then session closes cleanly`() {
         coEvery { repo.loadFarmConfig() } returns FarmConfig(minutesPerAccount = 0)
-        configureSuccessfulSwitch("user1")
+        configureSuccessfulSwitch(listOf("user1"))
 
         engine.startFarm(FarmMode.SELECTED_LIST, listOf("user1"))
 
@@ -213,7 +213,7 @@ class AutomationEngineIntegrationTest {
     @Test
     fun `farmLoop when checkpoint detected in video loop then breaks and marks checkpoint`() {
         coEvery { repo.loadFarmConfig() } returns FarmConfig(minutesPerAccount = 1)
-        configureSuccessfulSwitch("user1")
+        configureSuccessfulSwitch(listOf("user1"))
         every { NodeTraverser.hasNavBar(any()) } returns true
         every { NodeTraverser.detectCheckpoint(any()) } returns true  // phát hiện ngay lần đầu
 
@@ -231,8 +231,8 @@ class AutomationEngineIntegrationTest {
     /**
      * SCENARIO E: Nhiều accounts — tất cả được xử lý theo thứ tự.
      *
-     * Dùng launchTikTok=false để mỗi account fail nhanh.
-     * Verify: startSession và setCheckpoint được gọi đúng số lần, đúng account.
+     * Các session được đặt minutesPerAccount=0 để kết thúc ngay mà không chờ wall-clock.
+     * Verify: startSession được gọi đúng số lần, đúng account và đúng thứ tự.
      */
     @Test
     fun `farmLoop with multiple accounts processes all accounts in order`() {
@@ -254,10 +254,8 @@ class AutomationEngineIntegrationTest {
         coVerify(exactly = 1) { repo.startSession("userB") }
         coVerify(exactly = 1) { repo.startSession("userC") }
 
-        // Tất cả đều được đánh checkpoint vì switch fail
-        coVerify(exactly = 1) { repo.setCheckpoint("userA", true) }
-        coVerify(exactly = 1) { repo.setCheckpoint("userB", true) }
-        coVerify(exactly = 1) { repo.setCheckpoint("userC", true) }
+        // Switch thành công nên không account nào bị đánh checkpoint.
+        coVerify(exactly = 0) { repo.setCheckpoint(any(), any()) }
 
         // Thứ tự đúng: A trước B trước C
         coVerifyOrder {
@@ -270,7 +268,7 @@ class AutomationEngineIntegrationTest {
     /**
      * SCENARIO F: Auto-save accounts từ popup switch.
      *
-     * Khi NodeTraverser.parseAccountList trả về accounts,
+     * Khi NodeTraverser.parseAccountListWithNodes trả về các entry,
      * các account chưa có trong DB phải được addAccount().
      */
     @Test
