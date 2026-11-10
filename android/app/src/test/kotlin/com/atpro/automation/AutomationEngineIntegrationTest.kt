@@ -93,8 +93,11 @@ class AutomationEngineIntegrationTest {
         every { NodeTraverser.detectLive(any())      } returns false
         every { NodeTraverser.detectPopup(any())     } returns
             NodeTraverser.PopupInfo(false, NodeTraverser.PopupType.NONE, null)
+        every { NodeTraverser.detectLogoutPrompt(any()) } returns false
+        every { NodeTraverser.isOnFeedTab(any()) } returns false
+        every { NodeTraverser.findSwitchAccountRow(any(), any(), any()) } returns null
+        every { NodeTraverser.parseAccountListWithNodes(any(), any(), any()) } returns emptyList()
         every { NodeTraverser.findByText(any(), any(), any(), any()) } returns null
-        every { NodeTraverser.parseAccountList(any()) } returns emptyList()
 
         // Host: all gestures succeed, screen exists
         host = mockk {
@@ -133,13 +136,10 @@ class AutomationEngineIntegrationTest {
     // ── Tests ─────────────────────────────────────────────────
 
     /**
-     * SCENARIO A: launchTikTok() trả false ngay lúc mở TikTok để switch account.
+     * SCENARIO A: TikTok không mở được ở pha khởi động.
      *
-     * Mong đợi:
-     *   - Session được bắt đầu (startSession called) vì session tracking bắt đầu trước khi switch
-     *   - setCheckpoint(true) được gọi vì switch fail
-     *   - closeSession được gọi với likes=0, follows=0, videos=0
-     *   - isFarming = false sau khi farm hoàn thành
+     * Pha Launch kết thúc thất bại trước khi discover/position account,
+     * vì vậy chưa có session nào được tạo và không đánh checkpoint tài khoản.
      */
     @Test
     fun `farmLoop when launchTikTok fails then checkpoint set and session closed empty`() {
@@ -149,22 +149,18 @@ class AutomationEngineIntegrationTest {
 
         testScope.advanceUntilIdle()
 
-        // UnconfinedTestDispatcher → coroutine chạy xong synchronously
-        assertFalse("isFarming phải false", engine.isFarming)
-        coVerify { repo.startSession("user1") }
-        coVerify { repo.setCheckpoint("user1", true) }
-        coVerify { AtProNotificationManager.notifyCheckpoint("user1") }
-        coVerify { repo.closeSession(1L, "user1", 0, 0, 0, 0) }
+        assertFalse("isFarming phải false sau khi Launch thất bại", engine.isFarming)
+        verify(exactly = 3) { host.launchTikTok() }
+        coVerify(exactly = 0) { repo.startSession(any()) }
+        coVerify(exactly = 0) { repo.setCheckpoint(any(), any()) }
+        coVerify(exactly = 0) { repo.closeSession(any(), any(), any(), any(), any(), any()) }
     }
 
     /**
-     * SCENARIO B: TikTok mở được (launchTikTok=true) nhưng feed không load.
+     * SCENARIO B: TikTok mở được nhưng feed không tải được ở pha Launch.
      *
-     * waitFeedLoad() lặp 6 lần, mỗi lần check hasNavBar → false.
-     * → switchToAccountViaSettings returns false
-     * → checkpoint + empty session.
-     *
-     * Với UnconfinedTestDispatcher, 6 × delay(3000) chạy ngay lập tức.
+     * State machine kết thúc trước khi bắt đầu session; không đánh checkpoint
+     * vì chưa position được bất kỳ tài khoản nào.
      */
     @Test
     fun `farmLoop when feed never loads then switch fails and session closed empty`() {
@@ -175,9 +171,11 @@ class AutomationEngineIntegrationTest {
 
         testScope.advanceUntilIdle()
 
-        assertFalse(engine.isFarming)
-        coVerify { repo.setCheckpoint("user1", true) }
-        coVerify { repo.closeSession(1L, "user1", 0, 0, 0, 0) }
+        assertFalse("isFarming phải false sau khi hết lượt chờ feed", engine.isFarming)
+        coVerify(exactly = 1) { host.launchTikTok() }
+        coVerify(exactly = 0) { repo.startSession(any()) }
+        coVerify(exactly = 0) { repo.setCheckpoint(any(), any()) }
+        coVerify(exactly = 0) { repo.closeSession(any(), any(), any(), any(), any(), any()) }
     }
 
     /**
@@ -238,7 +236,8 @@ class AutomationEngineIntegrationTest {
      */
     @Test
     fun `farmLoop with multiple accounts processes all accounts in order`() {
-        every { host.launchTikTok() } returns false
+        configureSuccessfulSwitch(listOf("userA", "userB", "userC"))
+        coEvery { repo.loadFarmConfig() } returns FarmConfig(minutesPerAccount = 0)
         // Trả về session ID khác nhau cho từng account
         coEvery { repo.startSession("userA") } returns 1L
         coEvery { repo.startSession("userB") } returns 2L
@@ -276,22 +275,8 @@ class AutomationEngineIntegrationTest {
      */
     @Test
     fun `farmLoop when switch popup shows accounts then auto-saves new ones`() {
-        every { host.launchTikTok() } returns true
-        // Feed load thành công (lần 1 cho waitFeedLoad ban đầu)
-        every { NodeTraverser.hasNavBar(any()) } returns true
-
-        // Switch button tìm thấy
-        every { NodeTraverser.findByText(any(), any(), any(), any()) } answers {
-            val text = secondArg<String>().lowercase()
-            when {
-                "chuyển đổi" in text -> clickableResult("Chuyển đổi tài khoản")
-                text == "user1"      -> clickableResult("@user1")
-                else                 -> null
-            }
-        }
-
-        // Popup trả về 3 accounts — user1 đã có, newUser1 và newUser2 chưa có
-        every { NodeTraverser.parseAccountList(any()) } returns listOf("user1", "newUser1", "newUser2")
+        // Popup chứa 3 account — user1 đã có, newUser1 và newUser2 chưa có.
+        configureSuccessfulSwitch(listOf("user1", "newUser1", "newUser2"))
         coEvery { repo.getAccounts() } returns listOf(
             AccountEntity(username = "user1", status = "active")
         )
@@ -311,32 +296,30 @@ class AutomationEngineIntegrationTest {
     // ── Helpers ───────────────────────────────────────────────
 
     /**
-     * Cấu hình mock để switch account thành công.
-     *
-     * Flow mô phỏng:
-     *   1. launchTikTok() → true
-     *   2. waitFeedLoad() → hasNavBar → true (lần 1)
-     *   3. findByText("chuyển đổi tài khoản") → trả về nút switch
-     *   4. parseAccountList → emptyList (không auto-save)
-     *   5. findByText(account) → trả về account node
-     *   6. killTikTok + launchTikTok + waitFeedLoad lần 2 → hasNavBar → true
+     * Cấu hình switch-popup fixture theo API hiện tại:
+     * findSwitchAccountRow → parseAccountListWithNodes → position/relaunch.
+     * Các entry dùng cùng node giả vì test chỉ xác minh điều phối và thứ tự.
      */
-    private fun configureSuccessfulSwitch(account: String) {
+    private fun configureSuccessfulSwitch(accounts: List<String>) {
         every { host.launchTikTok() } returns true
-        every { NodeTraverser.hasNavBar(any()) } returns true  // feed loads OK
+        every { NodeTraverser.hasNavBar(any()) } returns true
+        every { NodeTraverser.isOnFeedTab(any()) } returns true
 
-        every { NodeTraverser.findByText(any(), any(), any(), any()) } answers {
-            val text = secondArg<String>().lowercase()
-            when {
-                "chuyển đổi" in text  -> clickableResult("Chuyển đổi tài khoản")
-                "switch account" in text -> null
-                "manage accounts" in text -> null
-                text == account.lowercase() -> clickableResult("@$account")
-                else -> null
-            }
-        }
+        val switchBounds = Rect(300, 1_000, 780, 1_080)
+        val switchLabel = NodeTraverser.NodeResult(
+            node = fakeNode,
+            bounds = switchBounds,
+            text = "Chuyển đổi tài khoản",
+            resourceId = null,
+            className = "android.widget.TextView",
+            isClickable = true,
+            isEnabled = true,
+        )
+        val switchRow = NodeTraverser.SwitchRow(switchLabel, fakeNode)
+        every { NodeTraverser.findSwitchAccountRow(any(), any(), any()) } returns switchRow
+        every { NodeTraverser.parseAccountListWithNodes(any(), any(), any()) } returns
+            accounts.map { NodeTraverser.AccountEntry(it, fakeNode, isNeedsNormalize = false) }
 
-        every { NodeTraverser.parseAccountList(any()) } returns emptyList()
         coEvery { repo.getAccounts() } returns emptyList()
     }
 }
