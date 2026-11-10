@@ -1,6 +1,6 @@
 # Cloud Sync Architecture — Appatpro
 
-- **Status:** Phases 3.4.2–3.4.7 and 5.2–5.5 implemented in source (not Android-build-verified); Phases 4.1–4.4 database backup CAS/RLS and public-schema hardening applied and verified in AT App; Android remote sync remains gated
+- **Status:** Phases 3.4.2–3.4.7 and 5.2–5.6 implemented in source (not Android-build-verified); Phases 4.1–4.4 database backup CAS/RLS and public-schema hardening applied and verified in AT App; Android remote sync remains gated
 - **Date:** 2026-11-10
 - **Scope:** Room-first backup architecture and Supabase security contract
 - **Related ADRs:** ADR-0015, ADR-0016, ADR-0017, ADR-0018, ADR-0019, ADR-0020, ADR-0021, ADR-0022, ADR-0023, ADR-0024, ADR-0025
@@ -390,3 +390,41 @@ Phase 5.5 adds the narrow Android transport path for the already secured `public
 - No `SyncWorker` integration: it remains preflight-only and reports `remote_executor_disabled`. No production entry point calls the new coordinator yet.
 - No local Room/Earnings apply, Outbox/tombstone/Earnings acknowledgement, local revision checkpoint update, retry-counter mutation, schedule activation or restore was added. These belong to Phase 5.6/5.7.
 - No Supabase SQL migration or project setting was changed. No GitHub Actions workflow was dispatched. Android build/JUnit execution remains unverified and is reserved for the single final build gate.
+
+
+## 18. Phase 5.6 — Exact acknowledgement and local checkpoint (2026-11-10)
+
+Phase 5.6 completes the local side of a successful remote CAS, without activating the worker.
+
+### Snapshot capture
+
+- `BackupSnapshotBuilder` now returns a `BackupSnapshotBuildResult` containing the v3 snapshot, Earnings dirty generation, owner UUID, local remote-revision checkpoint and a minimal Outbox acknowledgement capture.
+- The owner, checkpoint, all Room snapshot datasets and Outbox candidates are read in the same Room transaction. The Outbox projection contains only event ID, sequence, dataset, entity key, operation, payload byte count and retry time; no event payload is loaded.
+- Captured Outbox candidates are restricted to the exact sequence-preserving `SyncBatchPolicy` prefix (max 50 events / 512 KiB, due at snapshot time). The old account merge gate was removed because Phase 5.3 now performs deterministic account merging and returns explicit conflicts.
+- Earnings rows and generation are captured together through the existing EarningsStore snapshot lock. Writes after that generation remain dirty when the captured generation is acknowledged.
+
+### Commit and restore order
+
+1. `BackupCasCoordinator` rebuilds this richer local capture on every CAS attempt. It verifies the captured owner, local checkpoint and Outbox identity before remote read.
+2. The server's current revision must be at least the captured local checkpoint. A missing/older remote revision than the local checkpoint is rejected; it is never overwritten as if the server were empty.
+3. The coordinator returns both the exact local capture and the merged candidate confirmed by the server, plus remote base revision, committed revision, checksum and attempt count.
+4. `BackupAcknowledgementCoordinator` validates the committed candidate and applies it locally through `BackupRestoreCoordinator.restore` before acknowledging anything. The Phase 5.4 durable restore journal remains responsible for crash-safe Room/Earnings application. Restore failure leaves Outbox, checkpoint and captured Earnings acknowledgement untouched.
+5. The local Room transaction compare-and-sets the captured local checkpoint to the server-confirmed committed revision and deletes only the exact represented Outbox event IDs. This supports a legitimate jump (for example local checkpoint 2, remote base 4, committed revision 5) while rejecting any local checkpoint changed after capture.
+6. Current Outbox rows are re-read by captured ID and their sequence/dataset/entity/operation identity is verified. Rows replaced by newer event IDs are not deleted; new IDs remain pending. The delete count is checked inside the same transaction as the checkpoint update.
+7. Tombstones referenced by acknowledged events are verified against the committed snapshot and durable Room rows. A DELETE event is acknowledged only when its exact tombstone ID, dataset, key and local source installation are present. Tombstone rows are never deleted or garbage-collected.
+8. EarningsStore acknowledges only the generation captured with the committed snapshot. A newer generation (including a restore-created generation or a user write after capture) remains dirty for a later run.
+
+### Partial and fail-closed behavior
+
+- `BackupAcknowledgementPolicy` validates event UUIDs, sequence order, dataset/key/operation identity and the 50-event bound.
+- It acknowledges only a contiguous prefix whose live entity or tombstone is represented in the server-confirmed merged candidate. It never skips an unrepresented head event to acknowledge later IDs.
+- If a head event is not represented, the checkpoint and other safe acknowledgements may still advance, but the result is Partial and the blocked event remains pending. In particular, a `closedSessions` Outbox event whose session has aged out of the 90-day local snapshot and is absent remotely is not silently discarded. This retention edge must be resolved before Phase 5.7 enables the worker.
+- Restore, Room CAS, tombstone verification or Earnings acknowledgement failure returns RetryRequired/Rejected. No broad Outbox deletion, tombstone deletion or generation-wide acknowledgement is used.
+
+### Verification and boundaries
+
+- Added tests for exact live-entity acknowledgement, exact tombstone ID across multiple markers, UPSERT followed by DELETE, remote tombstone coverage from the merged candidate, contiguous-prefix blocking, malformed/duplicate/out-of-order captures, local restore failure, Room conflict, Earnings failure, owner mismatch and remote-to-local revision jumps.
+- Added CAS tests for remote revision rollback protection and invalid Outbox capture rejection before network.
+- The Room checkpoint update and exact Outbox delete are implemented in one Room transaction. The transaction source is reviewed but not executed in this phase; no Room instrumentation test or Android/JUnit run has been performed.
+- `SyncWorker` remains preflight-only with `remote_executor_disabled`. No production caller invokes the CAS or acknowledgement coordinators.
+- No Supabase SQL, RLS, grant, Auth setting or remote row changed. No GitHub Actions workflow was dispatched. The single final build/CI gate remains reserved until Phase 5.7.

@@ -28,8 +28,9 @@ interface SyncMetadataDao {
     ): Int
 
     /**
-     * Commit the local checkpoint only after the server confirms an atomic R -> R+1 commit.
-     * This is a local compare-and-set; it does not call Supabase.
+     * Commit the local checkpoint only after the server confirms remote revision R -> R+1.
+     * expectedRevision is the captured local checkpoint; committedRevision may jump ahead
+     * when another device advanced the remote revision. This remains a local compare-and-set.
      */
     @Query("""
         UPDATE sync_metadata

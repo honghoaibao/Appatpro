@@ -17,10 +17,21 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 
+data class BackupOutboxAckCandidate(
+    val eventId: String,
+    val sequence: Long,
+    val dataset: String,
+    val entityKey: String,
+    val operation: String,
+)
+
 data class BackupSnapshotBuildResult(
     val snapshot: BackupSnapshot,
     val earningsGeneration: Long,
     val earningsDirty: Boolean,
+    val ownerUserId: String?,
+    val localExpectedRevision: Long,
+    val outboxEvents: List<BackupOutboxAckCandidate>,
 )
 
 class BackupSnapshotException(message: String, cause: Throwable? = null) : Exception(message, cause)
@@ -35,6 +46,9 @@ class BackupSnapshotBuilder(context: Context) {
 
     private data class RoomRows(
         val installationId: String,
+        val ownerUserId: String?,
+        val lastRemoteRevision: Long,
+        val outboxEvents: List<BackupOutboxAckCandidate>,
         val accounts: List<AccountEntity>,
         val accountStatContributions: List<AccountStatContributionEntity>,
         val sessions: List<SessionEntity>,
@@ -57,7 +71,41 @@ class BackupSnapshotBuilder(context: Context) {
             database.withTransaction {
                 val metadata = database.syncMetadataDao().get()
                     ?: throw BackupSnapshotException("Sync metadata row is missing")
+                if (!BackupMetadataRules.isStructurallyValid(metadata)) {
+                    throw BackupSnapshotException("Sync metadata row is invalid")
+                }
                 validateInstallationId(metadata.installationId)
+                val outboxHead = database.syncOutboxDao()
+                    .getPendingAckCandidates(SyncBatchPolicy.MAX_EVENTS_PER_BATCH)
+                val outboxPlan = SyncBatchPolicy.plan(
+                    pendingEvents = outboxHead.map {
+                        SyncPendingEvent(
+                            eventId = it.eventId,
+                            sequence = it.sequence,
+                            dataset = it.dataset,
+                            operation = it.operation,
+                            payloadBytes = it.payloadBytes,
+                            nextAttemptAt = it.nextAttemptAt,
+                        )
+                    },
+                    nowEpochMillis = now,
+                )
+                val selectedEventIds = when (outboxPlan) {
+                    SyncBatchPlan.Empty -> emptySet()
+                    is SyncBatchPlan.Candidate -> outboxPlan.eventIds.toSet()
+                    else -> throw BackupSnapshotException("Outbox head is not eligible for acknowledgement")
+                }
+                val outboxEvents = outboxHead
+                    .filter { it.eventId in selectedEventIds }
+                    .map {
+                        BackupOutboxAckCandidate(
+                            eventId = it.eventId,
+                            sequence = it.sequence,
+                            dataset = it.dataset,
+                            entityKey = it.entityKey,
+                            operation = it.operation,
+                        )
+                    }
 
                 val accounts = database.accountDao().getAll()
                 val closedCount = database.sessionDao().countClosedForBackup(retainedSince)
@@ -95,6 +143,9 @@ class BackupSnapshotBuilder(context: Context) {
 
                 RoomRows(
                     installationId = metadata.installationId,
+                    ownerUserId = metadata.ownerUserId,
+                    lastRemoteRevision = metadata.lastRemoteRevision,
+                    outboxEvents = outboxEvents,
                     accounts = accounts,
                     accountStatContributions = database.accountStatContributionDao().getAll(),
                     sessions = sessions,
@@ -210,6 +261,9 @@ class BackupSnapshotBuilder(context: Context) {
             snapshot = snapshot,
             earningsGeneration = earningsSnapshot.dirtyState.generation,
             earningsDirty = earningsSnapshot.dirtyState.isDirty,
+            ownerUserId = roomRows.ownerUserId,
+            localExpectedRevision = roomRows.lastRemoteRevision,
+            outboxEvents = roomRows.outboxEvents,
         )
     }
 

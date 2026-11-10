@@ -23,7 +23,7 @@ class SyncBatchPolicyTest {
     @Test
     fun returnsEmptyForAnEmptyOutbox() {
         assertTrue(
-            SyncBatchPolicy.plan(emptyList(), nowEpochMillis = 100L, pendingAccountEvents = 0)
+            SyncBatchPolicy.plan(emptyList(), nowEpochMillis = 100L)
                 is SyncBatchPlan.Empty,
         )
     }
@@ -31,7 +31,7 @@ class SyncBatchPolicyTest {
     @Test
     fun preservesSequenceAndCapsBatchSize() {
         val events = (1L..60L).reversed().map { event(it) }
-        val plan = SyncBatchPolicy.plan(events, nowEpochMillis = 100L, pendingAccountEvents = 0)
+        val plan = SyncBatchPolicy.plan(events, nowEpochMillis = 100L)
             as SyncBatchPlan.Candidate
 
         assertEquals(50, plan.eventCount)
@@ -45,8 +45,7 @@ class SyncBatchPolicyTest {
                 event(1L, nextAttemptAt = 500L),
                 event(2L, nextAttemptAt = 0L),
             ),
-            nowEpochMillis = 100L,
-            pendingAccountEvents = 0,
+            nowEpochMillis = 100L
         )
 
         assertTrue(plan is SyncBatchPlan.WaitingForRetry)
@@ -54,15 +53,14 @@ class SyncBatchPolicyTest {
     }
 
     @Test
-    fun accountEventsGateTheWholeSnapshotBatch() {
+    fun accountEventsAreEligibleForTheDeterministicMergeCoordinator() {
         val plan = SyncBatchPolicy.plan(
-            pendingEvents = listOf(event(1L)),
+            pendingEvents = listOf(event(1L, dataset = "accounts")),
             nowEpochMillis = 100L,
-            pendingAccountEvents = 3,
         )
 
-        assertTrue(plan is SyncBatchPlan.AccountMergeGate)
-        assertEquals(3, (plan as SyncBatchPlan.AccountMergeGate).pendingAccountEvents)
+        assertTrue(plan is SyncBatchPlan.Candidate)
+        assertEquals(listOf("event-1"), (plan as SyncBatchPlan.Candidate).eventIds)
     }
 
     @Test
@@ -71,8 +69,7 @@ class SyncBatchPolicyTest {
             pendingEvents = listOf(
                 event(1L, payloadBytes = SyncBatchPolicy.MAX_BATCH_PAYLOAD_BYTES + 1),
             ),
-            nowEpochMillis = 100L,
-            pendingAccountEvents = 0,
+            nowEpochMillis = 100L
         )
 
         assertTrue(plan is SyncBatchPlan.OversizedFirstEvent)
@@ -88,8 +85,7 @@ class SyncBatchPolicyTest {
                 event(2L, payloadBytes = max / 2),
                 event(3L, payloadBytes = 1),
             ),
-            nowEpochMillis = 100L,
-            pendingAccountEvents = 0,
+            nowEpochMillis = 100L
         ) as SyncBatchPlan.Candidate
 
         assertEquals(2, plan.eventCount)

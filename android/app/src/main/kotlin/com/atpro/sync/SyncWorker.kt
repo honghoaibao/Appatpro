@@ -46,9 +46,6 @@ class SyncWorker(
                 return completed(STATUS_EARNINGS_WAITING_FOR_REMOTE_EXECUTOR)
             }
 
-            // Count across the entire Outbox so an account event beyond the inspected head
-            // cannot be bypassed by a smaller batch of later dataset events.
-            val accountEvents = dao.getPendingCountForDataset(DATASET_ACCOUNTS)
             val head = dao.getPendingHead(SyncBatchPolicy.MAX_PENDING_EVENTS_TO_INSPECT)
             val plan = SyncBatchPolicy.plan(
                 pendingEvents = head.map {
@@ -62,13 +59,10 @@ class SyncWorker(
                     )
                 },
                 nowEpochMillis = System.currentTimeMillis(),
-                pendingAccountEvents = accountEvents,
             )
 
             when (plan) {
                 SyncBatchPlan.Empty -> completed(STATUS_NO_DUE_BATCH, pendingCount)
-                is SyncBatchPlan.AccountMergeGate ->
-                    completed(STATUS_ACCOUNT_MERGE_GATE, pendingCount)
                 is SyncBatchPlan.WaitingForRetry ->
                     completed(STATUS_WAITING_FOR_RETRY, pendingCount)
                 is SyncBatchPlan.InvalidEvent ->
@@ -106,8 +100,6 @@ class SyncWorker(
     )
 
     private companion object {
-        const val DATASET_ACCOUNTS = "accounts"
-
         const val OUTPUT_STATUS = "sync_preflight_status"
         const val OUTPUT_PENDING_COUNT = "pending_count"
         const val OUTPUT_CANDIDATE_COUNT = "candidate_count"
@@ -119,7 +111,6 @@ class SyncWorker(
         const val STATUS_NO_PENDING_DATA = "no_pending_data"
         const val STATUS_EARNINGS_WAITING_FOR_REMOTE_EXECUTOR = "earnings_waiting_for_remote_executor"
         const val STATUS_NO_DUE_BATCH = "no_due_batch"
-        const val STATUS_ACCOUNT_MERGE_GATE = "account_merge_gate"
         const val STATUS_WAITING_FOR_RETRY = "waiting_for_retry_window"
         const val STATUS_INVALID_OUTBOX_EVENT = "invalid_outbox_event"
         const val STATUS_OVERSIZED_EVENT = "oversized_event"

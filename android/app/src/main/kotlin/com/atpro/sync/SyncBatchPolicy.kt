@@ -15,7 +15,6 @@ data class SyncPendingEvent(
 
 sealed interface SyncBatchPlan {
     data object Empty : SyncBatchPlan
-    data class AccountMergeGate(val pendingAccountEvents: Int) : SyncBatchPlan
     data class WaitingForRetry(val eventId: String, val nextAttemptAt: Long) : SyncBatchPlan
     data class InvalidEvent(val eventId: String) : SyncBatchPlan
     data class OversizedFirstEvent(val eventId: String, val payloadBytes: Int) : SyncBatchPlan
@@ -29,8 +28,8 @@ sealed interface SyncBatchPlan {
 /**
  * Bounded, sequence-preserving local batch planner.
  *
- * It does not acknowledge, mutate, upload or restore anything. The remote executor remains
- * deliberately disabled until the account conflict model and server revision contract exist.
+ * It does not acknowledge, mutate, upload or restore anything. Account events are eligible
+ * because the deterministic Phase 5.3 merge engine handles them and returns explicit conflicts.
  */
 object SyncBatchPolicy {
     const val MAX_EVENTS_PER_BATCH = 50
@@ -40,13 +39,7 @@ object SyncBatchPolicy {
     fun plan(
         pendingEvents: List<SyncPendingEvent>,
         nowEpochMillis: Long,
-        pendingAccountEvents: Int,
     ): SyncBatchPlan {
-        if (pendingAccountEvents > 0 || pendingEvents.any { it.dataset == DATASET_ACCOUNTS }) {
-            return SyncBatchPlan.AccountMergeGate(
-                pendingAccountEvents = maxOf(pendingAccountEvents, pendingEvents.count { it.dataset == DATASET_ACCOUNTS }),
-            )
-        }
         if (pendingEvents.isEmpty()) return SyncBatchPlan.Empty
 
         val ordered = pendingEvents.sortedBy { it.sequence }
@@ -95,7 +88,6 @@ object SyncBatchPolicy {
         }
     }
 
-    private const val DATASET_ACCOUNTS = "accounts"
     private const val OPERATION_UPSERT = "UPSERT"
     private const val OPERATION_DELETE = "DELETE"
 }

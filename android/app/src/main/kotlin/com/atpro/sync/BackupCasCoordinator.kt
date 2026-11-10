@@ -4,7 +4,7 @@ import com.atpro.auth.domain.AuthSession
 import kotlinx.coroutines.CancellationException
 
 fun interface BackupSnapshotProvider {
-    suspend fun buildSnapshot(): BackupSnapshot
+    suspend fun buildSnapshot(): BackupSnapshotBuildResult
 }
 
 /** Local Room owner binding must be confirmed before any remote request. */
@@ -29,7 +29,10 @@ object AndroidBackupSnapshotCodec : BackupSnapshotCodecPort {
 
 sealed interface BackupCasResult {
     data class Committed(
+        val buildResult: BackupSnapshotBuildResult,
+        /** The merged candidate that the server confirmed, not merely the local source snapshot. */
         val snapshot: BackupSnapshot,
+        val expectedRemoteRevision: Long,
         val revision: Long,
         val attempts: Int,
         val checksum: String,
@@ -70,10 +73,15 @@ class BackupCasCoordinator(
 
         repeat(MAX_CAS_ATTEMPTS) { index ->
             val attempt = index + 1
-            val local = try {
+            val localBuild = try {
                 snapshotProvider.buildSnapshot().also {
-                    BackupSnapshotValidator.validate(it)
-                    if (it.formatVersion != BackupSnapshot.CURRENT_FORMAT_VERSION) {
+                    if (it.ownerUserId != ownerId || it.localExpectedRevision < 0L ||
+                        it.outboxEvents.size > SyncBatchPolicy.MAX_EVENTS_PER_BATCH
+                    ) {
+                        throw BackupSnapshotException("Local snapshot metadata does not match the authenticated owner")
+                    }
+                    BackupSnapshotValidator.validate(it.snapshot)
+                    if (it.snapshot.formatVersion != BackupSnapshot.CURRENT_FORMAT_VERSION) {
                         throw BackupSnapshotException("Local snapshot must use v3")
                     }
                 }
@@ -85,6 +93,15 @@ class BackupCasCoordinator(
                 )
             }
 
+            when (BackupAcknowledgementPolicy.plan(localBuild, localBuild.snapshot)) {
+                is BackupAcknowledgementPlanResult.Rejected ->
+                    return BackupCasResult.Failed(
+                        BackupRemoteFailure("local_outbox_capture_invalid", retryable = false)
+                    )
+                is BackupAcknowledgementPlanResult.Ready -> Unit
+            }
+
+            val local = localBuild.snapshot
             val remote = when (val read = remoteStore.read(ownerId, token)) {
                 BackupRemoteReadResult.Missing -> null
                 is BackupRemoteReadResult.Failed -> return BackupCasResult.Failed(read.failure)
@@ -106,6 +123,13 @@ class BackupCasCoordinator(
             ) {
                 return BackupCasResult.Failed(
                     BackupRemoteFailure("invalid_remote_record", retryable = false)
+                )
+            }
+
+            val expectedRevision = remote?.revision ?: 0L
+            if (expectedRevision < localBuild.localExpectedRevision) {
+                return BackupCasResult.Failed(
+                    BackupRemoteFailure("remote_revision_behind_local_checkpoint", retryable = false)
                 )
             }
 
@@ -142,7 +166,6 @@ class BackupCasCoordinator(
                     BackupRemoteFailure("snapshot_encode_failed", retryable = false)
                 )
             }
-            val expectedRevision = remote?.revision ?: 0L
             if (expectedRevision == Long.MAX_VALUE ||
                 encoded.schemaVersion != BackupSnapshot.CURRENT_FORMAT_VERSION ||
                 encoded.encodedBytes <= 0 ||
@@ -166,7 +189,14 @@ class BackupCasCoordinator(
                             BackupRemoteFailure("invalid_committed_revision", retryable = false)
                         )
                     }
-                    return BackupCasResult.Committed(candidate, commit.revision, attempt, encoded.checksum)
+                    return BackupCasResult.Committed(
+                        buildResult = localBuild,
+                        snapshot = candidate,
+                        expectedRemoteRevision = expectedRevision,
+                        revision = commit.revision,
+                        attempts = attempt,
+                        checksum = encoded.checksum,
+                    )
                 }
                 BackupRemoteCommitResult.RevisionConflict -> Unit
                 is BackupRemoteCommitResult.Failed -> return BackupCasResult.Failed(commit.failure)

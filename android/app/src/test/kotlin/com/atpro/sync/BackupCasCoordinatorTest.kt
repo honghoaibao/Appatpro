@@ -22,6 +22,22 @@ class BackupCasCoordinatorTest {
         user = AuthUser(userId, null),
     )
 
+    private fun buildResult(
+        snapshotValue: BackupSnapshot = snapshot(),
+        ownerUserId: String? = owner,
+        localExpectedRevision: Long = 0L,
+        earningsGeneration: Long = 0L,
+        earningsDirty: Boolean = false,
+        outboxEvents: List<BackupOutboxAckCandidate> = emptyList(),
+    ) = BackupSnapshotBuildResult(
+        snapshot = snapshotValue,
+        earningsGeneration = earningsGeneration,
+        earningsDirty = earningsDirty,
+        ownerUserId = ownerUserId,
+        localExpectedRevision = localExpectedRevision,
+        outboxEvents = outboxEvents,
+    )
+
     private fun snapshot(
         source: String = installA,
         status: String = "active",
@@ -83,11 +99,12 @@ class BackupCasCoordinatorTest {
             reads += BackupRemoteReadResult.Missing
             commits += BackupRemoteCommitResult.Committed(1L)
         }
-        val result = BackupCasCoordinator(remote, BackupSnapshotProvider { snapshot() }, BackupOwnerBindingValidator { true }, FakeCodec())
+        val result = BackupCasCoordinator(remote, BackupSnapshotProvider { buildResult() }, BackupOwnerBindingValidator { true }, FakeCodec())
             .run(authSession())
         assertTrue(result is BackupCasResult.Committed)
         assertEquals(1L, (result as BackupCasResult.Committed).revision)
         assertEquals(listOf(0L), remote.expectedRevisions)
+        assertEquals(0L, (result as BackupCasResult.Committed).expectedRemoteRevision)
     }
 
     @Test
@@ -115,7 +132,7 @@ class BackupCasCoordinatorTest {
         var localBuilds = 0
         val result = BackupCasCoordinator(
             remote,
-            BackupSnapshotProvider { localBuilds++; snapshot(createdAt = 10L + localBuilds) },
+            BackupSnapshotProvider { localBuilds++; buildResult(snapshotValue = snapshot(createdAt = 10L + localBuilds)) },
             BackupOwnerBindingValidator { it == owner },
             codec,
         ).run(authSession())
@@ -123,6 +140,7 @@ class BackupCasCoordinatorTest {
         assertEquals(2, localBuilds)
         assertEquals(2, remote.readCount)
         assertEquals(listOf(2L, 3L), remote.expectedRevisions)
+        assertEquals(3L, (result as BackupCasResult.Committed).expectedRemoteRevision)
         val committed = result as BackupCasResult.Committed
         assertEquals("0.2", committed.snapshot.datasets.safeConfigs.single().value)
     }
@@ -135,7 +153,7 @@ class BackupCasCoordinatorTest {
                 commits += BackupRemoteCommitResult.RevisionConflict
             }
         }
-        val result = BackupCasCoordinator(remote, BackupSnapshotProvider { snapshot() }, BackupOwnerBindingValidator { true }, FakeCodec())
+        val result = BackupCasCoordinator(remote, BackupSnapshotProvider { buildResult() }, BackupOwnerBindingValidator { true }, FakeCodec())
             .run(authSession())
         assertEquals(BackupCasResult.RetryLater(3), result)
         assertEquals(3, remote.readCount)
@@ -151,7 +169,7 @@ class BackupCasCoordinatorTest {
                 RemoteBackupRecord(1L, 3, remotePayload.payload, remotePayload.checksum, null)
             )
         }
-        val result = BackupCasCoordinator(remote, BackupSnapshotProvider { snapshot() }, BackupOwnerBindingValidator { true }, codec)
+        val result = BackupCasCoordinator(remote, BackupSnapshotProvider { buildResult() }, BackupOwnerBindingValidator { true }, codec)
             .run(authSession())
         assertTrue(result is BackupCasResult.Conflicted)
         assertTrue(remote.expectedRevisions.isEmpty())
@@ -164,7 +182,7 @@ class BackupCasCoordinatorTest {
                 BackupRemoteFailure("server_error", retryable = true, httpStatus = 503)
             )
         }
-        val result = BackupCasCoordinator(remote, BackupSnapshotProvider { snapshot() }, BackupOwnerBindingValidator { true }, FakeCodec())
+        val result = BackupCasCoordinator(remote, BackupSnapshotProvider { buildResult() }, BackupOwnerBindingValidator { true }, FakeCodec())
             .run(authSession())
         assertTrue(result is BackupCasResult.Failed)
         assertEquals(1, remote.readCount)
@@ -177,7 +195,7 @@ class BackupCasCoordinatorTest {
         val remote = FakeRemote()
         val result = BackupCasCoordinator(
             remote,
-            BackupSnapshotProvider { snapshot() },
+            BackupSnapshotProvider { buildResult() },
             BackupOwnerBindingValidator { false },
             FakeCodec(),
         ).run(authSession())
@@ -185,10 +203,54 @@ class BackupCasCoordinatorTest {
         assertEquals(0, remote.readCount)
     }
 
+
+    @Test
+    fun remoteRevisionBehindLocalCheckpointIsRejectedBeforeCommit() = runBlocking {
+        val codec = FakeCodec()
+        val remotePayload = codec.encode(snapshot())
+        val remote = FakeRemote().apply {
+            reads += BackupRemoteReadResult.Found(
+                RemoteBackupRecord(2L, 3, remotePayload.payload, remotePayload.checksum, null)
+            )
+        }
+        val result = BackupCasCoordinator(
+            remote,
+            BackupSnapshotProvider { buildResult(localExpectedRevision = 3L) },
+            BackupOwnerBindingValidator { true },
+            codec,
+        ).run(authSession())
+        assertTrue(result is BackupCasResult.Failed)
+        assertEquals("remote_revision_behind_local_checkpoint", (result as BackupCasResult.Failed).failure.code)
+        assertTrue(remote.expectedRevisions.isEmpty())
+    }
+
+
+    @Test
+    fun invalidCapturedOutboxIdentityStopsBeforeRemoteRead() = runBlocking {
+        val remote = FakeRemote()
+        val invalid = BackupOutboxAckCandidate(
+            eventId = "not-a-uuid",
+            sequence = 1L,
+            dataset = "accounts",
+            entityKey = "sample",
+            operation = "UPSERT",
+        )
+        val result = BackupCasCoordinator(
+            remote,
+            BackupSnapshotProvider { buildResult(outboxEvents = listOf(invalid)) },
+            BackupOwnerBindingValidator { true },
+            FakeCodec(),
+        ).run(authSession())
+
+        assertTrue(result is BackupCasResult.Failed)
+        assertEquals("local_outbox_capture_invalid", (result as BackupCasResult.Failed).failure.code)
+        assertEquals(0, remote.readCount)
+    }
+
     @Test
     fun invalidAuthContextIsRejectedBeforeRemoteCall() = runBlocking {
         val remote = FakeRemote()
-        val result = BackupCasCoordinator(remote, BackupSnapshotProvider { snapshot() }, BackupOwnerBindingValidator { true }, FakeCodec())
+        val result = BackupCasCoordinator(remote, BackupSnapshotProvider { buildResult() }, BackupOwnerBindingValidator { true }, FakeCodec())
             .run(authSession("not-a-uuid"))
         assertTrue(result is BackupCasResult.Rejected)
         assertEquals(0, remote.readCount)

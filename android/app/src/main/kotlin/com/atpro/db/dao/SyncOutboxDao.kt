@@ -41,6 +41,24 @@ interface SyncOutboxDao {
     """)
     suspend fun getPendingHead(limit: Int): List<SyncOutboxHeadRow>
 
+    @Query("""
+        SELECT
+            eventId,
+            sequence,
+            dataset,
+            entityKey,
+            operation,
+            length(CAST(COALESCE(payloadJson, '') AS BLOB)) AS payloadBytes,
+            nextAttemptAt
+        FROM sync_outbox
+        ORDER BY sequence ASC
+        LIMIT :limit
+    """)
+    suspend fun getPendingAckCandidates(limit: Int): List<SyncOutboxAckRow>
+
+    @Query("SELECT * FROM sync_outbox WHERE eventId IN (:eventIds)")
+    suspend fun getByEventIds(eventIds: List<String>): List<SyncOutboxEntity>
+
     @Query("SELECT COUNT(*) FROM sync_outbox")
     suspend fun getPendingCount(): Int
 
@@ -59,6 +77,17 @@ interface SyncOutboxDao {
     """)
     suspend fun markRetry(eventId: String, nextAttemptAt: Long, lastErrorCode: String?)
 }
+
+/** Exact acknowledgement identity captured in the same Room transaction as the snapshot. */
+data class SyncOutboxAckRow(
+    val eventId: String,
+    val sequence: Long,
+    val dataset: String,
+    val entityKey: String,
+    val operation: String,
+    val payloadBytes: Int,
+    val nextAttemptAt: Long,
+)
 
 /** Small query projection; no Outbox payload or secret-bearing config value is loaded. */
 data class SyncOutboxHeadRow(

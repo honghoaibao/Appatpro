@@ -130,9 +130,9 @@ class BackupOwnershipManager(
     }
 
     /**
-     * Persist the new local revision only after a future RPC reports a committed R -> R+1.
-     * It uses owner + expected-revision predicates so a late response cannot overwrite
-     * a newer local checkpoint or attach itself to a different Auth user.
+     * Legacy one-step checkpoint helper. Phase 5.6 acknowledgement updates the checkpoint
+     * atomically with exact Outbox deletion through SyncMetadataDao.recordCommittedRevision,
+     * allowing a server-confirmed remote revision jump while retaining the local CAS guard.
      */
     suspend fun recordCommittedSnapshot(
         authUserId: String?,
