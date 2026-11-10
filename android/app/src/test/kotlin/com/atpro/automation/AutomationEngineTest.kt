@@ -10,6 +10,9 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.*
 import org.junit.*
 import org.junit.Assert.*
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * AutomationEngineTest — unit tests cho AutomationEngine state machine.
@@ -38,6 +41,8 @@ import org.junit.Assert.*
  *   → See TASK-008 in backlog for integration test expansion
  */
 @OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class AutomationEngineTest {
 
     // ── Test doubles ──────────────────────────────────────────
@@ -177,20 +182,19 @@ class AutomationEngineTest {
     }
 
     /**
-     * SCENARIO: empty account list
+     * SCENARIO: launch failure cleanup.
      *
-     * Nếu accounts rỗng → coroutine chạy qua loop ngay lập tức
-     * → stopInternal("completed") → isFarming = false.
-     *
-     * Với UnconfinedTestDispatcher, coroutine chạy eager →
-     * không cần advanceUntilIdle().
+     * Host mặc định không mở được TikTok. Cho test scheduler chạy hết
+     * backoff để xác nhận engine dọn trạng thái sau đủ 3 lần thử.
      */
     @Test
-    fun `given empty account list when startFarm then farm completes and isFarming becomes false`() {
-        engine.startFarm(FarmMode.SELECTED_LIST, emptyList())
+    fun `given TikTok launch fails after retries when startFarm then farming state resets`() {
+        engine.startFarm(FarmMode.SELECTED_LIST, listOf("testuser"))
 
-        // Với UnconfinedTestDispatcher, coroutine đã chạy xong
-        assertFalse("isFarming phải false sau khi farm rỗng hoàn thành", engine.isFarming)
+        testScope.advanceUntilIdle()
+
+        assertFalse("isFarming phải false sau khi hết lượt mở TikTok", engine.isFarming)
+        verify(exactly = 3) { host.launchTikTok() }
     }
 
     /**
