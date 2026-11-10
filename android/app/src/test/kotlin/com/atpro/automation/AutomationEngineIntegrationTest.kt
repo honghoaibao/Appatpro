@@ -138,7 +138,7 @@ class AutomationEngineIntegrationTest {
     fun `farmLoop when launchTikTok fails then checkpoint set and session closed empty`() {
         every { host.launchTikTok() } returns false
 
-        engine.startFarm(listOf("user1"))
+        engine.startFarm(FarmMode.SELECTED_LIST, listOf("user1"))
 
         // UnconfinedTestDispatcher → coroutine chạy xong synchronously
         assertFalse("isFarming phải false", engine.isFarming)
@@ -162,7 +162,7 @@ class AutomationEngineIntegrationTest {
         every { host.launchTikTok() } returns true
         every { NodeTraverser.hasNavBar(any()) } returns false   // feed không bao giờ load
 
-        engine.startFarm(listOf("user1"))
+        engine.startFarm(FarmMode.SELECTED_LIST, listOf("user1"))
 
         assertFalse(engine.isFarming)
         coVerify { repo.setCheckpoint("user1", true) }
@@ -182,7 +182,7 @@ class AutomationEngineIntegrationTest {
         coEvery { repo.loadFarmConfig() } returns FarmConfig(minutesPerAccount = 0)
         configureSuccessfulSwitch("user1")
 
-        engine.startFarm(listOf("user1"))
+        engine.startFarm(FarmMode.SELECTED_LIST, listOf("user1"))
 
         assertFalse(engine.isFarming)
         coVerify { repo.closeSession(1L, "user1", 0, 0, 0, 0) }
@@ -206,7 +206,7 @@ class AutomationEngineIntegrationTest {
         every { NodeTraverser.hasNavBar(any()) } returns true
         every { NodeTraverser.detectCheckpoint(any()) } returns true  // phát hiện ngay lần đầu
 
-        engine.startFarm(listOf("user1"))
+        engine.startFarm(FarmMode.SELECTED_LIST, listOf("user1"))
 
         assertFalse(engine.isFarming)
         coVerify { repo.setCheckpoint("user1", true) }
@@ -229,7 +229,7 @@ class AutomationEngineIntegrationTest {
         coEvery { repo.startSession("userB") } returns 2L
         coEvery { repo.startSession("userC") } returns 3L
 
-        engine.startFarm(listOf("userA", "userB", "userC"))
+        engine.startFarm(FarmMode.SELECTED_LIST, listOf("userA", "userB", "userC"))
 
         assertFalse(engine.isFarming)
 
@@ -281,7 +281,7 @@ class AutomationEngineIntegrationTest {
 
         coEvery { repo.loadFarmConfig() } returns FarmConfig(minutesPerAccount = 0)
 
-        engine.startFarm(listOf("user1"))
+        engine.startFarm(FarmMode.SELECTED_LIST, listOf("user1"))
 
         // Chỉ 2 account mới được lưu, user1 bỏ qua vì đã tồn tại
         coVerify(exactly = 1) { repo.addAccount("newUser1") }
