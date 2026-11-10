@@ -109,7 +109,7 @@ class AutomationEngineIntegrationTest {
             every  { launchTikTok()         } returns false  // default: fail
             every  { openTikTokSettings()   } returns true
             coEvery { killTikTok()           } just Runs
-            every  { showFarmOverlay()      } just Runs
+            every  { showFarmOverlay(any()) } just Runs
             every  { hideFarmOverlay()      } just Runs
             coEvery { clickNode(any())           } returns true
             coEvery { clickSuspend(any(), any()) } returns true
@@ -314,6 +314,10 @@ class AutomationEngineIntegrationTest {
             isEnabled = true,
         )
         val switchRow = NodeTraverser.SwitchRow(switchLabel, fakeNode)
+        // The first popup row is the active account; provide that state explicitly
+        // so the fixture does not rely on the production safety fallback for unknown accounts.
+        every { NodeTraverser.findProfileTab(null, any()) } returns clickableResult("Profile")
+        every { NodeTraverser.getCurrentAccountId(null) } returns "alreadyLoggedIn"
         every { NodeTraverser.findSwitchAccountRow(any(), any(), any()) } returns switchRow
         every { NodeTraverser.parseAccountListWithNodes(any(), any(), any()) } returns
             accounts.map { NodeTraverser.AccountEntry(it, fakeNode, isNeedsNormalize = false) }
