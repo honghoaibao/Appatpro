@@ -15,7 +15,7 @@ class BackupTombstoneMigrationTest {
         val changesCursor = mockk<Cursor>()
 
         every {
-            database.query(match { it.contains("SELECT COUNT(*) FROM sync_outbox") })
+            database.query(match<String> { it.contains("SELECT COUNT(*) FROM sync_outbox") })
         } returns pendingCursor
         every { database.query("SELECT changes()") } returns changesCursor
         every { pendingCursor.moveToFirst() } returns true
@@ -58,7 +58,7 @@ class BackupTombstoneMigrationTest {
         val changesCursor = mockk<Cursor>()
 
         every {
-            database.query(match { it.contains("SELECT COUNT(*) FROM sync_outbox") })
+            database.query(match<String> { it.contains("SELECT COUNT(*) FROM sync_outbox") })
         } returns pendingCursor
         every { database.query("SELECT changes()") } returns changesCursor
         every { pendingCursor.moveToFirst() } returns true
