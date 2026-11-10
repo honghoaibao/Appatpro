@@ -24,13 +24,13 @@ import org.robolectric.annotation.Config
  * Scope của tests:
  *   ✅ State transitions: isFarming, isPaused
  *   ✅ Idempotent start guard
- *   ✅ Empty account list → farm completes cleanly
+ *   ✅ Launch failure after retries → farming state is reset
  *   ✅ stop() → isFarming = false + overlay hidden
  *   ✅ pause() / resume() → isPaused flag
  *
- * NOT tested here (cần Robolectric / instrumentation):
- *   ❌ Full farmOneAccount() loop (requires AccessibilityNodeInfo)
- *   ❌ Account switch flow (requires TikTok UI tree)
+ * NOT tested here (cần dữ liệu cây UI từ thiết bị hoặc fixture riêng):
+ *   ❌ Full farmOneAccount() loop against a real AccessibilityNodeInfo tree
+ *   ❌ Account switch flow against a real TikTok UI tree
  *   ❌ v1.3.1: isForegroundTikTok() / dismissFacebookBottomSheetIfPresent() /
  *      relaunchTikTokWithRetry() — cùng nhóm private suspend fun phụ thuộc
  *      host.getRootNode() + cây node thật, chưa có hạ tầng test cho loại
