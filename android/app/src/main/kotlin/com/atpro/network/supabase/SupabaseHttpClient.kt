@@ -2,6 +2,7 @@ package com.atpro.network.supabase
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
@@ -12,7 +13,14 @@ data class SupabaseHttpRequest(
     val path: String,
     val body: String? = null,
     val accessToken: String? = null,
-)
+    /** Per-request response cap. Backup reads may use the full bounded snapshot allowance. */
+    val maxResponseBytes: Int = SupabaseHttpRequest.DEFAULT_MAX_RESPONSE_BYTES,
+) {
+    companion object {
+        const val DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024
+        const val MAX_ALLOWED_RESPONSE_BYTES = 8 * 1024 * 1024
+    }
+}
 
 data class SupabaseHttpResponse(
     val statusCode: Int,
@@ -22,92 +30,78 @@ data class SupabaseHttpResponse(
         get() = statusCode in 200..299
 }
 
-/** Injectable transport boundary, allowing repository tests to use a fake implementation. */
 fun interface SupabaseHttpTransport {
-    suspend fun execute(
-        config: SupabaseClientConfig,
-        request: SupabaseHttpRequest,
-    ): SupabaseHttpResponse
+    suspend fun execute(config: SupabaseClientConfig, request: SupabaseHttpRequest): SupabaseHttpResponse
 }
 
-/**
- * Small REST transport based on Android's HttpURLConnection.
- *
- * No additional networking dependency is required. Calls run on Dispatchers.IO,
- * have bounded connection/read timeouts, and do not retry requests implicitly.
- */
+/** Small REST transport with bounded timeouts and bounded response memory. */
 class UrlConnectionSupabaseTransport : SupabaseHttpTransport {
-
     override suspend fun execute(
         config: SupabaseClientConfig,
         request: SupabaseHttpRequest,
     ): SupabaseHttpResponse = withContext(Dispatchers.IO) {
         val method = request.method.uppercase(Locale.ROOT)
         require(method in ALLOWED_METHODS) { "Unsupported HTTP method" }
+        require(request.maxResponseBytes in 1..SupabaseHttpRequest.MAX_ALLOWED_RESPONSE_BYTES) {
+            "Supabase response size limit is outside the supported bound"
+        }
 
         val pathOnly = request.path.substringBefore('?')
         require(
-            request.path.startsWith("/") &&
-                !request.path.startsWith("//") &&
+            request.path.startsWith("/") && !request.path.startsWith("//") &&
                 pathOnly.split('/').none { it == "." || it == ".." }
-        ) {
-            "Supabase path must be a safe relative API path"
-        }
+        ) { "Supabase path must be a safe relative API path" }
 
         val connection = URL(config.projectUrl.trimEnd('/') + request.path)
             .openConnection() as HttpURLConnection
-
         try {
             connection.requestMethod = method
             connection.connectTimeout = config.connectTimeoutMs
             connection.readTimeout = config.readTimeoutMs
             connection.useCaches = false
             connection.instanceFollowRedirects = false
-
             connection.setRequestProperty("apikey", config.publishableKey)
             connection.setRequestProperty("Accept", "application/json")
             connection.setRequestProperty("X-Client-Info", "atpro-android")
-
-            request.accessToken
-                ?.trim()
-                ?.takeIf { it.isNotEmpty() }
-                ?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
-
+            request.accessToken?.trim()?.takeIf { it.isNotEmpty() }?.let {
+                connection.setRequestProperty("Authorization", "Bearer $it")
+            }
             request.body?.let { body ->
                 val bytes = body.toByteArray(Charsets.UTF_8)
                 connection.setRequestProperty("Content-Type", "application/json")
                 connection.doOutput = true
                 connection.setFixedLengthStreamingMode(bytes.size)
-                connection.outputStream.use { output ->
-                    output.write(bytes)
+                connection.outputStream.use { it.write(bytes) }
+            }
+
+            val status = connection.responseCode
+            val stream = if (status >= 400) connection.errorStream else connection.inputStream
+            val responseBody = stream?.use { input ->
+                val output = ByteArrayOutputStream(minOf(request.maxResponseBytes, 8 * 1024))
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                var total = 0
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    require(total <= request.maxResponseBytes) {
+                        "Supabase response exceeded its configured size limit"
+                    }
+                    output.write(buffer, 0, count)
                 }
-            }
-
-            val statusCode = connection.responseCode
-            val responseStream = if (statusCode >= 400) {
-                connection.errorStream
-            } else {
-                connection.inputStream
-            }
-            val responseBody = responseStream
-                ?.bufferedReader(Charsets.UTF_8)
-                ?.use { it.readText() }
-                .orEmpty()
-
-            SupabaseHttpResponse(statusCode = statusCode, body = responseBody)
+                String(output.toByteArray(), Charsets.UTF_8)
+            }.orEmpty()
+            SupabaseHttpResponse(status, responseBody)
         } finally {
             connection.disconnect()
         }
     }
 
     private companion object {
-        // PATCH is deliberately excluded: the JDK HttpURLConnection implementation
-        // does not support it consistently. The sync layer can use POST/upsert.
         val ALLOWED_METHODS = setOf("GET", "POST", "PUT", "DELETE")
     }
 }
 
-/** High-level client kept separate from the transport for easy testing and replacement. */
 class SupabaseHttpClient(
     private val config: SupabaseClientConfig = AtProSupabaseConfig.current,
     private val transport: SupabaseHttpTransport = UrlConnectionSupabaseTransport(),

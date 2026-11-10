@@ -1,6 +1,6 @@
 # Cloud Sync Architecture — Appatpro
 
-- **Status:** Phases 3.4.2–3.4.7 and 5.2–5.4 implemented in source (not Android-build-verified); Phases 4.1–4.4 database backup CAS/RLS and public-schema hardening applied and verified in AT App; Android remote sync remains gated
+- **Status:** Phases 3.4.2–3.4.7 and 5.2–5.5 implemented in source (not Android-build-verified); Phases 4.1–4.4 database backup CAS/RLS and public-schema hardening applied and verified in AT App; Android remote sync remains gated
 - **Date:** 2026-11-10
 - **Scope:** Room-first backup architecture and Supabase security contract
 - **Related ADRs:** ADR-0015, ADR-0016, ADR-0017, ADR-0018, ADR-0019, ADR-0020, ADR-0021, ADR-0022, ADR-0023, ADR-0024, ADR-0025
@@ -265,7 +265,7 @@ The Room database currently survives sign-out and is not partitioned by Supabase
 - **5.2:** ✅ Local durable tombstones, pending DELETE migration backfill, snapshot v3 and strict v2→v3 compatibility/validation implemented in source; build/JUnit remain unverified. No Supabase or remote executor changes.
 - **5.3:** ✅ Pure deterministic merge engine/conflict model and tests added in source; not build-verified.
 - **5.4:** ✅ Local staged restore coordinator, noBackupFilesDir AtomicFile journal, startup replay, transactional Room apply, idempotent EarningsStore merge and disabled schedule handling added in source. Journal metadata JVM tests added; Room/AtomicFile crash integration and Android build remain unverified. No remote writes.
-- **5.5:** Supabase read/RPC transport + bounded CAS coordinator; fake transport tests first.
+- **5.5:** ✅ Supabase PostgREST read + `save_user_backup` RPC transport and 3-attempt read/merge/CAS coordinator; fake transport/coordinator tests added. No worker integration or acknowledgement.
 - **5.6:** Exact Outbox/tombstone/earnings acknowledgement + owner/revision checkpoint + crash tests.
 - **5.7:** Enable remote worker only after all prior gates pass; one final GitHub Actions run after code completion. Do not enable app-side remote writes before every gate is verified.
 
@@ -354,3 +354,39 @@ Phase 5.4 adds `BackupRestoreCoordinator` and a pure bounded `BackupRestoreJourn
 - Added JVM tests for journal owner/record metadata, unsupported journal/snapshot versions, malformed checksum metadata and journal size limits. These tests were authored but not executed.
 - No Room schema migration or DB version bump was needed. No Supabase read/write, RPC/CAS, Auth owner reassignment, Outbox acknowledgement, tombstone acknowledgement, revision checkpoint update or remote worker activation was added.
 - GitHub Actions were not dispatched. Android build and Room/AtomicFile crash integration remain unverified and are reserved for the single final verification gate.
+
+
+## 17. Phase 5.5 — Supabase read/RPC transport and bounded CAS coordinator (2026-11-10)
+
+Phase 5.5 adds the narrow Android transport path for the already secured `public.user_backups` SELECT policy and `public.save_user_backup` RPC. It does not change the Supabase schema, RLS, grants, Auth settings or stored rows.
+
+### Read boundary
+
+- `SupabaseBackupRemoteStore.read` issues GET `/rest/v1/user_backups` with a minimal projection (`revision,schema_version,payload,checksum,updated_at`), a canonical `owner_id=eq.<AuthSession.user.id>` filter and the current Auth JWT.
+- The owner filter is only a query selector, never an authority. The database RLS policy remains the actual read boundary.
+- Only zero rows (Missing) or exactly one valid row (Found) are accepted. Duplicate rows, malformed JSON/fields, negative revisions, unsupported schema versions, invalid Base64 envelope, over-limit payloads or malformed checksums fail closed.
+- Legacy schema v2 and current schema v3 are accepted for reads. The existing bounded `BackupCodec` verifies GZIP, checksum and canonical JSON and converts v2 to the v3 staging model before merge.
+- Backup reads use an 8 MiB response cap. General Supabase requests retain a 1 MiB default cap; the transport supports no more than 8 MiB for any one response. No implicit HTTP retry was added.
+
+### Write boundary
+
+- The only remote write is POST `/rest/v1/rpc/save_user_backup`.
+- The body contains exactly `p_expected_revision`, `p_schema_version`, `p_payload` and `p_checksum`. It never includes `owner_id`; the existing SQL function derives ownership from `auth.uid()`.
+- New writes are schema v3 only. Payload size, Base64 envelope, checksum, uncompressed size and expected-revision overflow are checked before the request.
+- A revision conflict is recognized only for the exact server signal `code=P0001` and `message=BACKUP_REVISION_CONFLICT`. A success response must contain exactly one row whose revision equals expected + 1. Ambiguous or malformed responses are not treated as success.
+- HTTP 401/403 and validation failures are non-retryable at this layer. Timeout, rate-limit and 5xx failures are marked retryable for a later worker policy; this adapter never retries implicitly. The caller supplies an `AuthSession` from the existing AuthRepository; token refresh is deliberately not duplicated here.
+
+### Bounded coordinator
+
+- `BackupCasCoordinator` accepts one AuthSession, verifies the user UUID and asks a required local owner-binding validator to confirm Room is bound to that same user before any remote request.
+- Each attempt builds a fresh local v3 snapshot, reads the latest remote row, validates/decode it, invokes the Phase 5.3 deterministic merge engine, encodes a canonical v3 candidate and commits with the remote revision (or 0 when no row exists).
+- The limit is exactly three total CAS attempts per call. Only the exact revision-conflict result advances to another attempt; every retry re-reads the remote row and rebuilds the local snapshot. A merge conflict stops before any RPC write. Exhaustion returns RetryLater and leaves local state untouched.
+- The success result carries the committed candidate, server revision, checksum and attempt count for Phase 5.6 to consume.
+
+### Verification and boundaries
+
+- Added JVM fake-transport tests for owner-filter/JWT use, bounded read projection, empty/duplicate/unsupported remote rows, RPC argument shape (no caller-supplied owner), exact P0001 conflict handling, auth failure classification and oversize rejection.
+- Added fake-coordinator tests for first revision creation, conflict re-read + local rebuild + re-merge, three-attempt exhaustion, merge-conflict write prevention, transient read failure and local owner mismatch.
+- No `SyncWorker` integration: it remains preflight-only and reports `remote_executor_disabled`. No production entry point calls the new coordinator yet.
+- No local Room/Earnings apply, Outbox/tombstone/Earnings acknowledgement, local revision checkpoint update, retry-counter mutation, schedule activation or restore was added. These belong to Phase 5.6/5.7.
+- No Supabase SQL migration or project setting was changed. No GitHub Actions workflow was dispatched. Android build/JUnit execution remains unverified and is reserved for the single final build gate.
