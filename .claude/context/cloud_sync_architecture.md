@@ -336,11 +336,11 @@ All datasets are sorted before the candidate is returned. The result metadata us
 
 ## 16. Phase 5.4 — Staged local restore coordinator (2026-11-10)
 
-Phase 5.4 adds `BackupRestoreCoordinator` and a pure bounded `BackupRestoreJournalCodec`. The coordinator accepts only a validated, already merged v3 snapshot whose `sourceInstallId` matches the current Room installation. It never invokes the merge engine implicitly, never accesses Supabase, and does not update the remote revision checkpoint.
+Phase 5.4 adds `BackupRestoreCoordinator` and a pure bounded `BackupRestoreJournalCodec`. The coordinator accepts only a validated, already merged v3 snapshot, a valid authenticated owner UUID, and a structurally valid local metadata row already bound to that owner. It binds the owner ID into the journal and rechecks the same owner during replay, as well as matching `sourceInstallId` to the current Room installation. It never invokes the merge engine implicitly, never accesses Supabase, and does not update the remote revision checkpoint.
 
 ### Durable cross-store apply
 
-- Before the first mutation, the coordinator serializes the snapshot as the existing bounded Base64(GZIP(canonical JSON)) payload plus checksum and schema version, then writes a journal with `AtomicFile` into `noBackupFilesDir`. The journal is deliberately excluded from Android device-to-device backup so a pending transaction cannot replay against a different installation identity.
+- Before the first mutation, the coordinator serializes the snapshot as the existing bounded Base64(GZIP(canonical JSON)) payload plus checksum and schema version, then writes a journal with `AtomicFile` into `noBackupFilesDir`; the journal includes the bound Auth owner UUID. The journal is deliberately excluded from Android device-to-device backup so a pending transaction cannot replay against a different installation identity.
 - Room account, contribution, closed-session, allowlisted-config and tombstone changes are applied in one `RoomDatabase.withTransaction`. Farm logs, active sessions, unknown/device-local config keys, sync metadata, Outbox rows and remote revision/checksum state are not replaced or acknowledged.
 - Accounts are reconciled by identity; local accounts created after staging are retained unless a tombstone wins. Current contribution rows are merged with the candidate using per-installation component-wise MAX and aggregates are recomputed with saturating Long arithmetic before Int display clamping.
 - Closed sessions are inserted by stable sync UUID only when absent. Existing same-ID rows are compared before insertion; a changed row aborts the transaction. Active sessions are never imported or overwritten. UUID lookups are chunked to 500 to remain below SQLite bind-variable limits.
@@ -351,6 +351,6 @@ Phase 5.4 adds `BackupRestoreCoordinator` and a pure bounded `BackupRestoreJourn
 
 ### Verification and boundaries
 
-- Added JVM tests for journal record metadata, unsupported journal/snapshot versions, malformed checksum metadata and journal size limits. These tests were authored but not executed.
+- Added JVM tests for journal owner/record metadata, unsupported journal/snapshot versions, malformed checksum metadata and journal size limits. These tests were authored but not executed.
 - No Room schema migration or DB version bump was needed. No Supabase read/write, RPC/CAS, Auth owner reassignment, Outbox acknowledgement, tombstone acknowledgement, revision checkpoint update or remote worker activation was added.
 - GitHub Actions were not dispatched. Android build and Room/AtomicFile crash integration remain unverified and are reserved for the single final verification gate.

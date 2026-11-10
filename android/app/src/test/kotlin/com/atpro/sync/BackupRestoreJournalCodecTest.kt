@@ -8,12 +8,14 @@ class BackupRestoreJournalCodecTest {
     private fun recordJson(
         journalVersion: Int = 1,
         schemaVersion: Int = BackupSnapshot.CURRENT_FORMAT_VERSION,
-    ) = """{"journalVersion":$journalVersion,"schemaVersion":$schemaVersion,"payload":"Zm9v","checksum":"0000000000000000000000000000000000000000000000000000000000000000"}"""
+        ownerUserId: String = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    ) = """{"journalVersion":$journalVersion,"ownerUserId":"$ownerUserId","schemaVersion":$schemaVersion,"payload":"Zm9v","checksum":"0000000000000000000000000000000000000000000000000000000000000000"}"""
 
     @Test
     fun journalRecordAcceptsOnlyTheCurrentJournalAndSnapshotVersions() {
         val record = BackupRestoreJournalCodec.decodeRecord(recordJson())
         assertEquals(1, record.journalVersion)
+        assertEquals("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", record.ownerUserId)
         assertEquals(BackupSnapshot.CURRENT_FORMAT_VERSION, record.schemaVersion)
         assertEquals("Zm9v", record.payload)
     }
@@ -29,6 +31,13 @@ class BackupRestoreJournalCodecTest {
     fun journalRejectsUnknownSnapshotVersion() {
         assertThrows(BackupRestoreException::class.java) {
             BackupRestoreJournalCodec.decodeRecord(recordJson(schemaVersion = 99))
+        }
+    }
+
+    @Test
+    fun journalRejectsInvalidOwnerUuid() {
+        assertThrows(BackupRestoreException::class.java) {
+            BackupRestoreJournalCodec.decodeRecord(recordJson(ownerUserId = "not-a-uuid"))
         }
     }
 

@@ -21,15 +21,19 @@ internal object BackupRestoreJournalCodec {
         isLenient = false
     }
 
-    fun encode(snapshot: BackupSnapshot): String {
+    fun encode(snapshot: BackupSnapshot, ownerUserId: String): String {
         BackupSnapshotValidator.validate(snapshot)
         require(snapshot.formatVersion == BackupSnapshot.CURRENT_FORMAT_VERSION) {
             "Only snapshot v3 can be staged for local restore"
         }
         validateBounds(snapshot)
+        if (!BackupMetadataRules.isCanonicalUuid(ownerUserId)) {
+            throw BackupRestoreException("Restore journal owner ID is invalid")
+        }
         val encoded = BackupCodec.encode(snapshot)
         val record = BackupRestoreJournalRecord(
             journalVersion = JOURNAL_VERSION,
+            ownerUserId = ownerUserId,
             schemaVersion = encoded.schemaVersion,
             payload = encoded.payload,
             checksum = encoded.checksum,
@@ -41,7 +45,7 @@ internal object BackupRestoreJournalCodec {
         return text
     }
 
-    fun decode(text: String): BackupSnapshot {
+    fun decode(text: String): DecodedBackupRestoreJournal {
         if (text.toByteArray(Charsets.UTF_8).size > MAX_JOURNAL_BYTES) {
             throw BackupRestoreException("Prepared restore journal exceeds the local safety bound")
         }
@@ -52,7 +56,10 @@ internal object BackupRestoreJournalCodec {
             expectedSchemaVersion = record.schemaVersion,
         )
         validateBounds(snapshot)
-        return snapshot
+        return DecodedBackupRestoreJournal(
+            snapshot = snapshot,
+            ownerUserId = record.ownerUserId,
+        )
     }
 
     private fun validateBounds(snapshot: BackupSnapshot) {
@@ -75,6 +82,7 @@ internal object BackupRestoreJournalCodec {
         }
         if (record.journalVersion != JOURNAL_VERSION ||
             record.schemaVersion != BackupSnapshot.CURRENT_FORMAT_VERSION ||
+            !BackupMetadataRules.isCanonicalUuid(record.ownerUserId) ||
             record.payload.isBlank() ||
             !record.checksum.matches(Regex("^[0-9a-f]{64}$"))
         ) {
@@ -84,9 +92,15 @@ internal object BackupRestoreJournalCodec {
     }
 }
 
+internal data class DecodedBackupRestoreJournal(
+    val snapshot: BackupSnapshot,
+    val ownerUserId: String,
+)
+
 @Serializable
 internal data class BackupRestoreJournalRecord(
     val journalVersion: Int,
+    val ownerUserId: String,
     val schemaVersion: Int,
     val payload: String,
     val checksum: String,

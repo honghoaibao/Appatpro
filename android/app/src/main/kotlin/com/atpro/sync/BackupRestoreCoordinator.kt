@@ -44,7 +44,10 @@ class BackupRestoreCoordinator(context: Context) {
         EarningsStore.init(appContext)
     }
 
-    suspend fun restore(mergedSnapshot: BackupSnapshot) = restoreMutex.withLock {
+    suspend fun restore(
+        mergedSnapshot: BackupSnapshot,
+        authenticatedOwnerUserId: String?,
+    ) = restoreMutex.withLock {
         withContext(Dispatchers.IO) {
             // Finish an earlier interrupted restore before staging another candidate.
             recoverPendingLocked()
@@ -53,13 +56,18 @@ class BackupRestoreCoordinator(context: Context) {
                 if (mergedSnapshot.formatVersion != BackupSnapshot.CURRENT_FORMAT_VERSION) {
                     throw BackupRestoreException("Only validated snapshot v3 can be applied")
                 }
+                val ownerId = BackupMetadataRules.normalizeAuthUserId(authenticatedOwnerUserId)
+                    ?: throw BackupRestoreException("Restore requires a valid authenticated owner")
                 val metadata = database.syncMetadataDao().get()
                     ?: throw BackupRestoreException("Local sync metadata row is missing")
+                if (!BackupMetadataRules.isStructurallyValid(metadata) || metadata.ownerUserId != ownerId) {
+                    throw BackupRestoreException("Authenticated owner is not bound to this local backup")
+                }
                 if (mergedSnapshot.sourceInstallId != metadata.installationId) {
                     throw BackupRestoreException("Merged snapshot belongs to a different local installation")
                 }
 
-                val journalText = BackupRestoreJournalCodec.encode(mergedSnapshot)
+                val journalText = BackupRestoreJournalCodec.encode(mergedSnapshot, ownerId)
                 writeJournal(journalText)
                 applyJournalText(journalText)
             } catch (cancelled: CancellationException) {
@@ -94,8 +102,9 @@ class BackupRestoreCoordinator(context: Context) {
     }
 
     private suspend fun applyJournalText(journalText: String) {
-        val snapshot = BackupRestoreJournalCodec.decode(journalText)
-        val scheduleIds = applyRoomTransaction(snapshot)
+        val prepared = BackupRestoreJournalCodec.decode(journalText)
+        val snapshot = prepared.snapshot
+        val scheduleIds = applyRoomTransaction(snapshot, prepared.ownerUserId)
 
         // This merge is idempotent by earning UUID and retains entries appended since staging.
         EarningsStore.mergeFromRestore(
@@ -116,7 +125,10 @@ class BackupRestoreCoordinator(context: Context) {
         journal.delete()
     }
 
-    private suspend fun applyRoomTransaction(snapshot: BackupSnapshot): Set<String> =
+    private suspend fun applyRoomTransaction(
+        snapshot: BackupSnapshot,
+        expectedOwnerUserId: String,
+    ): Set<String> =
         database.withTransaction {
             if (snapshot.datasets.closedSessions.size > MAX_CLOSED_SESSIONS ||
                 snapshot.datasets.earnings.size > MAX_EARNINGS ||
@@ -126,6 +138,11 @@ class BackupRestoreCoordinator(context: Context) {
             }
             val metadata = database.syncMetadataDao().get()
                 ?: throw BackupRestoreException("Local sync metadata row is missing")
+            if (!BackupMetadataRules.isStructurallyValid(metadata) ||
+                metadata.ownerUserId != expectedOwnerUserId
+            ) {
+                throw BackupRestoreException("Backup owner binding changed during restore")
+            }
             if (metadata.installationId != snapshot.sourceInstallId) {
                 throw BackupRestoreException("Installation identity changed during restore")
             }

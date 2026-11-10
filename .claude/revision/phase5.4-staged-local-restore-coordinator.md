@@ -7,8 +7,8 @@
 
 ## Implementation
 
-- Added `BackupRestoreCoordinator` accepting an already merged, validated v3 candidate whose source installation UUID must match Room sync metadata.
-- Added `BackupRestoreJournalCodec`: bounded v3 journal record, schema/journal version checks, checksum metadata validation and reuse of the canonical BackupCodec payload/checksum.
+- Added `BackupRestoreCoordinator` accepting an already merged, validated v3 candidate plus the authenticated owner UUID. The local metadata must be structurally valid and already bound to that owner; the source installation UUID must also match Room sync metadata. The owner UUID is stored in the journal and rechecked during startup replay.
+- Added `BackupRestoreJournalCodec`: bounded v3 journal record including the bound Auth owner UUID, schema/journal version checks, checksum metadata validation and reuse of the canonical BackupCodec payload/checksum.
 - Journal is persisted through Android `AtomicFile` under `noBackupFilesDir` before any local mutation. Startup checks for pending base/backup journal files and replays the transaction before scheduling WorkManager preflight. Recovery failure fails closed.
 - Room apply is one `withTransaction`: reconcile accounts, merge contribution counters component-wise MAX, recompute saturated aggregate counters, insert missing closed sessions by UUID, update only allowlisted config keys, persist tombstones idempotently.
 - Preserve active sessions, farm logs, unknown/device-local config keys, sync metadata/revision checkpoint, Outbox rows and local writes created after staging. Detect local status/config/session/tombstone changes after staging and abort instead of overwriting.
@@ -19,7 +19,7 @@
 
 ## Tests and verification
 
-- Added JVM tests for journal metadata parsing, journal/snapshot version rejection, malformed checksum metadata and size bounds. These tests were authored but not executed.
+- Added JVM tests for journal owner/metadata parsing, journal/snapshot version rejection, malformed checksum metadata and size bounds. These tests were authored but not executed.
 - The Android project build and Room/AtomicFile process-crash integration tests remain unverified. No GitHub Actions workflow was dispatched.
 - No Supabase object, policy, Auth setting, backup row, HTTP/RPC/CAS transport, remote revision checkpoint, Outbox acknowledgement, tombstone acknowledgement or worker activation changed.
 - No Room schema change or migration was added.
