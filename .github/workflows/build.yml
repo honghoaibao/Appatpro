@@ -123,6 +123,11 @@ jobs:
         grep -E "versionCode|versionName" android/app/build.gradle
 
     # ── Build ──────────────────────────────────────────────────────────────────
+    # ── Unit tests ────────────────────────────────────────────────────────────
+    - name: Run JUnit unit tests
+      working-directory: android
+      run: gradle testDebugUnitTest --stacktrace --warning-mode all
+
     - name: Build APK
       working-directory: android
       run: gradle assembleRelease --stacktrace --warning-mode all
