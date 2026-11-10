@@ -20,17 +20,28 @@ interface AccountDao {
     @Query("SELECT * FROM accounts WHERE username = :username LIMIT 1")
     suspend fun getByUsername(username: String): AccountEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsert(account: AccountEntity)
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertAll(accounts: List<AccountEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(account: AccountEntity): Long
 
     @Query("""
         UPDATE accounts SET
             status      = :status,
             checkpoint  = :checkpoint,
-            updatedAt   = :now
+            updatedAt   = MAX(updatedAt, :now),
+            statusUpdatedAt = CASE
+                WHEN statusUpdatedAt >= :now THEN
+                    CASE
+                        WHEN statusUpdatedAt < 9223372036854775807 THEN statusUpdatedAt + 1
+                        ELSE statusUpdatedAt
+                    END
+                ELSE :now
+            END
         WHERE username = :username
     """)
     suspend fun updateStatus(
@@ -40,29 +51,32 @@ interface AccountDao {
         now:        Long = System.currentTimeMillis(),
     )
 
-    /**
-     * Cộng dồn stats sau mỗi session — dùng SQL arithmetic để tránh
-     * race condition nếu nhiều session chạy song song trong tương lai.
-     */
     @Query("""
         UPDATE accounts SET
-            sessionsCount = sessionsCount + 1,
-            totalLikes    = totalLikes    + :likes,
-            totalFollows  = totalFollows  + :follows,
-            totalVideos   = totalVideos   + :videos,
-            updatedAt     = :now
+            sessionsCount = :sessionsCount,
+            totalLikes = :totalLikes,
+            totalFollows = :totalFollows,
+            totalVideos = :totalVideos,
+            statsUpdatedAt = :statsUpdatedAt,
+            updatedAt = :updatedAt
         WHERE username = :username
     """)
-    suspend fun addStats(
+    suspend fun updateAggregatedStats(
         username: String,
-        likes:    Int,
-        follows:  Int,
-        videos:   Int,
-        now:      Long = System.currentTimeMillis(),
+        sessionsCount: Int,
+        totalLikes: Int,
+        totalFollows: Int,
+        totalVideos: Int,
+        statsUpdatedAt: Long,
+        updatedAt: Long,
     )
 
     @Query("DELETE FROM accounts WHERE username = :username")
     suspend fun delete(username: String)
+
+    /** Restore applies a prevalidated merged account set inside one Room transaction. */
+    @Query("DELETE FROM accounts")
+    suspend fun deleteAll()
 
     @Query("SELECT COUNT(*) FROM accounts")
     suspend fun count(): Int

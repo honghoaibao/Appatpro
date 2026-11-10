@@ -3,14 +3,33 @@ package com.atpro
 import android.content.Context
 import android.util.Log
 import androidx.multidex.MultiDexApplication
+import com.atpro.auth.data.AndroidKeystoreAuthSessionStore
+import com.atpro.auth.data.SupabaseAuthRepository
+import com.atpro.auth.domain.AuthRepository
+import com.atpro.data.EarningsStore
 import com.atpro.data.LocalRepository
 import com.atpro.notification.AtProNotificationManager
 import com.atpro.ui.theme.AtThemeState
+import com.atpro.db.AtProDatabase
+import com.atpro.sync.BackupOwnershipManager
+import com.atpro.sync.BackupRestoreCoordinator
+import com.atpro.sync.SyncWorkScheduler
 import kotlinx.coroutines.*
 
 class AtProApplication : MultiDexApplication() {
 
     val appScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    /** One process-wide Auth repository so all screens share one session StateFlow and refresh mutex. */
+    val backupOwnershipManager: BackupOwnershipManager by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        BackupOwnershipManager(AtProDatabase.getInstance(applicationContext))
+    }
+
+    val authRepository: AuthRepository by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        SupabaseAuthRepository(
+            sessionStore = AndroidKeystoreAuthSessionStore(applicationContext),
+        )
+    }
 
     companion object {
         private lateinit var _ctx: Context
@@ -21,6 +40,22 @@ class AtProApplication : MultiDexApplication() {
     override fun onCreate() {
         super.onCreate()
         _ctx = applicationContext
+        // Configure the file store before any automation service can record a reward.
+        EarningsStore.init(this)
+
+        // A staged restore journal is replayed before WorkManager preflight or UI/services
+        // can observe a half-applied Room + Earnings state. Normal startup does no blocking IO.
+        if (BackupRestoreCoordinator.hasPending(this)) {
+            try {
+                runBlocking(Dispatchers.IO) {
+                    BackupRestoreCoordinator(this@AtProApplication).recoverPending()
+                }
+            } catch (error: Exception) {
+                Log.e("AtProApp", "Pending backup restore could not be recovered; failing closed", error)
+                throw IllegalStateException("Pending backup restore recovery failed", error)
+            }
+        }
+
         // v1.7.0: nạp chế độ giao diện Sáng/Tối TRƯỚC mọi Activity để khung đầu tiên đã đúng màu.
         AtThemeState.load(this)
         com.atpro.ui.theme.AtWindowBackground.install(this)
@@ -32,6 +67,16 @@ class AtProApplication : MultiDexApplication() {
         appScope.launch {
             runCatching { AtProNotificationManager.loadConfig() }
                 .onFailure { Log.e("AtProApp", "loadConfig: ${it.message}") }
+        }
+
+        appScope.launch {
+            try {
+                SyncWorkScheduler.scheduleIfPending(this@AtProApplication)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.w("AtProApp", "Could not schedule backup preflight", error)
+            }
         }
 
         appScope.launch {

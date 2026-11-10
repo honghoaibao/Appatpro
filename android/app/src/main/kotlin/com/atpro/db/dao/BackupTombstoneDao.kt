@@ -1,0 +1,47 @@
+package com.atpro.db.dao
+
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.Query
+import com.atpro.db.entity.BackupTombstoneEntity
+
+@Dao
+interface BackupTombstoneDao {
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insert(tombstone: BackupTombstoneEntity)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertAll(tombstones: List<BackupTombstoneEntity>)
+
+    /** Idempotent replay of a prepared restore journal. Existing IDs are checked before insert. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAllIgnore(tombstones: List<BackupTombstoneEntity>)
+
+    @Query("SELECT * FROM backup_tombstones ORDER BY dataset ASC, entityKey ASC, deletedAt ASC, tombstoneId ASC")
+    suspend fun getAll(): List<BackupTombstoneEntity>
+
+    /** Bounded deterministic read for backup construction. */
+    @Query("""
+        SELECT * FROM backup_tombstones
+        ORDER BY dataset ASC, entityKey ASC, tombstoneId ASC
+        LIMIT :limit
+    """)
+    suspend fun getForBackup(limit: Int): List<BackupTombstoneEntity>
+
+    @Query("SELECT * FROM backup_tombstones WHERE tombstoneId IN (:ids)")
+    suspend fun getByIds(ids: List<String>): List<BackupTombstoneEntity>
+
+    @Query("""
+        SELECT * FROM backup_tombstones
+        WHERE dataset = :dataset AND entityKey IN (:entityKeys)
+    """)
+    suspend fun getForDatasetKeys(dataset: String, entityKeys: List<String>): List<BackupTombstoneEntity>
+
+    /** Reserved for the later exact-acknowledgement phase; not called by Phase 5.2. */
+    @Query("DELETE FROM backup_tombstones WHERE tombstoneId IN (:ids)")
+    suspend fun deleteAcknowledged(ids: List<String>): Int
+
+    @Query("SELECT COUNT(*) FROM backup_tombstones")
+    suspend fun count(): Int
+}

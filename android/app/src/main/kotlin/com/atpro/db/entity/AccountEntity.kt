@@ -25,4 +25,6 @@ data class AccountEntity(
     val totalVideos:    Int     = 0,
     val createdAt:      Long    = System.currentTimeMillis(),
     val updatedAt:      Long    = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "0") val statusUpdatedAt: Long = updatedAt,
+    @ColumnInfo(defaultValue = "0") val statsUpdatedAt: Long = updatedAt,
 )

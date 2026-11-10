@@ -20,6 +20,16 @@ interface SessionDao {
     @Insert
     suspend fun insert(session: SessionEntity): Long
 
+    @Query("SELECT * FROM sessions WHERE id = :id LIMIT 1")
+    suspend fun getById(id: Long): SessionEntity?
+
+    @Query("SELECT * FROM sessions WHERE syncId IN (:syncIds)")
+    suspend fun getBySyncIds(syncIds: List<String>): List<SessionEntity>
+
+    /** Inserts only absent closed-session UUIDs; active local rows are never replaced. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertBackupSessions(sessions: List<SessionEntity>): List<Long>
+
     /**
      * Đóng session: ghi endedAt, tính durationSecs và lưu stats.
      * v1.1.4 FIX: Thêm likes/follows/comments/videosWatched — trước đây
@@ -85,8 +95,57 @@ interface SessionDao {
     """)
     suspend fun getTotals(since: Long): TotalsRow
 
-    /** Dọn sessions cũ để không phình DB vô hạn. */
-    @Query("DELETE FROM sessions WHERE startedAt < :before")
+    /**
+     * Include locally retained sessions plus older sessions whose immutable UPSERT is
+     * still pending. The latter must survive local cleanup until the cloud confirms them.
+     */
+    @Query("""
+        SELECT COUNT(*) FROM sessions
+        WHERE endedAt IS NOT NULL
+          AND (
+              startedAt >= :since
+              OR EXISTS (
+                  SELECT 1 FROM sync_outbox
+                  WHERE sync_outbox.dataset = 'closedSessions'
+                    AND sync_outbox.entityKey = sessions.syncId
+                    AND sync_outbox.operation = 'UPSERT'
+              )
+          )
+    """)
+    suspend fun countClosedForBackup(since: Long): Int
+
+    /** Stable paging includes pending old rows without extending normal local retention. */
+    @Query("""
+        SELECT * FROM sessions
+        WHERE endedAt IS NOT NULL
+          AND (
+              startedAt >= :since
+              OR EXISTS (
+                  SELECT 1 FROM sync_outbox
+                  WHERE sync_outbox.dataset = 'closedSessions'
+                    AND sync_outbox.entityKey = sessions.syncId
+                    AND sync_outbox.operation = 'UPSERT'
+              )
+          )
+        ORDER BY syncId ASC
+        LIMIT :limit OFFSET :offset
+    """)
+    suspend fun getClosedForBackup(since: Long, limit: Int, offset: Int): List<SessionEntity>
+
+    /**
+     * Local retention is 90 days, but an old session is not removed while its cloud
+     * UPSERT remains pending. The acknowledgement transaction calls this after ack too.
+     */
+    @Query("""
+        DELETE FROM sessions
+        WHERE startedAt < :before
+          AND NOT EXISTS (
+              SELECT 1 FROM sync_outbox
+              WHERE sync_outbox.dataset = 'closedSessions'
+                AND sync_outbox.entityKey = sessions.syncId
+                AND sync_outbox.operation = 'UPSERT'
+          )
+    """)
     suspend fun deleteOlderThan(before: Long)
 }
 

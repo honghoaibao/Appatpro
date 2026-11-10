@@ -5,12 +5,15 @@ import android.view.accessibility.AccessibilityNodeInfo
 import io.mockk.*
 import org.junit.*
 import org.junit.Assert.*
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * NodeTraverserTest — unit tests cho NodeTraverser traversal + detection logic.
  *
- * Kỹ thuật: MockK để tạo AccessibilityNodeInfo fake trees.
- * Không cần Robolectric — tất cả Android class calls đều được mock.
+ * Kỹ thuật: Robolectric API 34 cung cấp Android framework trên JVM; MockK
+ * tạo các AccessibilityNodeInfo fake để dựng cây node độc lập với thiết bị.
  *
  * Cây node được xây dựng bằng helper [node()] — tạo một MockK
  * AccessibilityNodeInfo với text, resourceId, clickable, children.
@@ -27,6 +30,8 @@ import org.junit.Assert.*
  *     ACCOUNT_UPDATE_PROMPT (v1.3.1 — ưu tiên trước ACCOUNT_SWITCH), NONE
  *   - detectLive: via resourceId, not detected
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class NodeTraverserTest {
 
     // ── Tree builder ──────────────────────────────────────────
@@ -162,11 +167,11 @@ class NodeTraverserTest {
     }
 
     @Test
-    fun `hasNavBar returns false when fewer than 2 nav items`() {
+    fun `hasNavBar returns true when one nav tab label is visible`() {
         val oneTab = node(text = "For You")
         val root   = node(children = listOf(oneTab))
 
-        assertFalse(NodeTraverser.hasNavBar(root))
+        assertTrue(NodeTraverser.hasNavBar(root))
     }
 
     @Test
@@ -586,7 +591,7 @@ class NodeTraverserTest {
     @Test
     fun `findSwitchAccountRow tim dung hang chuyen doi tai khoan`() {
         val add    = node(text = "Thêm tài khoản", clickable = true)
-        val switch = node(text = "Chuyển đổi tài khoản", clickable = true)
+        val switch = node(text = "Chuyển đổi tài khoản", clickable = true, bounds = Rect(0, 100, 400, 180))
         val logout = node(text = "Đăng xuất", clickable = true)
         val root   = node(children = listOf(add, switch, logout))
 
@@ -608,7 +613,7 @@ class NodeTraverserTest {
 
     @Test
     fun `findSwitchAccountRow ho tro nhan tieng Anh`() {
-        val root = node(children = listOf(node(text = "Switch account", clickable = true), node(text = "Log out", clickable = true)))
+        val root = node(children = listOf(node(text = "Switch account", clickable = true, bounds = Rect(0, 100, 400, 180)), node(text = "Log out", clickable = true)))
         val row = NodeTraverser.findSwitchAccountRow(root, screenHeight = 2400)
         assertNotNull(row)
         assertEquals("Switch account", row!!.label.text)

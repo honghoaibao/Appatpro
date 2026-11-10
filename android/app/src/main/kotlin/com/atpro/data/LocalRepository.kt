@@ -2,9 +2,18 @@ package com.atpro.data
 
 import android.content.Context
 import android.util.Log
+import androidx.room.withTransaction
+import org.json.JSONArray
+import org.json.JSONObject
 import com.atpro.db.AtProDatabase
 import com.atpro.db.dao.TotalsRow
 import com.atpro.db.entity.*
+import java.util.UUID
+import com.atpro.sync.AccountStatContributionPolicy
+import com.atpro.sync.BackupAccountStatContribution
+import com.atpro.sync.BackupConfigPolicy
+import com.atpro.sync.SyncWorkScheduler
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -29,6 +38,7 @@ class LocalRepository(context: Context) : IFarmRepository {
 
     companion object {
         const val TAG = "LocalRepo"
+        private val TOMBSTONE_DATASETS = setOf("accounts", "safeConfigs", "schedules")
 
         @Volatile
         private var INSTANCE: LocalRepository? = null
@@ -39,11 +49,139 @@ class LocalRepository(context: Context) : IFarmRepository {
             }
     }
 
-    private val db      = AtProDatabase.getInstance(context)
+    private val appContext = context.applicationContext
+    private val db      = AtProDatabase.getInstance(appContext)
     private val accounts = db.accountDao()
     private val sessions = db.sessionDao()
     private val logs     = db.logDao()
     private val configs  = db.configDao()
+    private val syncOutbox = db.syncOutboxDao()
+    private val statContributions = db.accountStatContributionDao()
+
+    /**
+     * Schedule only after the Room mutation/Outbox transaction has committed.
+     * WorkManager KEEP coalesces rapid writes; scheduling failure never rolls back local data.
+     */
+    private suspend fun requestBackupPreflight() {
+        try {
+            SyncWorkScheduler.scheduleIfPending(appContext)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w(TAG, "Could not schedule backup preflight", error)
+        }
+    }
+
+    /** Call only from the same Room transaction as the domain mutation. */
+    private suspend fun enqueueUpsert(dataset: String, entityKey: String, payloadJson: String) {
+        syncOutbox.deletePendingUpserts(dataset, entityKey)
+        syncOutbox.insert(
+            SyncOutboxEntity(
+                dataset = dataset,
+                entityKey = entityKey,
+                operation = SyncOutboxOperation.UPSERT,
+                payloadJson = payloadJson,
+            )
+        )
+    }
+
+    /** Persist a durable tombstone and its Outbox event in the same Room transaction as deletion. */
+    private suspend fun recordTombstone(dataset: String, entityKey: String) {
+        require(dataset in TOMBSTONE_DATASETS) { "Dataset is not eligible for tombstones" }
+        require(entityKey.isNotBlank() && entityKey == entityKey.trim()) { "Invalid tombstone entity key" }
+        val metadata = db.syncMetadataDao().get()
+            ?: error("Sync metadata row is missing; cannot identify this installation")
+        val now = System.currentTimeMillis()
+        val tombstoneId = UUID.randomUUID().toString()
+        db.backupTombstoneDao().insert(
+            BackupTombstoneEntity(
+                tombstoneId = tombstoneId,
+                dataset = dataset,
+                entityKey = entityKey,
+                sourceInstallId = metadata.installationId,
+                deletedAt = now,
+            )
+        )
+        syncOutbox.insert(
+            SyncOutboxEntity(
+                eventId = tombstoneId,
+                dataset = dataset,
+                entityKey = entityKey,
+                operation = SyncOutboxOperation.DELETE,
+                createdAt = now,
+            )
+        )
+    }
+
+    /**
+     * Legacy databases are seeded by MIGRATION_3_4. This fallback adopts the existing
+     * aggregate only when the account has no contribution rows at all.
+     */
+    private suspend fun ensureCurrentInstallationContribution(account: AccountEntity) {
+        val metadata = db.syncMetadataDao().get()
+            ?: error("Sync metadata row is missing; cannot identify this installation")
+        val existing = statContributions.getForAccount(account.username)
+        val baseline = if (existing.isEmpty()) {
+            AccountStatContributionEntity(
+                accountId = account.username,
+                installationId = metadata.installationId,
+                sessionsCount = account.sessionsCount.toLong().coerceAtLeast(0L),
+                totalLikes = account.totalLikes.toLong().coerceAtLeast(0L),
+                totalFollows = account.totalFollows.toLong().coerceAtLeast(0L),
+                totalVideos = account.totalVideos.toLong().coerceAtLeast(0L),
+                updatedAt = account.statsUpdatedAt,
+            )
+        } else {
+            AccountStatContributionEntity(
+                accountId = account.username,
+                installationId = metadata.installationId,
+                updatedAt = account.statsUpdatedAt,
+            )
+        }
+        statContributions.ensureBaseline(baseline)
+    }
+
+    private suspend fun enqueueAccountUpsert(account: AccountEntity) {
+        ensureCurrentInstallationContribution(account)
+        val contributionArray = JSONArray()
+        statContributions.getForAccount(account.username).forEach { row ->
+            contributionArray.put(
+                JSONObject()
+                    .put("installationId", row.installationId)
+                    .put("sessionsCount", row.sessionsCount)
+                    .put("totalLikes", row.totalLikes)
+                    .put("totalFollows", row.totalFollows)
+                    .put("totalVideos", row.totalVideos)
+                    .put("updatedAt", row.updatedAt)
+            )
+        }
+        val payload = JSONObject()
+            .put("username", account.username)
+            .put("status", account.status)
+            .put("checkpoint", account.checkpoint)
+            .put("createdAt", account.createdAt)
+            .put("statusUpdatedAt", account.statusUpdatedAt)
+            .put("statsUpdatedAt", account.statsUpdatedAt)
+            .put("statContributions", contributionArray)
+            .toString()
+        enqueueUpsert("accounts", account.username, payload)
+    }
+
+    private suspend fun enqueueClosedSessionUpsert(session: SessionEntity) {
+        if (session.endedAt == null) return
+        val payload = JSONObject()
+            .put("syncId", session.syncId)
+            .put("accountId", session.accountId)
+            .put("startedAt", session.startedAt)
+            .put("endedAt", session.endedAt)
+            .put("likes", session.likes)
+            .put("follows", session.follows)
+            .put("comments", session.comments)
+            .put("videosWatched", session.videosWatched)
+            .put("durationSecs", session.durationSecs)
+            .toString()
+        enqueueUpsert("closedSessions", session.syncId, payload)
+    }
 
     // ── Accounts ─────────────────────────────────────────────
 
@@ -57,27 +195,50 @@ class LocalRepository(context: Context) : IFarmRepository {
         accounts.getActive()
 
     override suspend fun addAccount(username: String) {
-        accounts.upsert(AccountEntity(username = username.trim().removePrefix("@")))
+        val account = AccountEntity(username = username.trim().removePrefix("@"))
+        db.withTransaction {
+            accounts.insertIfAbsent(account)
+            accounts.getByUsername(account.username)?.let {
+                ensureCurrentInstallationContribution(it)
+                enqueueAccountUpsert(it)
+            }
+        }
+        requestBackupPreflight()
     }
 
-    suspend fun deleteAccount(username: String) =
-        accounts.delete(username)
+    suspend fun deleteAccount(username: String) {
+        val normalized = username.trim().removePrefix("@")
+        db.withTransaction {
+            if (accounts.getByUsername(normalized) != null) {
+                accounts.delete(normalized)
+                recordTombstone("accounts", normalized)
+            }
+        }
+        requestBackupPreflight()
+    }
 
     /** Update account status directly (e.g. "banned") from AccountsScreen actions. */
-    suspend fun updateStatus(username: String, status: String) =
-        db.accountDao().updateStatus(
-            username   = username,
-            status     = status,
-            checkpoint = status == "checkpoint",
-        )
+    suspend fun updateStatus(username: String, status: String) {
+        val now = System.currentTimeMillis()
+        db.withTransaction {
+            accounts.updateStatus(
+                username = username,
+                status = status,
+                checkpoint = status == "checkpoint",
+                now = now,
+            )
+            accounts.getByUsername(username)?.let { enqueueAccountUpsert(it) }
+        }
+        requestBackupPreflight()
+    }
 
     override suspend fun setCheckpoint(username: String, isCheckpoint: Boolean) {
         val status = if (isCheckpoint) "checkpoint" else "active"
-        accounts.updateStatus(username, status, isCheckpoint)
+        updateStatus(username, status)
     }
 
     suspend fun setBanned(username: String) =
-        accounts.updateStatus(username, "banned", false)
+        updateStatus(username, "banned")
 
     // ── Sessions ─────────────────────────────────────────────
 
@@ -103,12 +264,57 @@ class LocalRepository(context: Context) : IFarmRepository {
         videos:     Int,
         comments:   Int,
     ) {
+        require(likes >= 0 && follows >= 0 && videos >= 0 && comments >= 0) {
+            "Session counters must be non-negative before they can be accumulated"
+        }
         val now     = System.currentTimeMillis()
         val started = sessionStartMap.remove(sessionId) ?: now
         val durationSecs = ((now - started) / 1000).toInt().coerceAtLeast(0)
 
-        sessions.close(sessionId, now, durationSecs, likes, follows, comments, videos)  // [v1.1.4 FIX]
-        accounts.addStats(accountId, likes, follows, videos)  // dùng accountId được truyền vào
+        db.withTransaction {
+            sessions.close(sessionId, now, durationSecs, likes, follows, comments, videos)
+            sessions.getById(sessionId)?.let { enqueueClosedSessionUpsert(it) }
+
+            accounts.getByUsername(accountId)?.let { account ->
+                ensureCurrentInstallationContribution(account)
+                val metadata = db.syncMetadataDao().get()
+                    ?: error("Sync metadata row is missing; cannot identify this installation")
+                val changed = statContributions.addSessionContribution(
+                    accountId = accountId,
+                    installationId = metadata.installationId,
+                    likes = likes.toLong(),
+                    follows = follows.toLong(),
+                    videos = videos.toLong(),
+                    updatedAt = now,
+                )
+                check(changed == 1) { "Could not update the current installation account contribution" }
+
+                val totals = AccountStatContributionPolicy.aggregate(
+                    statContributions.getForAccount(accountId).map {
+                        BackupAccountStatContribution(
+                            accountId = it.accountId,
+                            installationId = it.installationId,
+                            sessionsCount = it.sessionsCount,
+                            totalLikes = it.totalLikes,
+                            totalFollows = it.totalFollows,
+                            totalVideos = it.totalVideos,
+                            updatedAt = it.updatedAt,
+                        )
+                    }
+                )
+                accounts.updateAggregatedStats(
+                    username = accountId,
+                    sessionsCount = AccountStatContributionPolicy.toDisplayInt(totals.sessionsCount),
+                    totalLikes = AccountStatContributionPolicy.toDisplayInt(totals.totalLikes),
+                    totalFollows = AccountStatContributionPolicy.toDisplayInt(totals.totalFollows),
+                    totalVideos = AccountStatContributionPolicy.toDisplayInt(totals.totalVideos),
+                    statsUpdatedAt = totals.updatedAt,
+                    updatedAt = now,
+                )
+                accounts.getByUsername(accountId)?.let { enqueueAccountUpsert(it) }
+            }
+        }
+        requestBackupPreflight()
 
         Log.i(TAG, "Session $sessionId @$accountId closed — " +
             "likes=$likes follows=$follows videos=$videos duration=${durationSecs}s")
@@ -175,8 +381,59 @@ class LocalRepository(context: Context) : IFarmRepository {
     suspend fun getConfig(key: String, default: String = ""): String =
         configs.get(key) ?: default
 
-    suspend fun setConfig(key: String, value: String) =
-        configs.set(ConfigEntity(key = key, value = value))
+    suspend fun setConfig(key: String, value: String) {
+        val now = System.currentTimeMillis()
+        db.withTransaction {
+            val previousValue = configs.get(key)
+            configs.set(ConfigEntity(key = key, value = value, updatedAt = now))
+            when (val dataset = BackupConfigPolicy.datasetFor(key)) {
+                "safeConfigs" -> {
+                    val payload = JSONObject()
+                        .put("key", key)
+                        .put("value", value)
+                        .put("updatedAt", now)
+                        .toString()
+                    enqueueUpsert(dataset, key, payload)
+                }
+                "schedules" -> {
+                    val scheduleId = key.removePrefix("sched_")
+                    if (value.isEmpty()) {
+                        if (!previousValue.isNullOrEmpty()) {
+                            recordTombstone(dataset, scheduleId)
+                        }
+                    } else {
+                        val payload = JSONObject()
+                            .put("scheduleId", scheduleId)
+                            .put("value", value)
+                            .put("updatedAt", now)
+                            .toString()
+                        enqueueUpsert(dataset, scheduleId, payload)
+                    }
+                }
+                else -> Unit
+            }
+        }
+        if (BackupConfigPolicy.datasetFor(key) != null) requestBackupPreflight()
+    }
+
+    suspend fun deleteConfig(key: String) {
+        db.withTransaction {
+            val existingValue = configs.get(key)
+            configs.delete(key)
+            when (val dataset = BackupConfigPolicy.datasetFor(key)) {
+                "safeConfigs" -> {
+                    if (existingValue != null) recordTombstone(dataset, key)
+                }
+                "schedules" -> {
+                    if (!existingValue.isNullOrEmpty()) {
+                        recordTombstone(dataset, key.removePrefix("sched_"))
+                    }
+                }
+                else -> Unit
+            }
+        }
+        if (BackupConfigPolicy.datasetFor(key) != null) requestBackupPreflight()
+    }
 
     suspend fun getConfigInt(key: String, default: Int): Int =
         configs.get(key)?.toIntOrNull() ?: default

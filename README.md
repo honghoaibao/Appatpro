@@ -134,7 +134,7 @@ git push origin v1.12.0
 
 ## Tests
 
-Unit test chạy trên JVM (JUnit4 + MockK), không cần emulator:
+Unit test chạy trên JVM với JUnit4 + MockK; các test chạm Android framework dùng Robolectric để mô phỏng Android, không cần emulator:
 
 ```bash
 cd android
