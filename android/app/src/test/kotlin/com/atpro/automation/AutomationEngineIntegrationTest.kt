@@ -33,7 +33,7 @@ import org.robolectric.annotation.Config
  *   - mockkObject(NodeTraverser): mock toàn bộ static-like calls
  *   - mockkObject(AtProNotificationManager / OverlayFarmMonitor): silence side-effects
  *   - mockk<AccessibilityNodeInfo>(relaxed=true): tạo NodeResult giả cho các luồng kiểm soát
- *   - UnconfinedTestDispatcher: coroutines chạy eager, delay() không block
+ *   - TestScope.advanceUntilIdle(): chạy hết các retry/delay ảo mà không đợi thời gian thực
  *
  * Giới hạn:
  *   ❌ doLike(), doFollow() — không thể test vì phụ thuộc Random + clickSuspend sequence
@@ -84,6 +84,7 @@ class AutomationEngineIntegrationTest {
         every  { OverlayFarmMonitor.show(any())          } just Runs
         every  { OverlayFarmMonitor.hide()               } just Runs
         every  { OverlayFarmMonitor.update(any(), any(), any(), any(), any(), any()) } just Runs
+        every  { OverlayFarmMonitor.setStartupStatus(any()) } just Runs
 
         // NodeTraverser: safe defaults — no popup, no nav, no checkpoint
         mockkObject(NodeTraverser)
@@ -146,6 +147,8 @@ class AutomationEngineIntegrationTest {
 
         engine.startFarm(FarmMode.SELECTED_LIST, listOf("user1"))
 
+        testScope.advanceUntilIdle()
+
         // UnconfinedTestDispatcher → coroutine chạy xong synchronously
         assertFalse("isFarming phải false", engine.isFarming)
         coVerify { repo.startSession("user1") }
@@ -170,6 +173,8 @@ class AutomationEngineIntegrationTest {
 
         engine.startFarm(FarmMode.SELECTED_LIST, listOf("user1"))
 
+        testScope.advanceUntilIdle()
+
         assertFalse(engine.isFarming)
         coVerify { repo.setCheckpoint("user1", true) }
         coVerify { repo.closeSession(1L, "user1", 0, 0, 0, 0) }
@@ -189,6 +194,8 @@ class AutomationEngineIntegrationTest {
         configureSuccessfulSwitch("user1")
 
         engine.startFarm(FarmMode.SELECTED_LIST, listOf("user1"))
+
+        testScope.advanceUntilIdle()
 
         assertFalse(engine.isFarming)
         coVerify { repo.closeSession(1L, "user1", 0, 0, 0, 0) }
@@ -214,6 +221,8 @@ class AutomationEngineIntegrationTest {
 
         engine.startFarm(FarmMode.SELECTED_LIST, listOf("user1"))
 
+        testScope.advanceUntilIdle()
+
         assertFalse(engine.isFarming)
         coVerify { repo.setCheckpoint("user1", true) }
         coVerify { AtProNotificationManager.notifyCheckpoint("user1") }
@@ -236,6 +245,8 @@ class AutomationEngineIntegrationTest {
         coEvery { repo.startSession("userC") } returns 3L
 
         engine.startFarm(FarmMode.SELECTED_LIST, listOf("userA", "userB", "userC"))
+
+        testScope.advanceUntilIdle()
 
         assertFalse(engine.isFarming)
 
@@ -288,6 +299,8 @@ class AutomationEngineIntegrationTest {
         coEvery { repo.loadFarmConfig() } returns FarmConfig(minutesPerAccount = 0)
 
         engine.startFarm(FarmMode.SELECTED_LIST, listOf("user1"))
+
+        testScope.advanceUntilIdle()
 
         // Chỉ 2 account mới được lưu, user1 bỏ qua vì đã tồn tại
         coVerify(exactly = 1) { repo.addAccount("newUser1") }
