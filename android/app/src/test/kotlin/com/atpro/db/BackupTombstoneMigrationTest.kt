@@ -10,9 +10,9 @@ import org.junit.Test
 class BackupTombstoneMigrationTest {
     @Test
     fun migrationCreatesIndexesAndBackfillsPendingDeletesWithStableIds() {
-        val database = mockk<SupportSQLiteDatabase>()
-        val pendingCursor = mockk<Cursor>()
-        val changesCursor = mockk<Cursor>()
+        val database = mockk<SupportSQLiteDatabase>(relaxed = true)
+        val pendingCursor = mockk<Cursor>(relaxed = true)
+        val changesCursor = mockk<Cursor>(relaxed = true)
 
         every {
             database.query(match<String> { it.contains("SELECT COUNT(*) FROM sync_outbox") })
@@ -53,9 +53,9 @@ class BackupTombstoneMigrationTest {
 
     @Test
     fun migrationFailsClosedIfAnEligibleDeleteCannotBeBackfilled() {
-        val database = mockk<SupportSQLiteDatabase>()
-        val pendingCursor = mockk<Cursor>()
-        val changesCursor = mockk<Cursor>()
+        val database = mockk<SupportSQLiteDatabase>(relaxed = true)
+        val pendingCursor = mockk<Cursor>(relaxed = true)
+        val changesCursor = mockk<Cursor>(relaxed = true)
 
         every {
             database.query(match<String> { it.contains("SELECT COUNT(*) FROM sync_outbox") })
