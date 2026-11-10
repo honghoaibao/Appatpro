@@ -43,5 +43,5 @@ Date: 2026-11-10
   - `f061ff8`: run `AutomationEngineTest` under Robolectric and replace the invalid empty-list expectation with a deterministic launch-retry cleanup test.
   - `5f9f7c6`: run `AutomationEngineIntegrationTest` under Robolectric.
   - `5488515`: make migration database/cursor mocks relaxed for incidental SQL/close calls.
-- Latest branch head after test harness and comment-alignment changes: `c948818bad2458dc6d879505e4397cd37d875391` (including `b437fcc`, `f9c0db1`, `c948818`). These changes are source-reviewed but **not build- or test-verified**. No CI has been triggered after them.
+- Latest test-harness/code-comment changes end at `c948818bad2458dc6d879505e4397cd37d875391` (including `b437fcc`, `f9c0db1`, `c948818`); later commits only synchronize project documentation. These changes are source-reviewed but **not build- or test-verified**. No CI has been triggered after them.
 - Draft PR #18 and #19 are both closed unmerged. `main` remains at `e8ce98fac9c6e49b817fe04d785a400746b9b1d8`. Do not trigger additional Actions runs without explicit user authorization.
