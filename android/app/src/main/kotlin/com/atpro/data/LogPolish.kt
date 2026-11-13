@@ -201,6 +201,8 @@ object LogPolish {
         r("Back ×\\d+ để thoát màn hình chặn") { "Đang thoát màn hình đang chặn" },
         r("Về feed sau .*✓") { "Đã về feed ✓" },
         r("Đã xử lý popup chặn") { "Đã đóng hộp thoại đang chặn" },
+        // v1.12.5: quét popup theo whitelist nút đóng (PopupHandler.scannerDismiss) — hiện lên popup/Nhật ký dù tag POPUP mặc định ẩn.
+        r("Đóng popup — bấm '(.*)'", detail = false) { "Đã đóng hộp thoại (nút \"${it.groupValues[1]}\")" },
         r("Vẫn chưa về feed — kill \\+ relaunch TikTok") { "Mở lại TikTok để về feed" },
         r("Không còn ở TikTok.*relaunch.*") { "Đã rời TikTok — đang mở lại" },
         r("recoverToFeed: tier 3 — kill \\+ relaunch TikTok") { "Mở lại TikTok để về feed" },

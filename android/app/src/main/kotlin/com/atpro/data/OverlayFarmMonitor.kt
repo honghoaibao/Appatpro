@@ -2,9 +2,13 @@ package com.atpro.data
 
 import android.animation.ObjectAnimator
 import android.content.Context
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.RectF
 import android.graphics.Typeface
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
@@ -15,7 +19,6 @@ import android.util.TypedValue
 import android.view.*
 import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
-import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -31,14 +34,17 @@ import java.util.Locale
 /**
  * OverlayFarmMonitor — popup nổi hiển thị phiên chạy theo THỜI GIAN THỰC.
  *
- * v1.10.0 — gọn hơn (rộng 216dp, cao ~½ bản trước) và có **thanh đếm ngược cho hành động đang chờ**
- * ([startCountdown]/[stopCountdown]: xem video, chờ tải job, nghỉ, nuôi acc...). Nhật ký còn 3 dòng, chạm để mở rộng.
- * Tiết kiệm pin: thanh đếm ngược là MỘT animator thuộc tính (không đăng chữ mỗi giây); khi thu nhỏ hoặc tạm dừng
- * thì dừng animator; khi thu nhỏ không dựng View cho nhật ký (chỉ giữ dữ liệu, dựng lại khi mở).
+ * v1.12.5 — thiết kế lại theo mẫu, 3 trạng thái (cùng một cửa sổ nổi, đổi giữa các trạng thái bằng [setMode]):
+ *  • FULL — popup đầy đủ: tài khoản + tiến trình, 3 ô số (Lượt thích · Đã thêm · Cảnh báo), trạng thái đang làm (kèm thanh
+ *    đếm ngược), Nhật ký hoạt động (mốc thời gian, nhãn INFO/SYSTEM/OK/WARN/ERROR), nút Tạm dừng/Tiếp tục · Dừng.
+ *    Nút ─ → MINI; nút ✕ → CHIP.
+ *  • MINI — "Mini Popup": tên + trạng thái + đồng hồ, thanh tiến trình, Hoàn thành n/N · tim · cảnh báo. Chạm / ⌃ → FULL; nhấn giữ → CHIP.
+ *  • CHIP — "Floating Chip": logo + trạng thái + đồng hồ. Chạm / › → FULL.
+ *  Cả ba kéo thả được.
  *
- * v1.9.0: nhật ký trực tiếp (mọi log của engine, gộp dòng trùng ×N), khối tóm tắt theo chế độ
- * (nhiệm vụ: acc + ✓ n/N + thanh tiến độ; nuôi acc: acc + phiên/tổng), dòng "Đang làm", nút
- * Tạm dừng / Tiếp tục · Dừng.
+ * v1.10.0 — thanh đếm ngược cho hành động đang chờ ([startCountdown]/[stopCountdown]: xem video, chờ tải job, nghỉ, nuôi acc...).
+ * Tiết kiệm pin: thanh đếm ngược là MỘT animator thuộc tính (không đăng chữ mỗi giây); vòng quay "đang tải" chỉ chạy khi FULL và
+ * không tạm dừng; MINI/CHIP không dựng View cho nhật ký (chỉ giữ dữ liệu, dựng lại khi mở lại FULL).
  *
  * Popup luôn tối (nổi trên TikTok, cần đọc rõ trên mọi nền) — KHÔNG đổi theo chế độ Sáng/Tối của app.
  * Mọi thao tác View chạy trên main thread (qua [handler]); API công khai gọi được từ bất kỳ luồng nào.
@@ -46,26 +52,33 @@ import java.util.Locale
 object OverlayFarmMonitor {
     const val TAG = "OverlayMonitor"
 
-    // ── Palette: Sky (đen ngả xanh · xanh dương · xanh da trời · trắng) ──
-    private const val C_BG     = 0xF506090F.toInt()
-    private const val C_BG2    = 0xF50D1420.toInt()
-    private const val C_BORDER = 0xFF1F2B44.toInt()
-    private const val C_ACCENT = 0xFF5B93FF.toInt()
-    private const val C_BLUE   = 0xFF7FB0FF.toInt()
-    private const val C_SKY    = 0xFF4FC3FF.toInt()
-    private const val C_GREEN  = 0xFF34D399.toInt()
-    private const val C_AMBER  = 0xFFFBBF24.toInt()
-    private const val C_RED    = 0xFFF87171.toInt()
-    private const val C_PINK   = 0xFFFB7185.toInt()
-    private const val C_TEXT   = 0xFFF5F9FF.toInt()
-    private const val C_MUTED  = 0xFFA9B8CE.toInt()
-    private const val C_DIM    = 0xFF7285A3.toInt()
+    // ── Palette: navy đậm · xanh dương · xanh da trời · trắng (+ tím cho nút chính) ──
+    private const val C_BG      = 0xF2080E1E.toInt()
+    private const val C_CARD    = 0xFF0F1830.toInt()
+    private const val C_CARD2   = 0xFF0B1326.toInt()
+    private const val C_BORDER  = 0xFF1F3158.toInt()
+    private const val C_ACCENT  = 0xFF3B8BFF.toInt()
+    private const val C_ACCENT2 = 0xFF6A5CFF.toInt()
+    private const val C_VIOLET  = 0xFF8B7CFF.toInt()
+    private const val C_BLUE    = 0xFF7FB0FF.toInt()
+    private const val C_SKY     = 0xFF4FC3FF.toInt()
+    private const val C_GREEN   = 0xFF2EE6A6.toInt()
+    private const val C_AMBER   = 0xFFFBBF24.toInt()
+    private const val C_RED     = 0xFFFF5C73.toInt()
+    private const val C_PINK    = 0xFFFF4D7A.toInt()
+    private const val C_TEXT    = 0xFFF5F9FF.toInt()
+    private const val C_MUTED   = 0xFFA9B8CE.toInt()
+    private const val C_DIM     = 0xFF7285A3.toInt()
 
-    private const val PANEL_WIDTH_DP = 216
+    private const val PANEL_WIDTH_DP = 340
+    private const val MINI_WIDTH_DP  = 300
     private const val LOG_ROWS_SMALL = 3
     private const val LOG_ROWS_LARGE = 8
-    private const val LOG_ROW_DP     = 15
+    private const val LOG_ROW_DP     = 24
     private const val MAX_LOG_ROWS   = 40
+
+    /** Ba trạng thái hiển thị của cùng một cửa sổ nổi. */
+    private enum class Mode { FULL, MINI, CHIP }
 
     // ─────────────────────────────────────────────────────────
     //  Internal state
@@ -75,67 +88,89 @@ object OverlayFarmMonitor {
     private var overlayView:   View?          = null
     private val handler = Handler(Looper.getMainLooper())
 
-    // Header
-    private var statusDotBg:     GradientDrawable? = null
-    private var statusDotGlowBg: GradientDrawable? = null
-    private var tvServiceLabel:  TextView? = null
-    private var tvRunTime:       TextView? = null
+    private var mode = Mode.FULL
+    private var fullPanel: View? = null
+    private var miniPanel: View? = null
+    private var chipPanel: View? = null
+    private var panelWidthPx = 0
+    private var miniWidthPx  = 0
 
-    // Tóm tắt — chế độ NUÔI ACC
-    private var farmRows:      View?     = null
-    private var tvAccount:     TextView? = null
-    private var tvSessionTime: TextView? = null
-    private var tvTotalTime:   TextView? = null
+    // Nền tảng + chế độ (suy ra từ nhãn dịch vụ khi show())
+    private var platformName = "TikTok"
+    private var platformLogo = R.drawable.ic_logo_tiktok
+    private var isTaskMode   = false
 
-    // Tóm tắt — chế độ NHIỆM VỤ
-    private var taskRows:       View?         = null
-    private var tvTaskAccount:  TextView?     = null
-    private var tvTaskAccIdx:   TextView?     = null
-    private var tvTaskProgress: TextView?     = null
-    private var tvTaskReward:   TextView?     = null
-    private var progressTrack:  LinearLayout? = null   // child(0) = phần đã xong, child(1) = phần còn lại
-    private var tvConsecErrors: TextView?     = null
-    private var tvTaskLikes:    TextView?     = null
-    private var tvTaskFollows:  TextView?     = null
-    private var isTaskMode:     Boolean       = false
+    // Trạng thái chạy/tạm dừng — vòng lặp cập nhật cả 3 trạng thái cùng lúc
+    private val pillTexts = ArrayList<TextView>(3)
+    private val pillDots  = ArrayList<GradientDrawable>(3)
+    private val timeTexts = ArrayList<TextView>(3)
+    private var btnPauseResume: TextView? = null
+
+    // Tài khoản + tiến trình
+    private var tvUser:    TextView? = null
+    private var tvModeChip: TextView? = null
+    private var tvReward:  TextView? = null
+    private var tvProgress: TextView? = null
+    private var tvPercent:  TextView? = null
+    private var progressRing: ProgressRing? = null
+    private var progressFillFull: View? = null
+    private var progressFillMini: View? = null
+    private var tvMiniDone: TextView? = null
+    private var tvMiniLikes: TextView? = null
+    private var tvMiniWarn:  TextView? = null
+
+    // Ô số
+    private var tvLikes: TextView? = null
+    private var tvAdded: TextView? = null
+    private var tvWarn:  TextView? = null
+    private var warnCardBg: GradientDrawable? = null
+
+    // Số liệu hiện tại
+    private var accName   = ""
+    private var accIndex  = 0
+    private var accTotal  = 0
+    private var doneCount = 0
+    private var totalCount = 0
+    private var progressFraction = 0f
+    private var sessionTotalSecs = 0L
+    private var likeCount   = 0
+    private var followCount = 0
+    private var warnCount   = 0
+    private var rewardValue = 0.0
+    private var consecErrors = 0
+    private var maxErrors    = 0
 
     // Hành động + thanh đếm ngược
-    private var tvAction:   TextView? = null
-    private var cdGroup:    View?     = null
-    private var tvCdLabel:  TextView? = null
-    private var tvCdTime:   TextView? = null
-    private var cdFill:     View?     = null
-    private var cdActive    = false
-    private var cdTotalMs   = 0L
-    private var cdRemaining = 0L        // còn lại tại thời điểm cdSyncWall
-    private var cdSyncWall  = 0L        // mốc đồng hồ khi animator bắt đầu chạy đoạn hiện tại
+    private var tvAction:    TextView? = null
+    private var tvActionSub: TextView? = null
+    private var spinner:     ArcSpinner? = null
+    private var signalBars:  SignalBars? = null
+    private var cdGroup:     View?     = null
+    private var cdFill:      View?     = null
+    private var cdLabel      = ""
+    private var cdActive     = false
+    private var cdTotalMs    = 0L
+    private var cdRemaining  = 0L        // còn lại tại thời điểm cdSyncWall
+    private var cdSyncWall   = 0L        // mốc đồng hồ khi animator bắt đầu chạy đoạn hiện tại
     private var cdAnimator: ObjectAnimator? = null
 
     // Nhật ký trực tiếp
-    private class LogEntry(val icon: String, val text: String, val color: Int, val pulse: Boolean = false)
+    private class LogEntry(
+        val icon: String, val text: String, val color: Int, val pulse: Boolean = false,
+        val badge: String = "INFO", val badgeColor: Int = C_ACCENT,
+    )
     private class LogRow(var time: String, val entry: LogEntry, var count: Int = 1) {
         var msgView:  TextView? = null
         var timeView: TextView? = null
         val line: String get() = "${entry.icon} ${entry.text}"
     }
     private val logData = ArrayDeque<LogRow>()           // luôn giữ dữ liệu (kể cả khi thu nhỏ)
-    private var logList:   LinearLayout? = null
-    private var logBox:    View?         = null
-    private var logLarge:  Boolean       = false
-    private var tvLogHint: TextView?     = null
+    private var logList:  LinearLayout? = null
+    private var logBox:   View?         = null
+    private var logLarge: Boolean       = false
+    private var tvLogHint: TextView?    = null
 
-    // Nút điều khiển + thu nhỏ
-    private var btnPauseResume: TextView?  = null
-    private var fullPanel:      View?      = null
-    private var circleView:     View?      = null
-    private var bubbleRingBg:   GradientDrawable? = null
-    private var tvBubbleLog:    TextView?  = null
-    private var isMinimized:    Boolean    = false
-    private var isPaused:       Boolean    = false
-    private var panelWidthPx:   Int = 0
-    private var circleSizePx:   Int = 0
-    private var bubbleWidthPx:  Int = 0
-    private var bubbleHeightPx: Int = 0
+    private var isPaused: Boolean = false
 
     // Hiệu ứng chấm khi đang chờ
     private var dotsRunnable: Runnable? = null
@@ -152,6 +187,8 @@ object OverlayFarmMonitor {
     private var lastAccountText = ""
     private var lastActionText  = ""
     private var lastShownAction = ""
+    private var curAction: LogEntry? = null      // dòng trạng thái hiện tại — vẽ lại khi mở lại FULL từ Mini/Chip
+    private var curActionDots = false
 
     private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
     private fun nowText(): String = synchronized(timeFmt) { timeFmt.format(Date()) }
@@ -165,9 +202,11 @@ object OverlayFarmMonitor {
         if (!android.provider.Settings.canDrawOverlays(context)) {
             Log.w(TAG, "No overlay permission"); return
         }
-        isTaskMode = (serviceLabel == "NV TIKTOK")
         handler.post {
             try {
+                isTaskMode = (serviceLabel == "NV TIKTOK")
+                resolvePlatform(serviceLabel)
+                resetNumbers()
                 windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
                 overlayView   = buildView(context)
 
@@ -190,19 +229,17 @@ object OverlayFarmMonitor {
                 }
 
                 windowManager!!.addView(overlayView, params)
-                // v1.11.0: popup hiện dần + phóng nhẹ thay vì bật ra đột ngột
+                // popup hiện dần + phóng nhẹ thay vì bật ra đột ngột
                 overlayView?.let { v ->
                     v.alpha = 0f; v.scaleX = 0.94f; v.scaleY = 0.94f
                     v.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(220L).start()
                 }
-                tvServiceLabel?.text = serviceLabel.removePrefix("NV ")
-                tvServiceLabel?.visibility = if (serviceLabel.isNotEmpty()) View.VISIBLE else View.GONE
-                farmRows?.visibility = if (isTaskMode) View.GONE else View.VISIBLE
-                taskRows?.visibility = if (isTaskMode) View.VISIBLE else View.GONE
                 tickRunSecs = 0L
+                renderAll()
                 renderLogRows()
+                spinner?.start()
                 startTicker()
-                Log.i(TAG, "Overlay shown [label=$serviceLabel taskMode=$isTaskMode]")
+                Log.i(TAG, "Overlay shown [label=$serviceLabel taskMode=$isTaskMode platform=$platformName]")
             } catch (e: Exception) {
                 Log.e(TAG, "show: ${e.message}")
             }
@@ -213,23 +250,23 @@ object OverlayFarmMonitor {
         stopTicker()
         handler.post {
             cdAnimator?.cancel(); cdAnimator = null; cdActive = false
+            spinner?.stop()
             try {
                 overlayView?.let { windowManager?.removeView(it) }
             } catch (_: Exception) {}
             overlayView = null; windowManager = null
-            statusDotBg = null; statusDotGlowBg = null
-            tvServiceLabel = null; tvRunTime = null
-            farmRows = null; tvAccount = null; tvSessionTime = null; tvTotalTime = null
-            taskRows = null; tvTaskAccount = null; tvTaskAccIdx = null; tvTaskProgress = null
-            tvTaskReward = null; progressTrack = null; tvConsecErrors = null
-            tvTaskLikes = null; tvTaskFollows = null; isTaskMode = false
-            tvAction = null; cdGroup = null; tvCdLabel = null; tvCdTime = null; cdFill = null
+            fullPanel = null; miniPanel = null; chipPanel = null
+            pillTexts.clear(); pillDots.clear(); timeTexts.clear(); btnPauseResume = null
+            tvUser = null; tvModeChip = null; tvReward = null; tvProgress = null; tvPercent = null
+            progressRing = null; progressFillFull = null; progressFillMini = null
+            tvMiniDone = null; tvMiniLikes = null; tvMiniWarn = null
+            tvLikes = null; tvAdded = null; tvWarn = null; warnCardBg = null
+            tvAction = null; tvActionSub = null; spinner = null; signalBars = null; cdGroup = null; cdFill = null
             logList = null; tvLogHint = null; logBox = null; logLarge = false; logData.clear()
-            btnPauseResume = null
-            fullPanel = null; circleView = null; bubbleRingBg = null; tvBubbleLog = null
-            isMinimized = false; isPaused = false
-            lastAccountText = ""; lastActionText = ""; lastShownAction = ""
+            mode = Mode.FULL; isPaused = false; isTaskMode = false
+            lastAccountText = ""; lastActionText = ""; lastShownAction = ""; curAction = null; curActionDots = false
             tickSessionSecs = 0L; tickTotalSecs = 0L; tickRunSecs = 0L
+            resetNumbers()
             stopDotsAnimation()
         }
     }
@@ -239,12 +276,13 @@ object OverlayFarmMonitor {
             isPaused = paused
             refreshPauseButton()
             if (paused) cdFreeze() else cdAnimate()
+            if (paused) spinner?.stop() else if (mode == Mode.FULL) spinner?.start()
         }
     }
 
     /**
-     * Chế độ NHIỆM VỤ — cập nhật khối tóm tắt: acc đang làm, tiến độ ✓ n/N, lỗi liên tiếp, tim/follow, thưởng.
-     * [action] (nếu có) hiện ở dòng "Đang làm".
+     * Chế độ NHIỆM VỤ — cập nhật: acc đang làm, tiến độ job n/N, lỗi liên tiếp, tim/follow, thưởng.
+     * [action] (nếu có) hiện ở dòng trạng thái đang làm.
      */
     fun updateTask(
         accountId:    String,
@@ -260,44 +298,38 @@ object OverlayFarmMonitor {
         accountTotal: Int    = 0,
     ) {
         handler.post {
-            tvTaskAccount?.text = "@${accountId.removePrefix("@")}"
-            tvTaskAccIdx?.text  = if (accountTotal > 0) "$accountIndex/$accountTotal" else ""
-            tvTaskProgress?.text = "✓ $successCount/$totalCount"
-            tvTaskReward?.text   = if (reward > 0.0) "+${formatReward(reward)}" else ""
-
-            progressTrack?.let { track ->
-                val ratio = if (totalCount > 0)
-                    (successCount.toFloat() / totalCount.toFloat()).coerceIn(0f, 1f)
-                else 0f
-                (track.getChildAt(0)?.layoutParams as? LinearLayout.LayoutParams)?.let {
-                    it.weight = ratio; track.getChildAt(0).layoutParams = it
-                }
-                (track.getChildAt(1)?.layoutParams as? LinearLayout.LayoutParams)?.let {
-                    it.weight = 1f - ratio; track.getChildAt(1).layoutParams = it
-                }
-                track.requestLayout()
-            }
-
-            tvConsecErrors?.let { tv ->
-                tv.text = if (maxErrors > 0) "⚠ $consecErrors/$maxErrors" else "⚠ $consecErrors"
-                tv.setTextColor(when {
-                    consecErrors <= 0                          -> C_DIM
-                    maxErrors > 0 && consecErrors >= maxErrors -> C_RED
-                    else                                       -> C_AMBER
-                })
-            }
-            tvTaskLikes?.text   = "❤ $likes"
-            tvTaskFollows?.text = "＋ $follows"
-
+            accName     = accountId.removePrefix("@")
+            accIndex    = accountIndex
+            accTotal    = accountTotal
+            doneCount   = successCount
+            this.totalCount = totalCount
+            progressFraction = if (totalCount > 0) (successCount.toFloat() / totalCount.toFloat()).coerceIn(0f, 1f) else 0f
+            this.consecErrors = consecErrors
+            this.maxErrors    = maxErrors
+            likeCount   = likes
+            followCount = follows
+            rewardValue = reward
+            renderAccount()
+            renderProgress()
+            renderCounters()
             if (action.isNotEmpty()) showAction(parseAction(action), dots = false)
         }
     }
 
-    /** Dòng "Đang làm" từ các bước khởi động / trạng thái của engine (`setStatus`). Không đưa vào danh sách log. */
+    /** Dòng trạng thái từ các bước khởi động / trạng thái của engine (`setStatus`). Không đưa vào danh sách log. */
     fun setStartupStatus(msg: String) {
         if (msg.isBlank()) return
         val e = parseAction(msg)
         handler.post { showAction(e, dots = e.color != C_RED && e.color != C_GREEN) }
+    }
+
+    /** Chế độ NUÔI ACC — số tim / follow của acc đang nuôi (hiện ở ô "Lượt thích" / "Đã thêm"). */
+    fun setCounters(likes: Int, follows: Int) {
+        handler.post {
+            likeCount = likes
+            followCount = follows
+            renderCounters()
+        }
     }
 
     /** Chế độ NUÔI ACC — acc hiện tại, đồng hồ phiên/tổng, hành động đang làm. */
@@ -318,7 +350,14 @@ object OverlayFarmMonitor {
         lastActionText  = action
 
         handler.post {
-            tvAccount?.text = accountText
+            val cleanId = accountId.removePrefix("@")
+            val newAccount = accIndex != accountIndex || accName != cleanId
+            accName  = cleanId
+            accIndex = accountIndex
+            accTotal = accountTotal
+            // Lần đọc đầu tiên của mỗi acc = tổng thời lượng phiên của acc đó (để tính % tiến trình)
+            if (newAccount || sessionTotalSecs <= 0L) sessionTotalSecs = sessionSecsLeft
+            if (sessionSecsLeft > sessionTotalSecs) sessionTotalSecs = sessionSecsLeft
 
             val actionClean = action.trim()
             if (actionClean.isNotEmpty() && actionClean != lastShownAction) {
@@ -326,19 +365,16 @@ object OverlayFarmMonitor {
                 showAction(parseAction(actionClean), dots = false)
             }
 
-            if (sessionDiff) {
-                tickSessionSecs = sessionSecsLeft
-                tvSessionTime?.text = formatTime(tickSessionSecs)
-            }
-            if (totalDiff) {
-                tickTotalSecs = totalSecsLeft
-                tvTotalTime?.text = formatTime(tickTotalSecs)
-            }
+            if (sessionDiff) tickSessionSecs = sessionSecsLeft
+            if (totalDiff)   tickTotalSecs   = totalSecsLeft
+            farmProgressFromClock()
+            renderAccount()
+            renderProgress()
         }
     }
 
     /**
-     * Thêm MỘT dòng vào "Nhật ký trực tiếp". v1.11.0: câu đã được [LogPolish] viết lại cho dễ đọc; dòng chỉ để gỡ lỗi
+     * Thêm MỘT dòng vào "Nhật ký hoạt động". Câu đã được [LogPolish] viết lại cho dễ đọc; dòng chỉ để gỡ lỗi
      * (`detail`) không lên popup (vẫn có đủ ở màn Nhật ký, bật "Chi tiết").
      */
     fun addLog(msg: String) {
@@ -348,7 +384,12 @@ object OverlayFarmMonitor {
         if (polished.detail) return
         val entry = parseLog(m, polished)
         val time  = nowText()
-        handler.post { appendLogRow(time, entry) }
+        val isWarning = (polished.level == LogLevel.WARNING || polished.level == LogLevel.ERROR) &&
+            polished.rawTag !in NON_WARNING_TAGS
+        handler.post {
+            if (isWarning) { warnCount++; renderCounters() }
+            appendLogRow(time, entry)
+        }
     }
 
     /**
@@ -360,12 +401,12 @@ object OverlayFarmMonitor {
         handler.post {
             cdAnimator?.cancel(); cdAnimator = null
             cdActive    = true
+            cdLabel     = label
             cdTotalMs   = totalMs
             cdRemaining = totalMs
-            tvCdLabel?.text = label
-            cdGroup?.visibility = if (overlayView != null) View.VISIBLE else View.GONE
+            cdGroup?.visibility = if (overlayView != null && mode == Mode.FULL) View.VISIBLE else View.GONE
             cdFill?.scaleX = 1f
-            tvCdTime?.text = formatSecs(totalMs)
+            renderCdText(totalMs)
             cdAnimate()
         }
     }
@@ -374,7 +415,8 @@ object OverlayFarmMonitor {
         handler.post {
             cdAnimator?.cancel(); cdAnimator = null
             cdActive = false
-            cdGroup?.visibility = View.GONE
+            cdGroup?.visibility = View.INVISIBLE
+            tvActionSub?.text = if (isPaused) "Đang tạm dừng" else ""
         }
     }
 
@@ -386,11 +428,15 @@ object OverlayFarmMonitor {
         return left.coerceIn(0L, cdTotalMs)
     }
 
+    private fun renderCdText(ms: Long) {
+        tvActionSub?.text = if (cdLabel.isEmpty()) formatSecs(ms) else "$cdLabel · còn ${formatSecs(ms)}"
+    }
+
     private fun cdFreeze() {
         if (!cdActive) return
         if (cdAnimator?.isRunning == true) cdRemaining = cdLeftNow()
         cdAnimator?.cancel(); cdAnimator = null
-        tvCdTime?.text = formatSecs(cdRemaining)
+        renderCdText(cdRemaining)
     }
 
     private fun cdAnimate() {
@@ -399,8 +445,8 @@ object OverlayFarmMonitor {
         cdAnimator?.cancel(); cdAnimator = null
         val fraction = if (cdTotalMs > 0L) (cdRemaining.toFloat() / cdTotalMs.toFloat()).coerceIn(0f, 1f) else 0f
         fill.scaleX = fraction
-        tvCdTime?.text = formatSecs(cdRemaining)
-        if (isPaused || isMinimized || cdRemaining <= 0L) return
+        renderCdText(cdRemaining)
+        if (isPaused || mode != Mode.FULL || cdRemaining <= 0L) return
         cdSyncWall = System.currentTimeMillis()
         cdAnimator = ObjectAnimator.ofFloat(fill, View.SCALE_X, fraction, 0f).apply {
             duration     = cdRemaining
@@ -410,7 +456,7 @@ object OverlayFarmMonitor {
     }
 
     // ─────────────────────────────────────────────────────────
-    //  Phân tích log → biểu tượng + màu
+    //  Phân tích log → biểu tượng + màu + nhãn
     // ─────────────────────────────────────────────────────────
 
     private val TAG_STYLES: Map<String, Pair<String, Int>> = mapOf(
@@ -442,11 +488,11 @@ object OverlayFarmMonitor {
     private fun parseLog(raw: String, p: PolishedLog): LogEntry {
         val msg = raw.trim()
         if (msg.startsWith(">>"))
-            return LogEntry("🚀", clean(p.body), C_BLUE)
+            return LogEntry("🚀", clean(p.body), C_BLUE, badge = "SYSTEM", badgeColor = C_VIOLET)
         if (msg.startsWith("✓"))
-            return LogEntry("✓", clean(p.body), C_GREEN, pulse = true)
+            return LogEntry("✓", clean(p.body), C_GREEN, pulse = true, badge = "OK", badgeColor = C_GREEN)
         if (msg.startsWith("Chờ feed"))
-            return LogEntry("⏳", "Đang tải feed", C_SKY)
+            return LogEntry("⏳", "Đang tải feed", C_SKY, badge = "INFO", badgeColor = C_ACCENT)
 
         val style = TAG_STYLES[p.rawTag]
         var color = style?.second ?: C_MUTED
@@ -458,21 +504,36 @@ object OverlayFarmMonitor {
             LogLevel.SUCCESS -> { color = C_GREEN; pulse = true }
             LogLevel.INFO    -> {}
         }
-        return LogEntry(style?.first ?: "•", clean(p.body), color, pulse)
+        val (badge, badgeColor) = when {
+            p.level == LogLevel.ERROR   -> "ERROR" to C_RED
+            p.level == LogLevel.WARNING -> "WARN"  to C_AMBER
+            p.level == LogLevel.SUCCESS -> "OK"    to C_GREEN
+            p.rawTag in SYSTEM_TAGS     -> "SYSTEM" to C_VIOLET
+            else                        -> "INFO"  to C_ACCENT
+        }
+        return LogEntry(style?.first ?: "•", clean(p.body), color, pulse, badge, badgeColor)
     }
+
+    /** Dòng log thuộc nhóm "hệ thống" (mở app, cấu hình, tự sửa lỗi, chuyển acc…) → nhãn SYSTEM; còn lại INFO. */
+    private val SYSTEM_TAGS = setOf(
+        "CFG", "OPEN", "BTN", "FOUND", "DEV", "WDG", "WDG-RECOVER", "RECOVER", "RELOAD", "SWITCH", "FIX", "NORM", "REST", "FEED",
+    )
+
+    /** Cảnh báo đếm vào ô "Cảnh báo": WARN/ERR thật — không tính các dòng "Bỏ qua" (quảng cáo/live/video không hợp) vì đó là hành vi bình thường. */
+    private val NON_WARNING_TAGS = setOf("SKIP", "LIKE SKIP", "CMT SKIP", "LIVE-FEED")
 
     private fun clean(s: String): String = s.trim().take(140)
 
     // ─────────────────────────────────────────────────────────
-    //  Hiển thị: dòng "Đang làm" + danh sách log
+    //  Hiển thị: dòng trạng thái + danh sách log
     // ─────────────────────────────────────────────────────────
 
     private fun showAction(e: LogEntry, dots: Boolean) {
         stopDotsAnimation()
+        curAction = e; curActionDots = dots
         val line = "${e.icon} ${e.text}"
-        tvBubbleLog?.let { b -> b.text = line; b.visibility = View.VISIBLE }
-        if (isMinimized) return               // thu nhỏ: chỉ cập nhật chú thích bong bóng, không chạy hiệu ứng
-        tvAction?.setTextColor(e.color)
+        if (mode != Mode.FULL) return          // thu nhỏ: không có dòng trạng thái để cập nhật, không chạy hiệu ứng
+        tvAction?.setTextColor(if (e.color == C_MUTED || e.color == C_DIM) C_TEXT else e.color)
         if (dots) {
             startDotsAnimation(line.trimEnd('.', '…', ' '))
         } else {
@@ -481,7 +542,7 @@ object OverlayFarmMonitor {
         }
     }
 
-    /** Thêm vào dữ liệu nhật ký (luôn) và dựng View (chỉ khi popup đang mở rộng). */
+    /** Thêm vào dữ liệu nhật ký (luôn) và dựng View (chỉ khi popup đang ở FULL). */
     private fun appendLogRow(time: String, e: LogEntry) {
         val last = logData.peekLast()
         if (last != null && last.line == "${e.icon} ${e.text}") {
@@ -489,14 +550,12 @@ object OverlayFarmMonitor {
             last.time = time
             last.msgView?.text = "${last.line}  ×${last.count}"
             last.timeView?.text = time
-            tvBubbleLog?.let { b -> b.text = last.line; b.visibility = View.VISIBLE }
             return
         }
         val row = LogRow(time, e)
         logData.addLast(row)
         while (logData.size > MAX_LOG_ROWS) logData.removeFirst()
-        tvBubbleLog?.let { b -> b.text = row.line; b.visibility = View.VISIBLE }
-        if (isMinimized) return
+        if (mode != Mode.FULL) return
 
         val list = logList ?: return
         addRowView(list, row, animate = true)
@@ -507,33 +566,48 @@ object OverlayFarmMonitor {
 
     private fun addRowView(list: LinearLayout, row: LogRow, animate: Boolean = false) {
         val ctx = list.context
+        val d = { n: Int -> dp(ctx, n) }
         val line = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
+        // chấm mốc thời gian (đường nối dọc do khung nhật ký vẽ chung)
+        val dot = View(ctx).apply {
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(row.entry.badgeColor) }
+        }
+        line.addView(dot, LinearLayout.LayoutParams(d(8), d(8)).apply { setMargins(d(2), 0, d(8), 0) })
         val tvTime = TextView(ctx).apply {
-            text = row.time; textSize = 7.5f; setTextColor(C_DIM)
+            text = row.time; textSize = 10f; setTextColor(C_DIM)
             typeface = Typeface.MONOSPACE; includeFontPadding = false
         }
+        line.addView(tvTime, LinearLayout.LayoutParams(d(54), LinearLayout.LayoutParams.WRAP_CONTENT))
+        val badge = TextView(ctx).apply {
+            text = row.entry.badge; textSize = 8.5f; setTextColor(row.entry.badgeColor)
+            typeface = Typeface.DEFAULT_BOLD; includeFontPadding = false; gravity = Gravity.CENTER
+            setPadding(d(6), d(2), d(6), d(2))
+            background = GradientDrawable().apply {
+                setColor(row.entry.badgeColor and 0x00FFFFFF or 0x2E000000); cornerRadius = d(6).toFloat()
+            }
+        }
+        line.addView(badge, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { setMargins(0, 0, d(7), 0) })
         val tvMsg = TextView(ctx).apply {
             text = if (row.count > 1) "${row.line}  ×${row.count}" else row.line
-            textSize = 9f; setTextColor(row.entry.color)
+            textSize = 10.5f; setTextColor(row.entry.color)
             maxLines = 1; ellipsize = TextUtils.TruncateAt.END; includeFontPadding = false
         }
-        line.addView(tvTime, LinearLayout.LayoutParams(dp(ctx, 38), LinearLayout.LayoutParams.WRAP_CONTENT))
         line.addView(tvMsg, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        list.addView(line, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(ctx, LOG_ROW_DP)))
+        list.addView(line, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, d(LOG_ROW_DP)))
         row.msgView = tvMsg; row.timeView = tvTime
-        // v1.11.0: dòng mới hiện dần + trượt nhẹ từ dưới lên (chỉ dòng mới; dựng lại hàng loạt thì không)
+        // dòng mới hiện dần + trượt nhẹ từ dưới lên (chỉ dòng mới; dựng lại hàng loạt thì không)
         if (animate) {
             line.alpha = 0f
-            line.translationY = dp(ctx, 5).toFloat()
+            line.translationY = d(5).toFloat()
             line.animate().alpha(1f).translationY(0f).setDuration(200L).start()
         }
     }
 
-    /** Dựng lại toàn bộ View nhật ký từ dữ liệu (khi mở rộng popup / lúc show). */
+    /** Dựng lại toàn bộ View nhật ký từ dữ liệu (khi mở lại FULL / lúc show). */
     private fun renderLogRows() {
         val list = logList ?: return
         list.removeAllViews()
@@ -543,17 +617,95 @@ object OverlayFarmMonitor {
 
     private fun scrollLogToEnd() {
         val box = logBox as? android.widget.ScrollView ?: return
-        box.post { box.scrollTo(0, logList?.height ?: 0) }
+        box.post { box.fullScroll(View.FOCUS_DOWN) }
     }
 
     private fun toggleLogSize() {
         logLarge = !logLarge
         val box = logBox ?: return
         val lp = box.layoutParams
-        lp.height = dp(box.context, (if (logLarge) LOG_ROWS_LARGE else LOG_ROWS_SMALL) * LOG_ROW_DP + 8)
+        lp.height = dp(box.context, (if (logLarge) LOG_ROWS_LARGE else LOG_ROWS_SMALL) * LOG_ROW_DP + 4)
         box.layoutParams = lp
-        tvLogHint?.text = if (logLarge) "Chạm để thu gọn ▴" else "Chạm để mở rộng ▾"
+        tvLogHint?.text = if (logLarge) "Thu gọn  ‹" else "Xem tất cả  ›"
         scrollLogToEnd()
+    }
+
+    // ─────────────────────────────────────────────────────────
+    //  Vẽ lại các khối từ số liệu hiện tại (chạy trên main thread)
+    // ─────────────────────────────────────────────────────────
+
+    private fun resolvePlatform(label: String) {
+        val l = label.uppercase(Locale.ROOT)
+        when {
+            l.contains("TKFB") -> { platformName = "Facebook";  platformLogo = R.drawable.ic_logo_facebook }
+            l.contains("TKIG") -> { platformName = "Instagram"; platformLogo = R.drawable.ic_logo_instagram }
+            l.contains("TKSC") -> { platformName = "Snapchat";  platformLogo = R.drawable.ic_logo_snapchat }
+            l.contains("TKTH") -> { platformName = "Threads";   platformLogo = R.drawable.ic_logo_x }
+            l.contains("TKX")  -> { platformName = "X";         platformLogo = R.drawable.ic_logo_x }
+            else               -> { platformName = "TikTok";    platformLogo = R.drawable.ic_logo_tiktok }
+        }
+    }
+
+    private fun resetNumbers() {
+        accName = ""; accIndex = 0; accTotal = 0
+        doneCount = 0; totalCount = 0; progressFraction = 0f; sessionTotalSecs = 0L
+        likeCount = 0; followCount = 0; warnCount = 0
+        rewardValue = 0.0; consecErrors = 0; maxErrors = 0
+        cdLabel = ""
+    }
+
+    private fun renderAll() {
+        renderAccount(); renderProgress(); renderCounters(); refreshPauseButton()
+        renderTimes()
+    }
+
+    private fun renderAccount() {
+        tvUser?.text = if (accName.isEmpty()) "@—" else "@$accName"
+        val kind = if (isTaskMode) "NHIỆM VỤ" else "NUÔI ACC"
+        val idx  = if (accTotal > 0) "  ·  $accIndex/$accTotal" else ""
+        // Nền tảng đã hiện ở avatar → nhãn chỉ ghi chế độ + acc n/N (ngắn để không bị cắt ở máy 360dp)
+        tvModeChip?.text = "$kind$idx"
+        tvReward?.text = if (rewardValue > 0.0) "+${formatReward(rewardValue)} xu" else ""
+    }
+
+    /** Nuôi acc: % = (acc đã xong + phần đã trôi của phiên acc hiện tại) / tổng acc. */
+    private fun farmProgressFromClock() {
+        if (isTaskMode) return
+        doneCount  = (accIndex - 1).coerceAtLeast(0)
+        totalCount = accTotal
+        val session = if (sessionTotalSecs > 0L)
+            (1f - tickSessionSecs.toFloat() / sessionTotalSecs.toFloat()).coerceIn(0f, 1f) else 0f
+        progressFraction = if (accTotal > 0) ((doneCount + session) / accTotal.toFloat()).coerceIn(0f, 1f) else 0f
+    }
+
+    private fun renderProgress() {
+        tvProgress?.text = "$doneCount / $totalCount"
+        tvPercent?.text  = "${(progressFraction * 100f).toInt()}%"
+        tvMiniDone?.text = "Hoàn thành: $doneCount/$totalCount"
+        progressRing?.setProgress(progressFraction)
+        progressFillFull?.animate()?.scaleX(progressFraction)?.setDuration(250L)?.start()
+        progressFillMini?.animate()?.scaleX(progressFraction)?.setDuration(250L)?.start()
+    }
+
+    private fun renderCounters() {
+        tvLikes?.text = likeCount.toString()
+        tvAdded?.text = followCount.toString()
+        tvWarn?.text  = warnCount.toString()
+        tvMiniLikes?.text = likeCount.toString()
+        tvMiniWarn?.text  = warnCount.toString()
+        // Ô Cảnh báo đổi màu theo lỗi liên tiếp của nhiệm vụ: vàng khi có lỗi, đỏ khi chạm ngưỡng dừng.
+        val c = when {
+            maxErrors > 0 && consecErrors >= maxErrors -> C_RED
+            consecErrors > 0                           -> C_AMBER
+            warnCount > 0                              -> C_AMBER
+            else                                       -> C_DIM
+        }
+        warnCardBg?.setStroke(dp(overlayView?.context ?: return, 1), c and 0x00FFFFFF or 0x66000000)
+    }
+
+    private fun renderTimes() {
+        val t = formatTime(tickRunSecs)
+        for (tv in timeTexts) tv.text = t
     }
 
     // ─────────────────────────────────────────────────────────
@@ -564,22 +716,22 @@ object OverlayFarmMonitor {
         stopTicker()
         val r = object : Runnable {
             override fun run() {
-                // Tạm dừng / thu nhỏ: không có gì để cập nhật → thức dậy thưa hơn (tiết kiệm pin).
-                val idle = isPaused || isMinimized
-                if (!idle) {
+                if (!isPaused) {
                     tickRunSecs += 1L
                     if (tickSessionSecs > 0) tickSessionSecs = maxOf(0, tickSessionSecs - 1L)
                     if (tickTotalSecs > 0)   tickTotalSecs   = maxOf(0, tickTotalSecs - 1L)
-                    tvRunTime?.text     = formatTime(tickRunSecs)
-                    tvSessionTime?.text = formatTime(tickSessionSecs)
-                    tvTotalTime?.text   = formatTime(tickTotalSecs)
-                    if (cdActive) tvCdTime?.text = formatSecs(cdLeftNow())
-                } else if (isMinimized && !isPaused) {
-                    tickRunSecs += 3L
-                    if (tickSessionSecs > 0) tickSessionSecs = maxOf(0, tickSessionSecs - 3L)
-                    if (tickTotalSecs > 0)   tickTotalSecs   = maxOf(0, tickTotalSecs - 3L)
+                    renderTimes()
+                    if (mode == Mode.FULL && cdActive) {
+                        // thanh đếm ngược do animator lo; chỉ cập nhật chữ
+                        renderCdText(cdLeftNow())
+                    }
+                    // % của nuôi acc trôi theo thời gian phiên — cập nhật thưa (5 giây/lần) cho đỡ tốn
+                    if (!isTaskMode && mode != Mode.CHIP && tickRunSecs % 5L == 0L) {
+                        farmProgressFromClock(); renderProgress()
+                    }
                 }
-                handler.postDelayed(this, if (idle) 3_000L else 1_000L)
+                // Tạm dừng: không có gì để cập nhật → thức dậy thưa hơn (tiết kiệm pin).
+                handler.postDelayed(this, if (isPaused) 3_000L else 1_000L)
             }
         }
         tickerRunnable = r
@@ -619,12 +771,12 @@ object OverlayFarmMonitor {
         dotsPhase = 0
     }
 
-    /** v1.11.0: nút co nhẹ khi nhấn, bật lại khi thả (không chặn sự kiện click). */
+    /** Nút co nhẹ khi nhấn, bật lại khi thả (không chặn sự kiện click). */
     @android.annotation.SuppressLint("ClickableViewAccessibility")
     private fun pressEffect(v: View) {
         v.setOnTouchListener { view, ev ->
             when (ev.actionMasked) {
-                MotionEvent.ACTION_DOWN -> view.animate().scaleX(0.94f).scaleY(0.94f).setDuration(90L).start()
+                MotionEvent.ACTION_DOWN -> view.animate().scaleX(0.95f).scaleY(0.95f).setDuration(90L).start()
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> view.animate().scaleX(1f).scaleY(1f).setDuration(140L).start()
             }
             false
@@ -638,356 +790,466 @@ object OverlayFarmMonitor {
     }
 
     // ─────────────────────────────────────────────────────────
+    //  View phụ: vòng quay · vòng tiến trình · cột sóng
+    // ─────────────────────────────────────────────────────────
+
+    /** Vòng cung quay — chỉ quay khi [start] (FULL + đang chạy). Một ObjectAnimator xoay View, không vẽ lại từng khung hình. */
+    private class ArcSpinner(context: Context, private val arc: Int, private val track: Int) : View(context) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+        private val oval = RectF()
+        private var anim: ObjectAnimator? = null
+
+        override fun onDraw(canvas: Canvas) {
+            val w = width.toFloat(); val h = height.toFloat()
+            val sw = minOf(w, h) * 0.12f
+            paint.strokeWidth = sw
+            oval.set(sw, sw, w - sw, h - sw)
+            paint.color = track; canvas.drawArc(oval, 0f, 360f, false, paint)
+            paint.color = arc;   canvas.drawArc(oval, -90f, 110f, false, paint)
+        }
+
+        fun start() {
+            if (anim?.isRunning == true) return
+            anim = ObjectAnimator.ofFloat(this, View.ROTATION, 0f, 360f).apply {
+                duration = 1_100L; repeatCount = ObjectAnimator.INFINITE; interpolator = LinearInterpolator(); start()
+            }
+        }
+
+        fun stop() { anim?.cancel(); anim = null }
+    }
+
+    /** Vòng tiến trình có dấu ✓ ở giữa. */
+    private class ProgressRing(context: Context, private val arc: Int, private val track: Int, private val check: Drawable?) : View(context) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+        private val oval = RectF()
+        private var fraction = 0f
+
+        fun setProgress(f: Float) { fraction = f.coerceIn(0f, 1f); invalidate() }
+
+        override fun onDraw(canvas: Canvas) {
+            val w = width.toFloat(); val h = height.toFloat()
+            val sw = minOf(w, h) * 0.10f
+            paint.strokeWidth = sw
+            oval.set(sw, sw, w - sw, h - sw)
+            paint.color = track; canvas.drawArc(oval, 0f, 360f, false, paint)
+            if (fraction > 0f) { paint.color = arc; canvas.drawArc(oval, -90f, 360f * fraction, false, paint) }
+            check?.let {
+                val pad = (minOf(w, h) * 0.30f).toInt()
+                it.setBounds(pad, pad, width - pad, height - pad)
+                it.draw(canvas)
+            }
+        }
+    }
+
+    /** Bốn cột sóng bên phải ô trạng thái (tĩnh — không tốn pin). */
+    private class SignalBars(context: Context, private var color: Int) : View(context) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val rect = RectF()
+        fun setBarColor(c: Int) { color = c; invalidate() }
+        override fun onDraw(canvas: Canvas) {
+            val w = width.toFloat(); val h = height.toFloat()
+            val gap = w * 0.12f
+            val bw = (w - gap * 3) / 4f
+            val heights = floatArrayOf(0.35f, 0.55f, 0.78f, 1f)
+            paint.color = color
+            for (i in 0 until 4) {
+                val left = i * (bw + gap)
+                rect.set(left, h * (1f - heights[i]), left + bw, h)
+                canvas.drawRoundRect(rect, bw * 0.25f, bw * 0.25f, paint)
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────
     //  View builder
     // ─────────────────────────────────────────────────────────
 
     private fun dp(ctx: Context, n: Int): Int =
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, n.toFloat(), ctx.resources.displayMetrics).toInt()
 
-    private fun buildView(context: Context): View {
-        val d = { n: Int -> dp(context, n) }
+    private fun roundBg(color: Int, radiusDp: Int, ctx: Context, strokeColor: Int? = null): GradientDrawable =
+        GradientDrawable().apply {
+            setColor(color); cornerRadius = dp(ctx, radiusDp).toFloat()
+            if (strokeColor != null) setStroke(dp(ctx, 1).coerceAtLeast(1), strokeColor)
+        }
 
-        val screenW = context.resources.displayMetrics.widthPixels
-        panelWidthPx   = minOf(d(PANEL_WIDTH_DP), (screenW * 0.88f).toInt())
-        circleSizePx   = d(44)
-        bubbleWidthPx  = d(150)
-        bubbleHeightPx = circleSizePx + d(56)
+    private fun tinted(ctx: Context, res: Int, color: Int): Drawable? =
+        ContextCompat.getDrawable(ctx, res)?.mutate()?.also { DrawableCompat.setTint(it, color) }
 
-        val wrapper = FrameLayout(context)
+    private fun icon(ctx: Context, res: Int, color: Int, sizeDp: Int): ImageView =
+        ImageView(ctx).apply {
+            setImageDrawable(tinted(ctx, res, color))
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            layoutParams = LinearLayout.LayoutParams(dp(ctx, sizeDp), dp(ctx, sizeDp))
+        }
 
-        // ── Panel đầy đủ ────────────────────────────────────
-        val root = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(d(10), d(8), d(10), d(8))
-            background = GradientDrawable().apply {
-                setColor(C_BG)
-                cornerRadius = d(14).toFloat()
-                setStroke(d(1), C_BORDER)
+    private fun vDivider(ctx: Context, heightDp: Int = 16): View =
+        View(ctx).apply {
+            setBackgroundColor(C_BORDER)
+            layoutParams = LinearLayout.LayoutParams(dp(ctx, 1), dp(ctx, heightDp)).apply { setMargins(dp(ctx, 7), 0, dp(ctx, 7), 0) }
+        }
+
+    private fun text(ctx: Context, t: String, sizeSp: Float, color: Int, bold: Boolean = false, mono: Boolean = false): TextView =
+        TextView(ctx).apply {
+            text = t; textSize = sizeSp; setTextColor(color)
+            typeface = when {
+                bold -> Typeface.DEFAULT_BOLD
+                mono -> Typeface.MONOSPACE
+                else -> Typeface.DEFAULT
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = d(8).toFloat()
+            includeFontPadding = false
         }
-        fullPanel = root
-        wrapper.addView(root, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-        ))
 
-        // ── Bong bóng thu nhỏ (vòng tròn logo + chú thích log mới nhất) ──
-        val bubbleWrapper = FrameLayout(context).apply { visibility = View.GONE }
-
-        val bubbleText = TextView(context).apply {
-            textSize = 8f
-            setTextColor(C_TEXT)
-            gravity  = Gravity.CENTER
-            maxLines = 2
-            ellipsize = TextUtils.TruncateAt.END
-            background = GradientDrawable().apply {
-                setColor(C_BG2); cornerRadius = d(10).toFloat(); setStroke(d(1), C_BORDER)
-            }
-            setPadding(d(6), d(3), d(6), d(3))
-            visibility = View.GONE
+    /** Nút tròn nhỏ có icon (─, ✕, ⌃, ›…). */
+    private fun roundIconButton(ctx: Context, res: Int, onClick: () -> Unit): ImageView =
+        ImageView(ctx).apply {
+            setImageDrawable(tinted(ctx, res, C_MUTED))
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(dp(ctx, 5), dp(ctx, 5), dp(ctx, 5), dp(ctx, 5))
+            background = roundBg(C_CARD, 16, ctx, C_BORDER)
+            layoutParams = LinearLayout.LayoutParams(dp(ctx, 26), dp(ctx, 26)).apply { setMargins(dp(ctx, 4), 0, 0, 0) }
+            pressEffect(this)
+            setOnClickListener { onClick() }
         }
-        bubbleWrapper.addView(bubbleText, FrameLayout.LayoutParams(
-            d(144), FrameLayout.LayoutParams.WRAP_CONTENT,
-        ).apply { gravity = Gravity.BOTTOM or Gravity.START; bottomMargin = circleSizePx + d(4) })
-        tvBubbleLog = bubbleText
 
-        val ring = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(C_BG)
-            setStroke(d(2), C_GREEN)
+    /** Logo AT PRO bo góc (icon_app); lỗi tải thì rơi về chữ "AT". */
+    private fun atLogo(ctx: Context, sizeDp: Int): View {
+        val dr = ContextCompat.getDrawable(ctx, R.drawable.icon_app)
+        if (dr == null) return text(ctx, "AT", 11f, C_ACCENT, bold = true).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         }
-        bubbleRingBg = ring
-        val circle = FrameLayout(context).apply {
-            background = ring
+        return ImageView(ctx).apply {
+            setImageDrawable(dr)
+            scaleType = ImageView.ScaleType.CENTER_CROP
             clipToOutline = true
             outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: android.graphics.Outline) {
-                    outline.setOval(0, 0, view.width, view.height)
+                    outline.setRoundRect(0, 0, view.width, view.height, dp(ctx, sizeDp / 4).toFloat())
                 }
             }
+            layoutParams = LinearLayout.LayoutParams(dp(ctx, sizeDp), dp(ctx, sizeDp))
         }
-        try {
-            val icon = context.packageManager.getApplicationIcon(context.packageName)
-            circle.addView(ImageView(context).apply {
-                setImageDrawable(icon)
-                scaleType = ImageView.ScaleType.FIT_CENTER
-                setPadding(d(5), d(5), d(5), d(5))
-            }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-        } catch (_: Exception) {
-            circle.addView(TextView(context).apply {
-                text = "AT"; textSize = 10f; setTextColor(C_ACCENT)
-                typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER
-            }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-        }
-        // Chạm vào vòng tròn được xử lý ở touch listener của wrapper (ACTION_UP + !hasDragged).
-        bubbleWrapper.addView(circle, FrameLayout.LayoutParams(circleSizePx, circleSizePx).apply {
-            gravity = Gravity.BOTTOM or Gravity.START
-        })
-        circleView = bubbleWrapper
-        wrapper.addView(bubbleWrapper, FrameLayout.LayoutParams(d(150), circleSizePx + d(48)))
+    }
 
-        fun text(t: String, sizeSp: Float, color: Int, bold: Boolean = false, mono: Boolean = false): TextView =
-            TextView(context).apply {
-                text = t; textSize = sizeSp; setTextColor(color)
-                typeface = when {
-                    bold -> Typeface.DEFAULT_BOLD
-                    mono -> Typeface.MONOSPACE
-                    else -> Typeface.DEFAULT
-                }
-                includeFontPadding = false
-            }
+    /** Chấm trạng thái (xanh = chạy, vàng = tạm dừng) có quầng sáng. */
+    private fun statusDot(ctx: Context): View {
+        val glow = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(C_GREEN and 0x00FFFFFF or 0x33000000) }
+        val dot  = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(C_GREEN) }
+        pillDots.add(dot); pillDots.add(glow)
+        return FrameLayout(ctx).apply {
+            addView(View(ctx).apply { background = glow }, FrameLayout.LayoutParams(dp(ctx, 12), dp(ctx, 12)).apply { gravity = Gravity.CENTER })
+            addView(View(ctx).apply { background = dot }, FrameLayout.LayoutParams(dp(ctx, 8), dp(ctx, 8)).apply { gravity = Gravity.CENTER })
+            layoutParams = LinearLayout.LayoutParams(dp(ctx, 12), dp(ctx, 12)).apply { setMargins(0, 0, dp(ctx, 5), 0) }
+        }
+    }
 
-        // ── Header: [logo] AT PRO ● NHÃN ........ 00:00 [─] ──
-        val header = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity     = Gravity.CENTER_VERTICAL
-        }
-        ContextCompat.getDrawable(context, R.drawable.icon_app)?.let { logoDrawable ->
-            val logo = ImageView(context).apply {
-                setImageDrawable(logoDrawable)
-                scaleType = ImageView.ScaleType.CENTER_CROP
-                clipToOutline = true
-                outlineProvider = object : ViewOutlineProvider() {
-                    override fun getOutline(view: View, outline: android.graphics.Outline) {
-                        outline.setRoundRect(0, 0, view.width, view.height, d(5).toFloat())
-                    }
-                }
-            }
-            header.addView(logo, LinearLayout.LayoutParams(d(16), d(16)).apply { setMargins(0, 0, d(5), 0) })
-        }
-        header.addView(text("AT PRO", 9.5f, C_TEXT, bold = true).apply { letterSpacing = 0.06f })
-
-        val glow = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL; setColor(C_GREEN and 0x00FFFFFF or 0x33000000)
-        }.also { statusDotGlowBg = it }
-        val dot = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL; setColor(C_GREEN)
-        }.also { statusDotBg = it }
-        val dotStack = FrameLayout(context).apply {
-            addView(View(context).apply { background = glow },
-                FrameLayout.LayoutParams(d(9), d(9)).apply { gravity = Gravity.CENTER })
-            addView(View(context).apply { background = dot },
-                FrameLayout.LayoutParams(d(6), d(6)).apply { gravity = Gravity.CENTER })
-        }
-        header.addView(dotStack, LinearLayout.LayoutParams(d(9), d(9)).apply {
-            gravity = Gravity.CENTER_VERTICAL; setMargins(d(5), 0, 0, 0)
-        })
-        tvServiceLabel = text("", 8f, C_DIM).apply { visibility = View.GONE }
-        header.addView(tvServiceLabel, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
-        ).apply { setMargins(d(6), 0, 0, 0) })
-        header.addView(View(context).apply { layoutParams = LinearLayout.LayoutParams(0, 1, 1f) })
-
-        tvRunTime = text("00:00", 8.5f, C_MUTED, mono = true)
-        header.addView(tvRunTime, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
-        ).apply { setMargins(0, 0, d(4), 0) })
-
-        val minBtn = ImageButton(context).apply {
-            ContextCompat.getDrawable(context, R.drawable.ic_ov_min)?.mutate()?.let {
-                DrawableCompat.setTint(it, C_MUTED); setImageDrawable(it)
-            }
-            setBackgroundColor(Color.TRANSPARENT)
-            setPadding(d(2), 0, 0, 0)
-            setOnClickListener { onMinimizeClick() }
-        }
-        header.addView(minBtn, LinearLayout.LayoutParams(d(18), d(18)).apply { gravity = Gravity.CENTER_VERTICAL })
-        root.addView(header)
-
-        // ── Tóm tắt: hai khối, mỗi chế độ chỉ hiện một ──
-        // NUÔI ACC: acc · i/n + Phiên / Tổng
-        val farmGroup = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, d(7), 0, 0)
-        }
-        tvAccount = text("@—  ·  —/—", 11f, C_TEXT, bold = true).apply {
-            maxLines = 1; ellipsize = TextUtils.TruncateAt.END
-        }
-        farmGroup.addView(tvAccount)
-        val timeRow = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, d(3), 0, 0)
-        }
-        tvSessionTime = text("--:--", 9f, C_GREEN, bold = true)
-        tvTotalTime   = text("--:--", 9f, C_TEXT)
-        timeRow.addView(text("Phiên ", 8f, C_DIM)); timeRow.addView(tvSessionTime)
-        timeRow.addView(text("   Tổng ", 8f, C_DIM)); timeRow.addView(tvTotalTime)
-        farmGroup.addView(timeRow)
-        root.addView(farmGroup)
-        farmRows = farmGroup
-
-        // NHIỆM VỤ: acc + i/N · ✓ n/N + thưởng · thanh tiến độ · ⚠ ❤ ＋
-        val taskGroup = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, d(7), 0, 0)
-            visibility  = View.GONE
-        }
-        val taskTop = LinearLayout(context).apply {
+    /** Viên thuốc trạng thái "● Đang chạy" — chạm để Tạm dừng / Tiếp tục. */
+    private fun statusPill(ctx: Context, withChevron: Boolean): View {
+        val tv = text(ctx, "Đang chạy", 11f, C_GREEN, bold = true)
+        pillTexts.add(tv)
+        return LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(ctx, 9), dp(ctx, 5), dp(ctx, 9), dp(ctx, 5))
+            background = roundBg(C_GREEN and 0x00FFFFFF or 0x1F000000, 14, ctx, C_GREEN and 0x00FFFFFF or 0x55000000)
+            addView(statusDot(ctx))
+            addView(tv)
+            if (withChevron) addView(icon(ctx, R.drawable.ic_ov_chev_down, C_GREEN, 12).apply {
+                (layoutParams as LinearLayout.LayoutParams).setMargins(dp(ctx, 2), 0, 0, 0)
+            })
+            pressEffect(this)
+            setOnClickListener { onPauseResumeClick() }
         }
-        tvTaskAccount = text("@—", 11.5f, C_TEXT, bold = true).apply {
+    }
+
+    private fun progressBar(ctx: Context, heightDp: Int, fillRef: (View) -> Unit): View {
+        val track = FrameLayout(ctx).apply { background = roundBg(C_BORDER and 0x00FFFFFF or 0x99000000.toInt(), 4, ctx) }
+        val fill = View(ctx).apply {
+            pivotX = 0f; scaleX = 0f
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(C_ACCENT, C_ACCENT2))
+                .apply { cornerRadius = dp(ctx, 4).toFloat() }
+        }
+        fillRef(fill)
+        track.addView(fill, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, dp(ctx, heightDp)))
+        track.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(ctx, heightDp))
+        return track
+    }
+
+    private fun buildView(context: Context): View {
+        val d = { n: Int -> dp(context, n) }
+        pillTexts.clear(); pillDots.clear(); timeTexts.clear()
+
+        val screenW = context.resources.displayMetrics.widthPixels
+        panelWidthPx = minOf(d(PANEL_WIDTH_DP), (screenW * 0.94f).toInt())
+        miniWidthPx  = minOf(d(MINI_WIDTH_DP),  (screenW * 0.90f).toInt())
+
+        val wrapper = FrameLayout(context)
+
+        // ═════ FULL ═════════════════════════════════════════════════════════
+        val full = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(d(12), d(10), d(12), d(12))
+            background = roundBg(C_BG, 20, context, C_BORDER)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = d(10).toFloat()
+        }
+        fullPanel = full
+        wrapper.addView(full, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
+
+        // Header: [logo] AT PRO | ● Đang chạy ⌄ ........ 00:00 [─] [✕]   (nền tảng hiện ở avatar bên dưới)
+        val header = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        header.addView(atLogo(context, 28).apply { (layoutParams as LinearLayout.LayoutParams).setMargins(0, 0, d(7), 0) })
+        header.addView(text(context, "AT PRO", 13f, C_TEXT, bold = true).apply { letterSpacing = 0.04f })
+        header.addView(vDivider(context))
+        header.addView(statusPill(context, withChevron = true))
+        header.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+        val tFull = text(context, "00:00", 12f, C_TEXT, bold = true, mono = true); timeTexts.add(tFull)
+        header.addView(tFull, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { setMargins(d(6), 0, d(4), 0) })
+        header.addView(roundIconButton(context, R.drawable.ic_ov_min) { setMode(Mode.MINI) })
+        header.addView(roundIconButton(context, R.drawable.ic_ov_close) { setMode(Mode.CHIP) })
+        full.addView(header)
+
+        // Thẻ tài khoản + tiến trình
+        val profile = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(d(12), d(10), d(12), d(10))
+            background = roundBg(C_CARD, 16, context, C_BORDER)
+        }
+        val avatar = ImageView(context).apply {
+            setImageResource(platformLogo)
+            contentDescription = platformName
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            setPadding(d(10), d(10), d(10), d(10))
+            clipToOutline = true
+            outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: android.graphics.Outline) { outline.setOval(0, 0, view.width, view.height) }
+            }
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.BLACK); setStroke(d(2), C_ACCENT) }
+        }
+        profile.addView(avatar, LinearLayout.LayoutParams(d(48), d(48)).apply { setMargins(0, 0, d(10), 0) })
+        val who = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        tvUser = text(context, "@—", 15f, C_TEXT, bold = true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        who.addView(tvUser)
+        tvModeChip = text(context, "", 9.5f, C_BLUE, bold = true).apply {
+            setPadding(d(8), d(3), d(8), d(3))
+            background = roundBg(C_ACCENT and 0x00FFFFFF or 0x26000000, 8, context, C_ACCENT and 0x00FFFFFF or 0x59000000)
             maxLines = 1; ellipsize = TextUtils.TruncateAt.END
         }
-        tvTaskAccIdx = text("", 8f, C_DIM)
-        taskTop.addView(tvTaskAccount, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        taskTop.addView(tvTaskAccIdx)
-        taskGroup.addView(taskTop)
+        who.addView(tvModeChip, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { setMargins(0, d(5), 0, 0) })
+        tvReward = text(context, "", 10f, C_AMBER, bold = true)
+        who.addView(tvReward, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { setMargins(0, d(3), 0, 0) })
+        profile.addView(who, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        profile.addView(View(context).apply { setBackgroundColor(C_BORDER) },
+            LinearLayout.LayoutParams(d(1), d(46)).apply { setMargins(d(8), 0, d(10), 0) })
+        val prog = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        val progTop = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        progressRing = ProgressRing(context, C_ACCENT, C_BORDER, tinted(context, R.drawable.ic_ov_check, C_ACCENT))
+        progTop.addView(progressRing, LinearLayout.LayoutParams(d(32), d(32)).apply { setMargins(0, 0, d(7), 0) })
+        val progTexts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        tvProgress = text(context, "0 / 0", 16f, C_TEXT, bold = true).apply { maxLines = 1 }
+        progTexts.addView(tvProgress)
+        progTexts.addView(text(context, "Tiến trình", 10.5f, C_MUTED))
+        progTop.addView(progTexts)
+        prog.addView(progTop)
+        val progBottom = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        progBottom.addView(progressBar(context, 5) { progressFillFull = it }, LinearLayout.LayoutParams(0, d(5), 1f))
+        tvPercent = text(context, "0%", 10.5f, C_TEXT, bold = true)
+        progBottom.addView(tvPercent, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { setMargins(d(6), 0, 0, 0) })
+        prog.addView(progBottom, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { setMargins(0, d(6), 0, 0) })
+        profile.addView(prog, LinearLayout.LayoutParams(d(112), LinearLayout.LayoutParams.WRAP_CONTENT))
+        full.addView(profile, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { setMargins(0, d(10), 0, 0) })
 
-        val taskMid = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, d(3), 0, 0)
-        }
-        tvTaskProgress = text("✓ 0/0", 10.5f, C_GREEN, bold = true)
-        tvTaskReward   = text("", 8.5f, C_AMBER)
-        taskMid.addView(tvTaskProgress, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        taskMid.addView(tvTaskReward)
-        taskGroup.addView(taskMid)
-
-        val fill = View(context).apply {
-            background = GradientDrawable().apply { setColor(C_GREEN); cornerRadius = d(2).toFloat() }
-        }
-        val track = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            background = GradientDrawable().apply {
-                setColor(C_BORDER and 0x00FFFFFF or 0x33000000); cornerRadius = d(2).toFloat()
+        // 3 ô số
+        fun statCard(res: Int, color: Int, label: String, setValue: (TextView) -> Unit, setBg: ((GradientDrawable) -> Unit)? = null): View {
+            val card = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(d(8), d(8), d(8), d(8))
             }
-            addView(fill, LinearLayout.LayoutParams(0, d(3), 0f))
-            addView(View(context), LinearLayout.LayoutParams(0, d(3), 1f))
-        }
-        progressTrack = track
-        taskGroup.addView(track, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, d(3))
-            .apply { setMargins(0, d(4), 0, 0) })
-
-        val chips = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, d(4), 0, 0)
-        }
-        tvConsecErrors = text("⚠ 0", 8.5f, C_DIM)
-        tvTaskLikes    = text("❤ 0", 8.5f, C_PINK)
-        tvTaskFollows  = text("＋ 0", 8.5f, C_SKY)
-        chips.addView(tvTaskLikes)
-        chips.addView(tvTaskFollows, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(d(8), 0, 0, 0) })
-        chips.addView(tvConsecErrors, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(d(8), 0, 0, 0) })
-        taskGroup.addView(chips)
-        root.addView(taskGroup)
-        taskRows = taskGroup
-
-        // ── Dòng "Đang làm" ──
-        tvAction = TextView(context).apply {
-            textSize = 10f
-            setTextColor(C_MUTED)
-            maxLines = 1
-            ellipsize = TextUtils.TruncateAt.END
-            includeFontPadding = false
-            setPadding(0, d(7), 0, 0)
-        }
-        root.addView(tvAction)
-
-        // ── Thanh đếm ngược: [nhãn ........ 8s] + thanh mỏng ──
-        val cd = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, d(4), 0, 0)
-            visibility = View.GONE
-        }
-        val cdTop = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-        tvCdLabel = text("", 8f, C_DIM)
-        tvCdTime  = text("", 8f, C_SKY, mono = true)
-        cdTop.addView(tvCdLabel, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        cdTop.addView(tvCdTime)
-        cd.addView(cdTop)
-        val cdTrack = FrameLayout(context).apply {
-            background = GradientDrawable().apply {
-                setColor(C_BORDER and 0x00FFFFFF or 0x66000000); cornerRadius = d(2).toFloat()
+            val bg = roundBg(color and 0x00FFFFFF or 0x14000000, 14, context, color and 0x00FFFFFF or 0x59000000)
+            card.background = bg
+            setBg?.invoke(bg)
+            val badge = FrameLayout(context).apply {
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color and 0x00FFFFFF or 0x33000000) }
+                addView(icon(context, res, color, 15), FrameLayout.LayoutParams(d(15), d(15)).apply { gravity = Gravity.CENTER })
             }
+            card.addView(badge, LinearLayout.LayoutParams(d(28), d(28)).apply { setMargins(0, 0, d(7), 0) })
+            val col = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+            val v = text(context, "0", 16f, C_TEXT, bold = true); setValue(v)
+            col.addView(v)
+            col.addView(text(context, label, 10f, C_MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+            card.addView(col, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            return card
         }
-        val cdBar = View(context).apply {
-            background = GradientDrawable().apply { setColor(C_SKY); cornerRadius = d(2).toFloat() }
-            pivotX = 0f
+        val stats = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        stats.addView(statCard(R.drawable.ic_ov_heart, C_PINK, "Lượt thích", { tvLikes = it }),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        stats.addView(statCard(R.drawable.ic_ov_plus, C_ACCENT, "Đã thêm", { tvAdded = it }),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(d(6), 0, d(6), 0) })
+        stats.addView(statCard(R.drawable.ic_ov_warn, C_AMBER, "Cảnh báo", { tvWarn = it }, { warnCardBg = it }),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        full.addView(stats, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { setMargins(0, d(8), 0, 0) })
+
+        // Trạng thái đang làm (+ thanh đếm ngược ở đáy)
+        val statusCard = FrameLayout(context).apply { background = roundBg(C_ACCENT and 0x00FFFFFF or 0x1A000000, 16, context, C_ACCENT and 0x00FFFFFF or 0x66000000) }
+        val statusRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(d(12), d(10), d(12), d(12))
         }
+        spinner = ArcSpinner(context, C_ACCENT, C_BORDER)
+        statusRow.addView(spinner, LinearLayout.LayoutParams(d(30), d(30)).apply { setMargins(0, 0, d(10), 0) })
+        val statusTexts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        tvAction = text(context, "Đang khởi động…", 13f, C_TEXT, bold = true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        tvActionSub = text(context, "", 10.5f, C_MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        statusTexts.addView(tvAction)
+        statusTexts.addView(tvActionSub, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { setMargins(0, d(3), 0, 0) })
+        statusRow.addView(statusTexts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        signalBars = SignalBars(context, C_ACCENT)
+        statusRow.addView(signalBars, LinearLayout.LayoutParams(d(26), d(22)).apply { setMargins(d(8), 0, 0, 0) })
+        statusCard.addView(statusRow, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
+        val cdTrack = FrameLayout(context).apply { visibility = View.INVISIBLE; background = roundBg(C_BORDER and 0x00FFFFFF or 0x99000000.toInt(), 2, context) }
+        val cdBar = View(context).apply { background = roundBg(C_SKY, 2, context); pivotX = 0f }
         cdFill = cdBar
         cdTrack.addView(cdBar, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, d(3)))
-        cd.addView(cdTrack, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, d(3))
-            .apply { setMargins(0, d(2), 0, 0) })
-        root.addView(cd)
-        cdGroup = cd
+        cdGroup = cdTrack
+        statusCard.addView(cdTrack, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, d(3))
+            .apply { gravity = Gravity.BOTTOM; setMargins(d(12), 0, d(12), d(5)) })
+        full.addView(statusCard, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { setMargins(0, d(8), 0, 0) })
 
-        // ── Nhật ký trực tiếp: 3 dòng, chạm để mở rộng 8 dòng ──
-        // v1.11.0: có tiêu đề + gợi ý để biết chạm vào được
-        val logHeader = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(d(2), d(8), d(2), 0)
+        // Nhật ký hoạt động
+        val logCard = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(d(12), d(9), d(12), d(8))
+            background = roundBg(C_CARD2, 16, context, C_BORDER)
         }
-        logHeader.addView(text("Nhật ký", 8f, C_DIM, bold = true),
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        tvLogHint = text("Chạm để mở rộng ▾", 7.5f, C_DIM)
+        val logHeader = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        logHeader.addView(icon(context, R.drawable.ic_ov_clock, C_ACCENT, 16), LinearLayout.LayoutParams(d(16), d(16)).apply { setMargins(0, 0, d(7), 0) })
+        logHeader.addView(text(context, "Nhật ký hoạt động", 12.5f, C_TEXT, bold = true), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        tvLogHint = text(context, "Xem tất cả  ›", 10.5f, C_BLUE)
         logHeader.addView(tvLogHint)
         logHeader.setOnClickListener { toggleLogSize() }
-        root.addView(logHeader)
+        logCard.addView(logHeader)
+        logCard.addView(View(context).apply { setBackgroundColor(C_BORDER) },
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, d(1)).apply { setMargins(0, d(7), 0, d(3)) })
 
         val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         logList = list
+        // đường nối dọc giữa các chấm mốc (vẽ một lần cho cả danh sách; chấm nằm ở cột trái mỗi dòng)
+        val line = View(context).apply { setBackgroundColor(C_ACCENT and 0x00FFFFFF or 0x66000000) }
+        val content = FrameLayout(context).apply {
+            addView(line, FrameLayout.LayoutParams(d(2), FrameLayout.LayoutParams.MATCH_PARENT)
+                .apply { setMargins(d(5), d(LOG_ROW_DP / 2), 0, d(LOG_ROW_DP / 2)) })
+            addView(list, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
+        }
         val sv = android.widget.ScrollView(context).apply {
             isVerticalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
-            background = GradientDrawable().apply {
-                setColor(C_BG2); cornerRadius = d(8).toFloat(); setStroke(d(1), C_BORDER)
-            }
-            setPadding(d(6), d(3), d(6), d(3))
-            addView(list, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
+            addView(content, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
             setOnClickListener { toggleLogSize() }
         }
         logBox = sv
-        root.addView(sv, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, d(LOG_ROWS_SMALL * LOG_ROW_DP + 8),
-        ).apply { setMargins(0, d(3), 0, 0) })
+        logCard.addView(sv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, d(LOG_ROWS_SMALL * LOG_ROW_DP + 4)))
+        full.addView(logCard, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { setMargins(0, d(8), 0, 0) })
 
-        // ── Nút điều khiển: Tạm dừng / Tiếp tục · Dừng ──
-        val btnRow = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, d(7), 0, 0)
+        // Nút điều khiển: Tạm dừng / Tiếp tục (nút chính, nền chuyển màu) · Dừng
+        val btnRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        val primary = TextView(context).apply {
+            textSize = 14f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER; includeFontPadding = false
+            setPadding(d(10), d(12), d(10), d(12))
+            compoundDrawablePadding = d(7)
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xFF1E90FF.toInt(), C_ACCENT2))
+                .apply { cornerRadius = d(24).toFloat() }
+            pressEffect(this)
+            setOnClickListener { onPauseResumeClick() }
         }
-
-        fun makeBtn(label: String, color: Int, iconRes: Int): TextView =
-            TextView(context).apply {
-                text = label; textSize = 9f
-                setTextColor(color)
-                typeface = Typeface.DEFAULT_BOLD
-                gravity  = Gravity.CENTER
-                setPadding(d(6), d(5), d(6), d(5))
-                ContextCompat.getDrawable(context, iconRes)?.mutate()?.also { dr ->
-                    DrawableCompat.setTint(dr, color)
-                    val sz = d(11)
-                    dr.setBounds(0, 0, sz, sz)
-                    setCompoundDrawables(dr, null, null, null)
-                    compoundDrawablePadding = d(3)
-                }
-                background = GradientDrawable().apply {
-                    setColor(color and 0x00FFFFFF or 0x22000000)
-                    cornerRadius = d(8).toFloat()
-                    setStroke(d(1), color and 0x00FFFFFF or 0x55000000)
-                }
+        btnPauseResume = primary
+        btnRow.addView(primary, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.25f).apply { setMargins(0, 0, d(8), 0) })
+        val stop = TextView(context).apply {
+            text = "Dừng"; textSize = 14f; setTextColor(C_RED); typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER; includeFontPadding = false
+            setPadding(d(10), d(12), d(10), d(12))
+            compoundDrawablePadding = d(7)
+            tinted(context, R.drawable.ic_ov_stop, C_RED)?.let { dr ->
+                dr.setBounds(0, 0, d(14), d(14)); setCompoundDrawables(dr, null, null, null)
             }
-
-        btnPauseResume = makeBtn("Tạm dừng", C_AMBER, R.drawable.ic_ov_pause).also { btn ->
-            pressEffect(btn)
-            btn.setOnClickListener { onPauseResumeClick() }
-            btnRow.addView(btn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                .apply { setMargins(0, 0, d(5), 0) })
+            background = roundBg(C_CARD, 24, context, C_BORDER)
+            pressEffect(this)
+            setOnClickListener { onStopClick() }
         }
-        makeBtn("Dừng", C_RED, R.drawable.ic_ov_stop).also { btn ->
-            pressEffect(btn)
-            btn.setOnClickListener { onStopClick() }
-            btnRow.addView(btn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        }
-        root.addView(btnRow)
+        btnRow.addView(stop, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        full.addView(btnRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { setMargins(0, d(10), 0, 0) })
 
-        // ── Kéo để di chuyển (ngưỡng 8px phân biệt kéo / chạm) ──
+        // ═════ MINI ═════════════════════════════════════════════════════════
+        val mini = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(d(12), d(10), d(12), d(10))
+            background = roundBg(C_BG, 18, context, C_BORDER)
+            visibility = View.GONE
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = d(8).toFloat()
+        }
+        miniPanel = mini
+        wrapper.addView(mini, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
+        val miniTop = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        miniTop.addView(atLogo(context, 26).apply { (layoutParams as LinearLayout.LayoutParams).setMargins(0, 0, d(7), 0) })
+        miniTop.addView(text(context, "AT PRO", 13f, C_TEXT, bold = true).apply { letterSpacing = 0.04f })
+        miniTop.addView(View(context), LinearLayout.LayoutParams(d(8), 1))
+        miniTop.addView(statusPill(context, withChevron = false))
+        miniTop.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+        val tMini = text(context, "00:00", 12f, C_TEXT, bold = true, mono = true); timeTexts.add(tMini)
+        miniTop.addView(tMini, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { setMargins(d(6), 0, d(4), 0) })
+        miniTop.addView(roundIconButton(context, R.drawable.ic_ov_chev_up) { setMode(Mode.FULL) })
+        mini.addView(miniTop)
+        mini.addView(progressBar(context, 5) { progressFillMini = it },
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, d(5)).apply { setMargins(0, d(9), 0, 0) })
+        val miniBottom = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        tvMiniDone = text(context, "Hoàn thành: 0/0", 11.5f, C_TEXT)
+        miniBottom.addView(tvMiniDone, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        miniBottom.addView(vDivider(context, 14))
+        miniBottom.addView(icon(context, R.drawable.ic_ov_heart, C_PINK, 14))
+        tvMiniLikes = text(context, "0", 12f, C_TEXT, bold = true)
+        miniBottom.addView(tvMiniLikes, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(d(5), 0, 0, 0) })
+        miniBottom.addView(vDivider(context, 14))
+        miniBottom.addView(icon(context, R.drawable.ic_ov_warn, C_AMBER, 14))
+        tvMiniWarn = text(context, "0", 12f, C_TEXT, bold = true)
+        miniBottom.addView(tvMiniWarn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(d(5), 0, 0, 0) })
+        mini.addView(miniBottom, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(0, d(9), 0, 0) })
+
+        // ═════ CHIP ═════════════════════════════════════════════════════════
+        val chip = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(d(6), d(6), d(6), d(6))
+            background = roundBg(C_BG, 28, context, C_BORDER)
+            visibility = View.GONE
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = d(8).toFloat()
+        }
+        chipPanel = chip
+        wrapper.addView(chip, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT))
+        chip.addView(atLogo(context, 30).apply { (layoutParams as LinearLayout.LayoutParams).setMargins(0, 0, d(8), 0) })
+        val chipDot = statusDot(context)
+        chip.addView(chipDot)
+        val chipTv = text(context, "Đang chạy", 12f, C_TEXT, bold = true); pillTexts.add(chipTv)
+        chip.addView(chipTv)
+        chip.addView(vDivider(context))
+        val tChip = text(context, "00:00", 12.5f, C_TEXT, bold = true, mono = true); timeTexts.add(tChip)
+        chip.addView(tChip, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 0, d(6), 0) })
+        chip.addView(roundIconButton(context, R.drawable.ic_ov_chev_right) { setMode(Mode.FULL) })
+
+        // ── Kéo để di chuyển (ngưỡng 8px phân biệt kéo / chạm); chạm MINI/CHIP = mở lại FULL, nhấn giữ MINI = CHIP ──
         var dragInitX = 0; var dragInitY = 0
         var dragTouchX = 0f; var dragTouchY = 0f
         var hasDragged = false
+        var downAt = 0L
 
         wrapper.setOnTouchListener { _, event ->
             when (event.action) {
@@ -996,7 +1258,7 @@ object OverlayFarmMonitor {
                         ?: return@setOnTouchListener false
                     dragInitX = lp.x; dragInitY = lp.y
                     dragTouchX = event.rawX; dragTouchY = event.rawY
-                    hasDragged = false; true
+                    hasDragged = false; downAt = System.currentTimeMillis(); true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = (event.rawX - dragTouchX).toInt()
@@ -1013,7 +1275,14 @@ object OverlayFarmMonitor {
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (isMinimized && !hasDragged) onMinimizeClick()
+                    if (!hasDragged) {
+                        val held = System.currentTimeMillis() - downAt
+                        when (mode) {
+                            Mode.CHIP -> setMode(Mode.FULL)
+                            Mode.MINI -> setMode(if (held >= 500L) Mode.CHIP else Mode.FULL)
+                            Mode.FULL -> Unit
+                        }
+                    }
                     hasDragged = false; false
                 }
                 else -> false
@@ -1024,78 +1293,84 @@ object OverlayFarmMonitor {
     }
 
     // ─────────────────────────────────────────────────────────
-    //  Nút bấm
+    //  Đổi trạng thái FULL / MINI / CHIP
     // ─────────────────────────────────────────────────────────
 
-    private fun onMinimizeClick() {
+    private fun setMode(newMode: Mode) {
         handler.post {
-            isMinimized = !isMinimized
+            if (mode == newMode) return@post
             val lp = (overlayView?.layoutParams as? WindowManager.LayoutParams) ?: return@post
-            if (isMinimized) {
-                cdFreeze()                       // thu nhỏ: dừng animator, giữ nguyên số giây còn lại
-                stopDotsAnimation()
-                fullPanel?.visibility  = View.GONE
-                circleView?.visibility = View.VISIBLE
-                lp.width  = bubbleWidthPx
-                lp.height = bubbleHeightPx
-            } else {
-                circleView?.visibility = View.GONE
-                fullPanel?.visibility  = View.VISIBLE
-                lp.width  = panelWidthPx
-                lp.height = WindowManager.LayoutParams.WRAP_CONTENT
-                tvRunTime?.text     = formatTime(tickRunSecs)
-                tvSessionTime?.text = formatTime(tickSessionSecs)
-                tvTotalTime?.text   = formatTime(tickTotalSecs)
-                renderLogRows()                  // dựng lại nhật ký từ dữ liệu đã giữ khi thu nhỏ
-                cdAnimate()
+            mode = newMode
+            fullPanel?.visibility = if (newMode == Mode.FULL) View.VISIBLE else View.GONE
+            miniPanel?.visibility = if (newMode == Mode.MINI) View.VISIBLE else View.GONE
+            chipPanel?.visibility = if (newMode == Mode.CHIP) View.VISIBLE else View.GONE
+            when (newMode) {
+                Mode.FULL -> {
+                    lp.width = panelWidthPx
+                    cdGroup?.visibility = if (cdActive) View.VISIBLE else View.INVISIBLE
+                    renderLogRows()                  // dựng lại nhật ký từ dữ liệu đã giữ khi thu nhỏ
+                    curAction?.let { showAction(it, curActionDots) }
+                    cdAnimate()
+                    if (!isPaused) spinner?.start()
+                }
+                Mode.MINI -> {
+                    lp.width = miniWidthPx
+                    cdFreeze(); stopDotsAnimation(); spinner?.stop()   // thu nhỏ: dừng animator, giữ nguyên số giây còn lại
+                }
+                Mode.CHIP -> {
+                    lp.width = WindowManager.LayoutParams.WRAP_CONTENT
+                    cdFreeze(); stopDotsAnimation(); spinner?.stop()
+                }
             }
+            lp.height = WindowManager.LayoutParams.WRAP_CONTENT
+            renderAll()
             try { windowManager?.updateViewLayout(overlayView, lp) } catch (_: Exception) {}
+            overlayView?.let { v -> v.alpha = 0.4f; v.animate().alpha(1f).setDuration(160L).start() }
         }
     }
+
+    // ─────────────────────────────────────────────────────────
+    //  Nút bấm
+    // ─────────────────────────────────────────────────────────
 
     private fun onPauseResumeClick() {
         val engine = TikTokAccessibilityService.instance?.engine ?: return
         if (isPaused) { engine.resume(); isPaused = false }
         else          { engine.pause();  isPaused = true  }
         refreshPauseButton()
-        if (isPaused) cdFreeze() else cdAnimate()
+        if (isPaused) { cdFreeze(); spinner?.stop() } else { cdAnimate(); if (mode == Mode.FULL) spinner?.start() }
     }
 
     private fun onStopClick() {
         TikTokAccessibilityService.instance?.engine?.stop()
     }
 
-    private fun updateBtnStyle(btn: TextView, label: String, color: Int, iconRes: Int) {
-        btn.text = label
-        btn.setTextColor(color)
-        val context = btn.context
-        ContextCompat.getDrawable(context, iconRes)?.mutate()?.also { dr ->
-            DrawableCompat.setTint(dr, color)
-            val sz = dp(context, 11)
-            dr.setBounds(0, 0, sz, sz)
-            btn.setCompoundDrawables(dr, null, null, null)
-        }
-        val strokeW = dp(context, 1).coerceAtLeast(1)
-        (btn.background as? GradientDrawable)?.apply {
-            setColor(color and 0x00FFFFFF or 0x22000000)
-            setStroke(strokeW, color and 0x00FFFFFF or 0x55000000)
-        }
-    }
-
+    /** Cập nhật mọi nơi hiển thị trạng thái chạy/tạm dừng: viên thuốc ở cả 3 trạng thái, nút chính, cột sóng. */
     private fun refreshPauseButton() {
-        val btn = btnPauseResume ?: return
-        val ringW = dp(btn.context, 2)
-        if (isPaused) {
-            updateBtnStyle(btn, "Tiếp tục", C_GREEN, R.drawable.ic_ov_play)
-            statusDotBg?.setColor(C_AMBER)
-            statusDotGlowBg?.setColor(C_AMBER and 0x00FFFFFF or 0x33000000)
-            bubbleRingBg?.setStroke(ringW, C_AMBER)
-        } else {
-            updateBtnStyle(btn, "Tạm dừng", C_AMBER, R.drawable.ic_ov_pause)
-            statusDotBg?.setColor(C_GREEN)
-            statusDotGlowBg?.setColor(C_GREEN and 0x00FFFFFF or 0x33000000)
-            bubbleRingBg?.setStroke(ringW, C_GREEN)
+        val color = if (isPaused) C_AMBER else C_GREEN
+        val label = if (isPaused) "Tạm dừng" else "Đang chạy"
+        for (tv in pillTexts) {
+            tv.text = label
+            // chữ của viên thuốc ở CHIP là màu trắng; hai viên còn lại theo màu trạng thái
+            if (tv.currentTextColor != C_TEXT) tv.setTextColor(color)
         }
+        // pillDots chứa [chấm, quầng] theo cặp
+        var i = 0
+        while (i + 1 < pillDots.size) {
+            pillDots[i].setColor(color)
+            pillDots[i + 1].setColor(color and 0x00FFFFFF or 0x33000000)
+            i += 2
+        }
+        signalBars?.setBarColor(if (isPaused) C_DIM else C_ACCENT)
+        btnPauseResume?.let { btn ->
+            val ctx = btn.context
+            btn.text = if (isPaused) "Tiếp tục" else "Tạm dừng"
+            tinted(ctx, if (isPaused) R.drawable.ic_ov_play else R.drawable.ic_ov_pause, Color.WHITE)?.let { dr ->
+                val sz = dp(ctx, 16); dr.setBounds(0, 0, sz, sz); btn.setCompoundDrawables(dr, null, null, null)
+            }
+        }
+        if (!isPaused && !cdActive) tvActionSub?.text = ""
+        else if (isPaused && !cdActive) tvActionSub?.text = "Đang tạm dừng"
     }
 
     // ─────────────────────────────────────────────────────────

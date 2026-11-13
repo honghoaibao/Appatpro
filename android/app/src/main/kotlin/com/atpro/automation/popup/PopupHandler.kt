@@ -3,7 +3,10 @@ import com.atpro.automation.IFarmHost
 
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
+import com.atpro.accessibility.ContentScanner
 import com.atpro.accessibility.NodeTraverser
+import com.atpro.accessibility.ScanCategory
+import com.atpro.accessibility.ScanKeywords
 import com.atpro.network.LanWebSocketServer
 import kotlinx.coroutines.*
 
@@ -20,13 +23,22 @@ import kotlinx.coroutines.*
  *     Dự phòng cho popup chưa biết hoặc TikTok version mới.
  *     Quét text/contentDescription toàn bộ cây node.
  *
+ *   Tier 1.5 (v1.12.5) — ContentScanner (whitelist nút đóng)
+ *     Bấm nút "Để sau" / "Đóng" / "Not now"… của popup đè lên feed. Chạy được cả khi đang ở feed
+ *     (Tier 1 GENERIC và Tier 2 cố ý bỏ qua feed để tránh bấm nhầm) vì CHỈ bấm nút có chữ nằm trong
+ *     whitelist — không bao giờ bấm OK/Đồng ý/Cho phép, không pressBack, không đoán theo từ khoá.
+ *
  * Fallback cuối: pressBack nếu cả 2 tier đều fail.
  *
  * Không dùng screenshot, không cần internet — hoàn toàn local.
  */
 class PopupHandler(private val service: IFarmHost) {
 
-    companion object { const val TAG = "PopupHandler" }
+    companion object {
+        const val TAG = "PopupHandler"
+        /** v1.12.5 — chờ trước lượt quét thứ hai của [sweep] (popup render trễ sau khi màn hình đã tải). */
+        const val LATE_RENDER_MS = 1_200L
+    }
 
     /** v1.4.0 — chống kẹt vòng lặp khi 1 popup không đóng được (xem PopupLoopGuard). */
     private val loopGuard = PopupLoopGuard()
@@ -59,6 +71,9 @@ class PopupHandler(private val service: IFarmHost) {
             if (result.handled) return result
         }
 
+        // Tier 1.5 (v1.12.5): whitelist nút đóng — popup đè lên feed (vd "Liên kết email": Để sau / OK).
+        scannerDismiss(root)?.let { return it }
+
         // Tier 2: Keyword scan — fallback khi Tier 1 không nhận ra popup.
         // Chạy chậm hơn, nhưng bắt được popup TikTok version mới.
         val tier2 = scanKeywords(root)
@@ -80,6 +95,75 @@ class PopupHandler(private val service: IFarmHost) {
         }
 
         return PopupResult.NONE
+    }
+
+    // ── v1.12.5: quét an toàn theo whitelist + dọn popup tại các "mốc" của luồng ─────────────────
+
+    /**
+     * Tier 1.5 — quét một lần bằng [ContentScanner]; nếu có nút đóng nằm trong whitelist thì bấm.
+     * Trả null = không có gì để làm (không phải popup / đang ở màn hình cần giữ nguyên / popup lì).
+     *
+     * Giữ nguyên các màn hình tool mở CÓ CHỦ ĐÍCH:
+     *  • hộp xác nhận đăng xuất — engine tự bấm Hủy ([NodeTraverser.detectLogoutPrompt]);
+     *  • bảng chuyển đổi tài khoản — có nút X "Đóng" không được bấm → chỉ cho nút đóng "mềm" (Để sau/Not now…),
+     *    nhờ đó popup nằm ĐÈ LÊN bảng (vd "Tài khoản cần cập nhật") vẫn đóng được.
+     */
+    private suspend fun scannerDismiss(root: AccessibilityNodeInfo): PopupResult? {
+        if (NodeTraverser.detectLogoutPrompt(root)) return null
+        val probes   = ContentScanner.extractProbes(root)
+        val softOnly = ContentScanner.isAccountSwitchScreen(probes)
+        val verdict  = ContentScanner.classify(probes, softDismissOnly = softOnly)
+        if (verdict.category != ScanCategory.POPUP) return null
+
+        when (loopGuard.record("scan:${verdict.matchedText}", System.currentTimeMillis())) {
+            PopupLoopGuard.Verdict.TRY_BACK -> {
+                log("WARN: Popup '${verdict.matchedText}' lặp lại nhiều lần — đổi sang bấm Back")
+                service.pressBack(); delay(700)
+                return PopupResult(true, "loop_guard_back")
+            }
+            PopupLoopGuard.Verdict.GIVE_UP -> {
+                log("WARN: Popup '${verdict.matchedText}' không đóng được — bỏ qua, chờ recovery")
+                return null
+            }
+            PopupLoopGuard.Verdict.PROCEED -> Unit
+        }
+
+        val cfg     = ScanKeywords.DEFAULT
+        val clicked = ContentScanner.clickDismissButton(root, if (softOnly) cfg.softDismiss else cfg.dismissButtons)
+            ?: return null
+        log("POPUP: Đóng popup — bấm '$clicked'")
+        delay(700)
+        return PopupResult(true, "scan_dismiss")
+    }
+
+    /**
+     * v1.12.5 — Dọn popup tại một "mốc" của luồng (vừa mở Cài đặt, vừa mở danh sách tài khoản, feed vừa tải xong…).
+     *
+     * Popup của TikTok có thể hiện ra ở BẤT KỲ bước nào, kể cả hiện TRỄ vài giây sau khi màn hình đã load. Hàm này:
+     *  1. quét an toàn ([scannerDismiss]) lặp tối đa [maxRounds] lần cho tới khi hết popup (popup nối đuôi nhau);
+     *  2. nếu [lateRender] — chờ [LATE_RENDER_MS] rồi quét thêm một lượt để bắt popup render trễ.
+     *
+     * Chỉ dùng quét AN TOÀN (whitelist nút đóng) — KHÔNG gọi [handleIfPresent]: Tier 2 (đoán theo từ khoá) từng bấm
+     * Back nhầm trên Cài đặt/feed (xem FIX-WAITFEED-POPUP). Trả số popup đã đóng.
+     */
+    suspend fun sweep(where: String, maxRounds: Int = 3, lateRender: Boolean = false): Int {
+        var closed = sweepRounds(maxRounds)
+        if (lateRender) {
+            delay(LATE_RENDER_MS)
+            closed += sweepRounds(maxRounds)
+        }
+        if (closed > 0) log("POPUP: $where — đã đóng $closed popup")
+        return closed
+    }
+
+    private suspend fun sweepRounds(maxRounds: Int): Int {
+        var closed = 0
+        repeat(maxRounds) {
+            val root = service.getRootNode() ?: return closed
+            val r = scannerDismiss(root) ?: return closed
+            if (r.handled) closed++
+        }
+        return closed
     }
 
     // ── Tier 1 ────────────────────────────────────────────────

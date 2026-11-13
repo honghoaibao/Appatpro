@@ -106,6 +106,7 @@ class AutomationEngineIntegrationTest {
             every  { screenHeight } returns 2400
             coEvery { getRootNode() } returns null  // v1.3.1: getRootNode() giờ là suspend fun
             every  { pressBack()   } returns true
+            every  { pressHome()   } returns true   // v1.12.5
             every  { launchTikTok()         } returns false  // default: fail
             every  { openTikTokSettings()   } returns true
             coEvery { killTikTok()           } just Runs

@@ -2,7 +2,7 @@
 
 Công cụ tự động hóa chạy trực tiếp trên thiết bị Android (không cần PC), dữ liệu lưu hoàn toàn local. Dịch vụ chính là **TikTok** (nuôi acc; làm nhiệm vụ kiếm tiền Like/Follow qua **Follow4Follow** — `TaskProvider`); có thêm luồng nuôi acc cho Facebook, Instagram, X/Twitter, Threads, Snapchat.
 
-- **Phiên bản hiện tại:** v1.12.0 (`versionCode 44`)
+- **Phiên bản hiện tại:** v1.12.5 (`versionCode 45`)
 - **Package:** `com.atpro` · **minSdk 24 / targetSdk & compileSdk 34**
 - **Ngôn ngữ giao diện, log, comment:** tiếng Việt
 
@@ -34,7 +34,7 @@ Công cụ tự động hóa chạy trực tiếp trên thiết bị Android (kh
 ├── setup_signing.sh                     ← Tạo keystore + in sẵn 4 GitHub Secrets
 ├── assets/images/                       ← Icon
 └── android/app/src/main/kotlin/com/atpro/
-    ├── accessibility/   TikTokAccessibilityService, NodeTraverser
+    ├── accessibility/   TikTokAccessibilityService, NodeTraverser, ContentScanner
     ├── automation/      AutomationEngine, FarmBehavior (RateGate), IFarmHost, popup/ (PopupHandler, PopupLoopGuard)
     ├── data/            FarmConfig, LocalRepository, IFarmRepository, FarmForegroundService,
     │                    OverlayFarmMonitor, TikTokDeepLinks, BootReceiver, AccessibilitySettingsHelper
@@ -51,12 +51,13 @@ Công cụ tự động hóa chạy trực tiếp trên thiết bị Android (kh
 
 ## Tính năng chính
 
-- **Nuôi acc TikTok:** xem video, like, follow, comment, inbox, shop; chuyển acc bằng deep link; tự xử lý popup (2 tầng + chống lặp vòng); watchdog + tự hồi phục khi kẹt. Từ v1.4.0 tỉ lệ like/follow/xem bình luận được điều tiết bởi `RateGate` (bám sát cấu hình, ít dao động) và gắn với thời gian xem video.
+- **Nuôi acc TikTok:** xem video, like, follow, comment, inbox, shop; chuyển acc bằng deep link; tự xử lý popup (2 tầng + quét an toàn theo whitelist ở mọi mốc + chống lặp vòng; v1.12.5); watchdog + tự hồi phục khi kẹt. Từ v1.4.0 tỉ lệ like/follow/xem bình luận được điều tiết bởi `RateGate` (bám sát cấu hình, ít dao động) và gắn với thời gian xem video.
 - **Nhiệm vụ TikTok kiếm tiền (task mode) — Follow4Follow:** đăng nhập Follow4Follow trong app (tab Dịch vụ → *Nhiệm vụ kiếm tiền*, hoặc Cài đặt → Nhiệm vụ), sau đó engine lấy acc đã liên kết → lấy job Like/Follow → mở link bằng deep link → làm bằng Accessibility → báo hoàn thành (đợi ≥5s, xử lý giới hạn tốc độ 429) hoặc bỏ qua → nuôi acc ngắn giữa các job. Tự chuyển acc active phía server (`quick-switch`), dừng acc khi hết lượt trong ngày. App chỉ lưu token (không lưu mật khẩu). Tài liệu: [`.claude/context/Follow4FollowAPI_Documentation.md`](.claude/context/Follow4FollowAPI_Documentation.md). Cờ `AppConstants.TASKS_ENABLED` để ẩn/hiện toàn bộ tính năng.
 - **Ví Follow4Follow (v1.7.0):** màn hình riêng mở từ tab Dịch vụ — số dư/cấp/tỷ giá/job còn lại hôm nay, **bảng xếp hạng** (podium top 3 + hạng của bạn), **rút tiền** qua 5 kênh (ngân hàng, ZaloPay, PayPal, Crypto, thẻ cào; luôn có hộp thoại xác nhận, chống gửi trùng), lịch sử job (Follow/Like), lịch sử rút tiền, giới thiệu (mã/link/hoa hồng + nhận hoa hồng), thông báo.
 - **Dịch vụ khác:** Facebook (kể cả xem Reels), Instagram, X, Threads, Snapchat — mức demo/nuôi cơ bản.
 - **Lịch tự động:** màn hình phủ mở từ Tổng quan hoặc Cài đặt (`ScheduledFarmManager`), khôi phục sau khi khởi động lại máy (`BootReceiver`).
-- **Overlay:** cửa sổ nổi hiển thị trạng thái farm, thu nhỏ/kéo được (`OverlayFarmMonitor`).
+- **Overlay:** cửa sổ nổi hiển thị trạng thái phiên chạy với **3 trạng thái** — Popup (tài khoản, tiến trình, Lượt thích · Đã thêm · Cảnh báo, trạng thái đang làm, Nhật ký hoạt động, Tạm dừng/Dừng) · Mini Popup · Floating Chip; kéo được (`OverlayFarmMonitor`, v1.12.5).
+- **Dừng an toàn:** mọi đường dừng đều đưa máy về màn hình chính điện thoại trước khi tool tắt (v1.12.5).
 - **Thông báo:** Android notification + Discord webhook; kiểm tra bản mới từ GitHub Releases (`UpdateChecker`).
 
 ## Setup
@@ -125,10 +126,10 @@ Workflow: `.github/workflows/build.yml` (tên: *AT PRO — Build APK*).
 
 ```bash
 # Chạy tay
-gh workflow run "AT PRO — Build APK" -f version=1.12.0 -f build=44
+gh workflow run "AT PRO — Build APK" -f version=1.12.5 -f build=45
 
 # Push tag → build + tạo GitHub Release
-git tag v1.12.0
+git tag v1.12.5
 git push origin v1.12.0
 ```
 
@@ -144,11 +145,12 @@ gradle test        # hoặc ./gradlew test nếu đã có wrapper
 | File | Số test |
 |------|---------|
 | `NodeTraverserTest` | 39 |
-| `AutomationEngineTest` | 8 |
+| `AutomationEngineTest` | 12 |
 | `AutomationEngineIntegrationTest` | 6 |
 | `TaskNurtureTest` | 8 |
 | `FarmBehaviorTest` | 9 |
 | `PopupLoopGuardTest` | 6 |
+| `ContentScannerTest` | 23 |
 | `F4fSignerTest` | 5 |
 | `F4fApiClientTest` | 11 |
 | `Follow4FollowProviderTest` | 24 |
@@ -171,9 +173,9 @@ Phần Follow4Follow (ký request, đăng nhập, luồng job) test hoàn toàn 
 |---------|----------|
 | `CLAUDE.md` | Quy tắc làm việc với repo |
 | `context/` | `project_overview`, `architecture`, `current_focus`, `constraints`, `glossary`, `Follow4FollowAPI_Documentation` + `follow4follow/` (tham chiếu API đầy đủ + `f4f.py` đã field-test) |
-| `decisions/` | ADR-0001 … ADR-0014 |
+| `decisions/` | ADR-0001 … ADR-0026 |
 | `principles/` | Quy tắc Android, kiến trúc, coding, git, hiệu năng, bảo mật |
-| `revision/` | Ghi chú theo phiên bản (giữ 10 bản gần nhất): `v1.3.3.md` … `v1.12.0.md` |
+| `revision/` | Ghi chú theo phiên bản (giữ 10 bản gần nhất): `v1.3.3.md` … `v1.12.5.md` |
 | `tasks/` | `backlog`, `completed_tasks`, `technical_debt` |
 | `skills/` | Skill dùng trong quá trình phát triển |
 
@@ -183,7 +185,8 @@ Chi tiết từng bản nằm trong `.claude/revision/vX.Y.Z.md`.
 
 | Bản | Điểm chính |
 |-----|-----------|
-| **v1.12.0** (44) | **Nhận nhiệm vụ theo `f4f.py` v2.8** (danh sách acc `quick-switch`, luôn kèm `uid`, thang đổi acc S1–S5, 429 chờ-thử-lại, job hết hạn, trace); **chọn tài khoản nhận nhiệm vụ riêng** (Tự động / Chọn tay, `TaskAccountSelector`); **thông báo nâng cấp** (4 nhóm, giờ yên tĩnh, tổng kết nhiệm vụ + xu, tiến độ trên thông báo đang chạy, mở đúng tab, nút gửi thử); 401 giữa phiên dừng cả lượt (ADR-0014) |
+| **v1.12.5** (45) | **Quét popup / quảng cáo / live ở mọi bước** (`ContentScanner` theo whitelist nút đóng — không bao giờ bấm OK; quét tại các mốc: vào Cài đặt, mở danh sách tài khoản, feed vừa tải, trang job; đóng popup đè lên feed); **sửa vuốt thừa** sau khi thấy nút Chuyển đổi tài khoản (vuốt ngắn + chậm + dò liên tục, bấm ngay bằng ACTION_CLICK); **mọi đường dừng đều về màn hình chính** trước khi tool tắt; **popup nổi mới** (Popup · Mini Popup · Floating Chip) |
+| v1.12.0 (44) | **Nhận nhiệm vụ theo `f4f.py` v2.8** (danh sách acc `quick-switch`, luôn kèm `uid`, thang đổi acc S1–S5, 429 chờ-thử-lại, job hết hạn, trace); **chọn tài khoản nhận nhiệm vụ riêng** (Tự động / Chọn tay, `TaskAccountSelector`); **thông báo nâng cấp** (4 nhóm, giờ yên tĩnh, tổng kết nhiệm vụ + xu, tiến độ trên thông báo đang chạy, mở đúng tab, nút gửi thử); 401 giữa phiên dừng cả lượt (ADR-0014) |
 | v1.11.0 (43) | **Sửa bấm nhầm "Đăng xuất" khi chuyển acc** ("Đăng xuất" chứa chữ x bị coi là nút đóng; nhận diện popup + chọn dòng theo acc đang dùng; `openSwitchList()` có chặn + huỷ hộp đăng xuất); **thanh kéo mới** `AtSlider`; nuôi lâu tối đa 50 job, thời lượng ≥ 30s; **tab Nuôi acc riêng** cho kiếm tiền; **ngưỡng số tim tối thiểu**; logic hashtag mới (không phân biệt dấu, ranh giới từ); **nhật ký dễ đọc** (`LogPolish`, chip "Chi tiết"); hiệu ứng popup/thẻ/nhật ký (ADR-0013) |
 | v1.10.0 (42) | **Back về feed** sau báo cáo job (phân loại trang theo thanh điều hướng); **bảng xếp hạng F4F hiện xu** (`parseCoinText`); F4F làm lại (bỏ Giới thiệu, ô Xu chờ · Làm hôm nay · Tổng xu); **Thống kê kiếm tiền + biểu đồ** (`EarningsStore`, Canvas); Quyền/Thông báo tách riêng, thẻ quyền bố cục dọc + chặn cỡ chữ hệ thống; Cài đặt/Tài khoản/Lịch tinh gọn; **popup nhỏ + thanh đếm ngược**; tối ưu pin (memo cây node, gom ghi log); bỏ chữ thừa (ADR-0012) |
 | v1.9.0 (41) | **Sửa lỗi không tìm thấy nút Follow** trên mọi loại hồ sơ (viết lại bộ dò: khớp nhãn chính xác trong hàng nút, bấm cha clickable, chờ hồ sơ tải, chạm cử chỉ dự phòng, bật `flagIncludeNotImportantViews`); **tối đa 150 job/acc**, nuôi trước job **tối thiểu 10s**; **popup nổi mới** với nhật ký thời gian thực + dữ liệu nhiệm vụ thật; bỏ 6 màn hình/khung dư thừa, `ConfigScreen`/`ScheduleScreen` đồng bộ `AtTopBar` (ADR-0011) |

@@ -36,11 +36,15 @@ When code or docs deviate, flag it and align.
 | **TikTokAccessibilityService** | The Android `AccessibilityService` that drives TikTok UI. Entry point for all node-level interaction |
 | **NodeTraverser** | Utility for traversing and querying the AccessibilityNodeInfo tree |
 | **PopupHandler** | Detects and dismisses TikTok popups before the farming loop continues |
+| **ContentScanner** | Bộ quét một lần cây giao diện → POPUP / SPONSORED / APP_INSTALL / LIVE / CLEAN theo chữ hiển thị; chỉ bấm nút đóng nằm trong whitelist (v1.12.5) |
+| **Sweep (quét mốc)** | `PopupHandler.sweep()` — dọn popup an toàn tại một bước của luồng (vào Cài đặt, mở danh sách tài khoản, feed vừa tải…), có tuỳ chọn quét trễ 1,2s |
+| **Nút đóng mềm / cứng** | Mềm: `Để sau`, `Not now`, `Bỏ qua`… (chỉ popup mới có). Cứng: `Đóng`, `Hủy`… (cũng là nhãn nút X của bảng chuyển đổi tài khoản nên bị cấm khi bảng đang hiện) |
+| **Về Home khi dừng** | `goHomeBeforeStop()` — mọi đường dừng gọi `GLOBAL_ACTION_HOME` đúng một lần trước khi tool tắt (v1.12.5) |
 | **FarmForegroundService** | Android foreground service that keeps AutomationEngine alive while the screen is off or the app is backgrounded |
 | **ScheduledFarmManager** | Manages start/stop schedules for farm runs (`FarmSchedule`) |
 | **FarmSchedule** | A named schedule: days of week + start/stop time |
 | **LanWebSocketServer** | WebSocket server broadcasting farm status to other devices on the same LAN |
-| **OverlayFarmMonitor** | Floating overlay window showing real-time account/progress info while farming |
+| **OverlayFarmMonitor** | Floating overlay window showing real-time account/progress info while farming. Ba trạng thái (v1.12.5): **Popup** (đầy đủ) · **Mini Popup** · **Floating Chip** |
 | **LocalRepository** | Single data access point for all Room operations |
 | **AtProDatabase** | Room database instance. Tables: accounts, sessions, farm_logs, config |
 | **AtProNotificationManager** | Android notification management for farm start, progress, errors |

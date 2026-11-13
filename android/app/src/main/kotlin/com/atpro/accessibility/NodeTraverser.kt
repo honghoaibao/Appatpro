@@ -943,6 +943,11 @@ object NodeTraverser {
     fun detectLive(root: AccessibilityNodeInfo?): Boolean {
         root ?: return false
 
+        // ── Tier -1 (v1.12.5): quét theo bảng chữ của ContentScanner ─────
+        // Huy hiệu "Đang LIVE" / "Nhấn để xem LIVE" là text node RIÊNG → khớp NGUYÊN CHỮ (không dính caption chứa chữ
+        // "live"), cần đủ điểm (>= 2) mới kết luận. Các tầng bên dưới giữ nguyên làm phần bổ sung.
+        if (ContentScanner.isLiveContent(root)) return true
+
         // ── Tier 0: Gift-panel IDs — CHỈ tồn tại trong live room ────────
         // Nút/panel quà tặng + danh sách người xem là tín hiệu mạnh nhất,
         // không bao giờ xuất hiện trong feed video thông thường.
@@ -1052,6 +1057,11 @@ object NodeTraverser {
      */
     fun detectAd(root: AccessibilityNodeInfo?): Boolean {
         root ?: return false
+
+        // Tier -1 (v1.12.5): quét theo bảng chữ của ContentScanner — nhãn "Được tài trợ" (kể cả gộp dòng kiểu
+        // "Dola · Được tài trợ"), tên nhạc "Nhạc Quảng cáo" (tín hiệu phụ) và nút cài app ("nhận"/"cài đặt"…).
+        // Các tầng bên dưới giữ nguyên làm phần bổ sung.
+        if (ContentScanner.isAdContent(root)) return true
 
         // Tier 1: Resource-ID chính xác — chỉ xuất hiện trong ad container
         val AD_IDS = listOf(

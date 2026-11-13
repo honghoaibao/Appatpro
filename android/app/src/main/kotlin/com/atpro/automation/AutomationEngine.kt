@@ -547,10 +547,11 @@ class AutomationEngine(
         resetPauseTracking()
 
         farmJob = host.scope.launch {
-            config = repo.loadFarmConfig()
-            host.showFarmOverlay("NUÔI TKT")
-
             try {
+                // v1.12.5: nạp cấu hình + hiện popup nằm TRONG try — lỗi ở đây vẫn đi qua finally → stopInternal
+                // (nhả cờ isFarming, về màn hình chính). Trước đây lỗi ở hai dòng này làm phiên chết mà không qua finally.
+                config = repo.loadFarmConfig()
+                host.showFarmOverlay("NUÔI TKT")
                 runStateMachine(mode, inputList)
             } catch (e: CancellationException) {
                 log("Farm bị hủy bởi người dùng")
@@ -590,10 +591,9 @@ class AutomationEngine(
         followDebugDumps = 0   // v1.9.0: mỗi lần chạy nhiệm vụ được dump chẩn đoán hồ sơ tối đa 3 lần
 
         farmJob = host.scope.launch {
-            config = repo.loadFarmConfig()
-            host.showFarmOverlay("NV TIKTOK")
-
             try {
+                config = repo.loadFarmConfig()          // v1.12.5: trong try — xem startFarm()
+                host.showFarmOverlay("NV TIKTOK")
                 runTaskStateMachine(mode, inputList)
             } catch (e: CancellationException) {
                 log("Task bị hủy bởi người dùng")
@@ -633,10 +633,9 @@ class AutomationEngine(
         resetPauseTracking()
 
         farmJob = host.scope.launch {
-            config = repo.loadFarmConfig()
-            host.showFarmOverlay("NUÔI TKFB")
-
             try {
+                config = repo.loadFarmConfig()          // v1.12.5: trong try — xem startFarm()
+                host.showFarmOverlay("NUÔI TKFB")
                 runFacebookNurtureSession()
             } catch (e: CancellationException) {
                 log("Nuôi Facebook bị hủy bởi người dùng")
@@ -657,8 +656,7 @@ class AutomationEngine(
         isFarming = true; isPaused = false; isResting = false
         resetPauseTracking()
         farmJob = host.scope.launch {
-            config = repo.loadFarmConfig(); host.showFarmOverlay("NUÔI TKX")
-            try { runXNurtureSession() }
+            try { config = repo.loadFarmConfig(); host.showFarmOverlay("NUÔI TKX"); runXNurtureSession() }
             catch (e: CancellationException) { log("Nuôi X bị hủy bởi người dùng"); throw e }
             catch (e: Exception) { log("ERR: Nuôi X lỗi: ${e.javaClass.simpleName} — ${e.message}") }
             finally { host.hideFarmOverlay(); setStatus(""); stopInternal("x_completed") }
@@ -671,8 +669,7 @@ class AutomationEngine(
         isFarming = true; isPaused = false; isResting = false
         resetPauseTracking()
         farmJob = host.scope.launch {
-            config = repo.loadFarmConfig(); host.showFarmOverlay("NUÔI TKIG")
-            try { runInstagramNurtureSession() }
+            try { config = repo.loadFarmConfig(); host.showFarmOverlay("NUÔI TKIG"); runInstagramNurtureSession() }
             catch (e: CancellationException) { log("Nuôi Instagram bị hủy bởi người dùng"); throw e }
             catch (e: Exception) { log("ERR: Nuôi Instagram lỗi: ${e.javaClass.simpleName} — ${e.message}") }
             finally { host.hideFarmOverlay(); setStatus(""); stopInternal("instagram_completed") }
@@ -685,8 +682,7 @@ class AutomationEngine(
         isFarming = true; isPaused = false; isResting = false
         resetPauseTracking()
         farmJob = host.scope.launch {
-            config = repo.loadFarmConfig(); host.showFarmOverlay("NUÔI TKTH")
-            try { runThreadsNurtureSession() }
+            try { config = repo.loadFarmConfig(); host.showFarmOverlay("NUÔI TKTH"); runThreadsNurtureSession() }
             catch (e: CancellationException) { log("Nuôi Threads bị hủy bởi người dùng"); throw e }
             catch (e: Exception) { log("ERR: Nuôi Threads lỗi: ${e.javaClass.simpleName} — ${e.message}") }
             finally { host.hideFarmOverlay(); setStatus(""); stopInternal("threads_completed") }
@@ -699,8 +695,7 @@ class AutomationEngine(
         isFarming = true; isPaused = false; isResting = false
         resetPauseTracking()
         farmJob = host.scope.launch {
-            config = repo.loadFarmConfig(); host.showFarmOverlay("NUÔI TKSC")
-            try { runSnapchatNurtureSession() }
+            try { config = repo.loadFarmConfig(); host.showFarmOverlay("NUÔI TKSC"); runSnapchatNurtureSession() }
             catch (e: CancellationException) { log("Nuôi Snapchat bị hủy bởi người dùng"); throw e }
             catch (e: Exception) { log("ERR: Nuôi Snapchat lỗi: ${e.javaClass.simpleName} — ${e.message}") }
             finally { host.hideFarmOverlay(); setStatus(""); stopInternal("snapchat_completed") }
@@ -1298,19 +1293,41 @@ class AutomationEngine(
     }
 
     /**
-     * Cuộn Settings cho đến khi thấy hàng "Chuyển đổi tài khoản".
-     * KHÔNG click — chỉ tìm. Tránh bug cũ: scroll thêm sau khi đã click.
+     * Cuộn Settings cho đến khi thấy hàng "Chuyển đổi tài khoản". KHÔNG click — chỉ tìm.
+     *
+     * v1.12.5 (FIX vuốt thừa): trước đây tool vẫn vuốt thêm vài lần sau khi hàng đã hiện. Ba nguyên nhân, sửa cả ba:
+     *  1. cú vuốt dài + nhanh → danh sách "trôi" (fling) qua mặt hàng rồi phải vuốt ngược lại → giờ vuốt NGẮN (34% màn
+     *     hình) và CHẬM (≈600ms) nên không nhảy qua hàng, trôi rất ít;
+     *  2. chỉ đọc lại sau 700ms cố định → giờ DÒ liên tục (150ms/lần) trong lúc danh sách còn trôi, thấy hàng là dừng ngay;
+     *  3. kiểm tra thiếu một lượt sau cú vuốt cuối (vuốt xong mới thấy hàng nhưng vẫn báo "không tìm thấy").
+     * Popup che trang Cài đặt (vuốt sẽ trúng popup) được dọn trước khi vuốt tiếp — không tính là một lần vuốt.
      */
     private suspend fun scrollUntilSwitchFound(maxScrolls: Int): Boolean {
-        repeat(maxScrolls) {
+        var swipes = 0
+        var sweeps = 0
+        while (isFarming) {
             if (NodeTraverser.findSwitchAccountRow(host.getRootNode(), screenH) != null) return true
+            // Không thấy hàng: có thể một popup đang che trang → dọn rồi dò lại (không vuốt, không tính lượt vuốt).
+            if (sweeps < 4 && popup.sweep("Cài đặt", maxRounds = 2) > 0) { sweeps++; delay(500); continue }
+            if (swipes >= maxScrolls) return false
+            swipes++
             setStatus("SCAN: Đang tìm nút chuyển đổi tài khoản...")
             host.swipeSuspend(
-                screenW / 2, (screenH * 0.7).toInt(),
-                screenW / 2, (screenH * 0.3).toInt(),
-                Human.swipeDuration(400),
+                screenW / 2, (screenH * 0.66).toInt(),
+                screenW / 2, (screenH * 0.32).toInt(),
+                Human.swipeDuration(600),
             )
-            delay(700)
+            if (pollSwitchRow(900L)) return true   // thấy hàng khi danh sách còn trôi → dừng, không vuốt thêm
+        }
+        return false
+    }
+
+    /** Dò hàng "Chuyển đổi tài khoản" mỗi 150ms trong [windowMs]. true = đã thấy (không cần vuốt thêm). */
+    private suspend fun pollSwitchRow(windowMs: Long): Boolean {
+        var waited = 0L
+        while (waited < windowMs) {
+            delay(150); waited += 150
+            if (NodeTraverser.findSwitchAccountRow(host.getRootNode(), screenH) != null) return true
         }
         return false
     }
@@ -1332,6 +1349,7 @@ class AutomationEngine(
             if (attempt == 0) log("CFG: Mở Settings để đọc danh sách acc...")
             host.openTikTokSettings()
             delay(if (attempt == 0) 2_000L else 2_200L)
+            popup.sweep("Mở Cài đặt")   // v1.12.5: popup có thể hiện ngay khi vào Cài đặt
 
             if (!scrollUntilSwitchFound(maxScrolls = 8)) {
                 log("ERR: Không tìm thấy nút chuyển đổi tài khoản")
@@ -1345,6 +1363,9 @@ class AutomationEngine(
             log("BTN: Đã tìm thấy nút chuyển đổi tài khoản")
             if (!tapSwitchRow(row)) continue
             delay(1_500)
+            // v1.12.5: popup có thể hiện ngay sau khi mở danh sách (vd "Tài khoản cần cập nhật"). Bảng chuyển đổi tài khoản
+            // có nút X "Đóng" nên chỉ nút đóng "mềm" (Để sau/Not now…) được bấm — xem PopupHandler.scannerDismiss.
+            popup.sweep("Mở danh sách tài khoản", maxRounds = 2)
 
             when (afterSwitchTap()) {
                 SwitchTapResult.OPENED -> return true
@@ -1358,32 +1379,44 @@ class AutomationEngine(
         return false
     }
 
-    /** Chờ hàng "Chuyển đổi tài khoản" nằm giữa màn hình và đứng yên (2 lần đọc cách nhau 350ms trùng vị trí). */
+    /**
+     * Chờ hàng "Chuyển đổi tài khoản" ĐỨNG YÊN (2 lần đọc cách nhau 300ms trùng vị trí) rồi trả về.
+     *
+     * v1.12.5 (FIX vuốt thừa): hàng bấm được bằng ACTION_CLICK (không phụ thuộc toạ độ) thì KHÔNG cần căn giữa → không
+     * vuốt thêm cú nào — chỉ chờ danh sách ngừng trôi. Trước đây luôn căn vào giữa màn hình bằng tối đa 3 cú vuốt.
+     * Chỉ khi phải bấm theo toạ độ và hàng nằm sát mép mới nhích ĐÚNG MỘT lần (vuốt chậm); nhích xong vị trí không đổi
+     * (đã hết cuộn được) thì bấm luôn nếu còn trong ngưỡng an toàn.
+     */
     private suspend fun settleSwitchRow(): NodeTraverser.SwitchRow? {
-        var nudges = 0
-        for (i in 0 until 8) {
+        var nudged = false
+        repeat(12) {
+            if (!isFarming) return null
             val r1 = NodeTraverser.findSwitchAccountRow(host.getRootNode(), screenH)
-            if (r1 == null) { delay(500); continue }
-            val b = r1.bounds
+            if (r1 == null) { delay(400); return@repeat }
+            delay(300)
+            val r2 = NodeTraverser.findSwitchAccountRow(host.getRootNode(), screenH) ?: return@repeat
+            if (kotlin.math.abs(r2.bounds.top - r1.bounds.top) > 6) return@repeat   // còn trôi → chờ tiếp, KHÔNG vuốt
+
+            // Bấm bằng ACTION_CLICK lên hàng đang hiện → xong, không cần cuộn thêm.
+            if (r2.tapNode?.isVisibleToUser == true) return r2
+
+            val b = r2.bounds
             val cy = b.centerY()
             val tooLow  = b.bottom > screenH * 0.92 || cy > screenH * 0.78
             val tooHigh = b.top < screenH * 0.12 || cy < screenH * 0.15
-            if ((tooLow || tooHigh) && nudges < 3) {
-                // Đưa hàng về giữa màn hình bằng cú vuốt chậm (chậm để danh sách không bị trôi tiếp)
-                nudges++
+            if (!tooLow && !tooHigh) return r2                      // toạ độ ở giữa → bấm theo toạ độ an toàn
+            if (!nudged) {
+                nudged = true                                       // MỘT lần nhích duy nhất
                 val dy = (cy - screenH / 2).coerceIn(-(screenH * 0.4).toInt(), (screenH * 0.4).toInt())
                 val y0 = (screenH * 0.65).toInt()
                 val y1 = (y0 - dy).coerceIn((screenH * 0.2).toInt(), (screenH * 0.85).toInt())
                 host.swipeSuspend(screenW / 2, y0, screenW / 2, y1, 650L)
-                delay(700)
-                continue
+                delay(900)
+                return@repeat
             }
-            // Hết cuộn được mà vẫn sát mép → không dám bấm (có thể trúng thanh điều hướng/hàng bên dưới)
-            if (b.bottom > screenH * 0.95 || b.top < screenH * 0.06) { delay(500); continue }
-
-            delay(350)
-            val r2 = NodeTraverser.findSwitchAccountRow(host.getRootNode(), screenH) ?: continue
-            if (kotlin.math.abs(r2.bounds.top - b.top) <= 6) return r2
+            // Đã nhích mà vẫn sát mép (hết cuộn được): chỉ bấm khi chưa chạm mép màn hình.
+            if (b.bottom <= screenH * 0.95 && b.top >= screenH * 0.06) return r2
+            delay(500)
         }
         return null
     }
@@ -1627,6 +1660,7 @@ class AutomationEngine(
             totalSecsLeft   = totalSecsLeftFn(),
             action          = "Khởi động...",
         )
+        OverlayFarmMonitor.setCounters(likes = 0, follows = 0)   // v1.12.5: popup nổi hiện số tim / follow của acc đang nuôi
         LanWebSocketServer.broadcast("currentAccount", mapOf(
             "account" to account,
             "index"   to idx + 1,
@@ -2051,6 +2085,7 @@ class AutomationEngine(
             safeStep("swipe_next", timeoutMs = 10_000L) { swipeNext() }
 
             // ── [12] Emit live stats ──────────────────────────────────────
+            OverlayFarmMonitor.setCounters(likes = likes, follows = follows)
             _liveFarmStats.update {
                 LiveFarmStats(
                     account       = account,
@@ -2862,7 +2897,13 @@ class AutomationEngine(
                 // [FIX-WAITFEED-POPUP] Đã bỏ repeat(3) { popup.handleIfPresent() } ở đây.
                 // scanKeywords() false positive (caption video) → pressBack() ngay sau confirm feed
                 // → navigate khỏi feed dù waitFeedLoad() đã trả true → Lost loop.
-                // Popup thật sẽ được xử lý tự nhiên trong vòng lặp farm chính (farmOneAccount step [2]).
+                // v1.12.5: feed vừa tải xong là lúc popup hay hiện (có khi hiện trễ ~1s). Dọn bằng quét AN TOÀN
+                // (chỉ bấm nút đóng trong whitelist — không Back, không đoán theo từ khoá) nên không lặp lại lỗi trên.
+                if (popup.sweep("Feed vừa tải", lateRender = true) > 0 &&
+                    !NodeTraverser.isOnFeedTab(host.getRootNode())) {
+                    log("WARN: Sau khi dọn popup chưa thấy feed — chờ thêm")
+                    return@repeat
+                }
                 return true
             }
             log("   Chờ feed ${i + 1}/6...")
@@ -3194,10 +3235,13 @@ class AutomationEngine(
     }
 
     private fun stopInternal(reason: String) {
+        // v1.12.5: chỉ "đang chạy" mới cần về Home. stop() rồi finally của farmJob cùng gọi stopInternal → lần sau bỏ qua.
+        val wasRunning = isFarming
         _liveFarmStats.update { LiveFarmStats() }
         isFarming = false
         isPaused  = false
         isResting = false
+        if (wasRunning) goHomeBeforeStop(reason)
         AtProNotificationManager.clearRunStatus()   // v1.12.0: thông báo "đang chạy" về dòng mặc định
         LanWebSocketServer.broadcast("farmStatus",
             mapOf("status" to "stopped", "reason" to reason))
@@ -3213,6 +3257,27 @@ class AutomationEngine(
             "snapchat_completed"  -> notifyDiscord("✅ **AT Pro** — Hoàn thành phiên nuôi Snapchat")
             "task_completed"      -> notifyDiscord("✅ **AT Pro** — Hoàn thành phiên Task mode")
             // "completed" (TikTok chính) đã có message riêng ở trên, không gửi trùng.
+        }
+    }
+
+    /**
+     * v1.12.5 — Về màn hình chính điện thoại TRƯỚC KHI tool tắt, ở MỌI đường dừng: người dùng bấm Dừng (Dashboard / popup /
+     * thông báo), xong phiên, hết acc, lỗi không mong đợi, bị huỷ, service bị tắt. Máy không bị bỏ lại trong TikTok,
+     * Cài đặt, danh sách tài khoản hay một popup.
+     *
+     * `performGlobalAction` không suspend nên chạy được cả khi coroutine đã bị huỷ. Nếu hệ thống từ chối lần đầu thì thử
+     * lại đúng một lần sau 400ms (scope của service không bị huỷ theo farmJob).
+     */
+    private fun goHomeBeforeStop(reason: String) {
+        val ok = runCatching { host.pressHome() }.getOrDefault(false)
+        Log.i(TAG, "goHomeBeforeStop($reason): pressHome=$ok")
+        if (!ok) {
+            runCatching {
+                host.scope.launch {
+                    delay(400)
+                    runCatching { host.pressHome() }
+                }
+            }
         }
     }
 
@@ -3338,6 +3403,8 @@ class AutomationEngine(
                 log("$tag: Không còn ở TikTok — mở lại")
                 return relaunchTikTokWithRetry(tag)
             }
+            // v1.12.5: popup đang che thì Back có thể trúng popup chứ không phải trang → dọn trước, không tính lần Back.
+            if (popup.sweep("$tag: Về feed", maxRounds = 2) > 0) continue
             if (backs == 0) log("$tag: Chưa ở feed — Back về feed")
             host.pressBack()
             Human.delay(700, 1_100)
@@ -3671,6 +3738,8 @@ class AutomationEngine(
             // Chờ delay cấu hình cho video/profile load (v1.10.0: một thanh đếm ngược thay vì đăng trạng thái mỗi giây)
             setStatus("TASK: Chờ tải nội dung")
             waitWithBar("Chờ tải", config.taskJobDelaySecs * 1_000L)
+            // v1.12.5: popup hay hiện ngay khi trang video/hồ sơ tải xong và che nút Thích/Theo dõi.
+            popup.sweep("Trang nhiệm vụ", lateRender = true)
 
             // ── [D] Thực hiện nhiệm vụ ───────────────────────────
             val success = when (job.kind) {

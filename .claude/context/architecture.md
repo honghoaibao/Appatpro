@@ -8,19 +8,20 @@ _Last updated: 2026-10-31 — v1.8.0 (bố cục 5 tab; ui/settings/; Thống k�
 android/app/src/main/kotlin/com/atpro/
 ├── accessibility/          ANDROID-FIRST ✅
 │   ├── TikTokAccessibilityService.kt   — accessibility entry point
-│   └── NodeTraverser.kt                — node tree queries
+│   ├── NodeTraverser.kt                — node tree queries
+│   └── ContentScanner.kt               — quét popup/quảng cáo/live theo chữ + whitelist nút đóng (pure Kotlin, có test)
 ├── automation/             ANDROID-FIRST ✅
 │   ├── AutomationEngine.kt             — farm + task-mode orchestration (taskPostJobNurtureSecs ở top-level)
 │   ├── FarmBehavior.kt                 — RateGate + WatchPlan (thuật toán hành vi, pure Kotlin, có test)
 │   ├── IFarmHost.kt                    — interface host (getRootNode() là suspend từ v1.3.1)
 │   └── popup/
-│       └── PopupHandler.kt             — popup detection & dismissal
+│       └── PopupHandler.kt             — popup detection & dismissal (Tier 1 / 1.5 / 2) + sweep() tại các mốc
 ├── data/                   ANDROID-FIRST ✅
 │   ├── FarmConfig.kt                   — farm configuration model
 │   ├── FarmForegroundService.kt        — foreground service lifecycle
 │   ├── LocalRepository.kt              — Room data access (implements IFarmRepository)
 │   ├── IFarmRepository.kt              — interface repo cho engine/test
-│   ├── OverlayFarmMonitor.kt           — floating overlay
+│   ├── OverlayFarmMonitor.kt           — floating overlay (Popup · Mini Popup · Floating Chip)
 │   ├── TikTokDeepLinks.kt              — TikTok deep link constants
 │   ├── AccessibilitySettingsHelper.kt  — accessibility permission helpers
 │   └── BootReceiver.kt                 — reboot → restore schedules
@@ -184,3 +185,5 @@ Now accessible via ⚙️ icon in `DashboardScreen.IdleView` header.
 > v1.11.0: `accessibility/VideoText.kt` (đọc số tim/hashtag), `data/LogPolish.kt` (nhật ký dễ đọc), `ui/theme/AtSlider.kt`; `NodeTraverser` không bao giờ chọn nhãn Đăng xuất; `AutomationEngine.openSwitchList()`. Xem ADR-0013.
 
 > v1.10.0: `data/EarningsStore.kt` (nhật ký thu nhập từng job) + `data/EarningsStats.kt` (`summarizeEarnings`, hàm thuần) → tab Kiếm tiền của Thống kê. Xem ADR-0012.
+
+> v1.12.5: `accessibility/ContentScanner.kt` (R0–R5, whitelist nút đóng, chỉ nút đóng *mềm* khi bảng chuyển đổi tài khoản đang hiện); `PopupHandler.sweep()` gọi tuần tự ở các mốc (Cài đặt, danh sách tài khoản, `waitFeedLoad`, `ensureRealFeed`, trang job) — không chạy nền song song (ADR-0026); `AutomationEngine.goHomeBeforeStop()` trong `stopInternal()` (`IFarmHost.pressHome()`); `openSwitchList()` không vuốt thừa (`scrollUntilSwitchFound` + `pollSwitchRow` + `settleSwitchRow`); `OverlayFarmMonitor` 3 trạng thái, API công khai giữ nguyên + `setCounters()`.

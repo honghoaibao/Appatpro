@@ -78,6 +78,7 @@ class AutomationEngineTest {
             every  { screenHeight } returns 2400
             coEvery { getRootNode() } returns null  // v1.3.1: getRootNode() giờ là suspend fun
             every  { pressBack()   } returns true
+            every  { pressHome()   } returns true   // v1.12.5: về màn hình chính trước khi dừng
             every  { launchTikTok()         } returns false  // fail fast → farmOneAccount exits early
             every  { openTikTokSettings()   } returns false
             coEvery { killTikTok()           } just Runs
@@ -228,5 +229,52 @@ class AutomationEngineTest {
         engine.stop()   // phải không crash
 
         assertFalse("isFarming vẫn false", engine.isFarming)
+    }
+
+    // ── v1.12.5: về màn hình chính trước khi dừng ─────────────
+
+    /** Dừng giữa chừng (người dùng bấm Dừng) → máy phải về Home, đúng MỘT lần dù stop() và finally cùng gọi stopInternal. */
+    @Test
+    fun `given farming when stop called then phone goes home exactly once`() {
+        engine.startFarm(FarmMode.SELECTED_LIST, listOf("testuser"))
+        assertTrue(engine.isFarming)
+
+        engine.stop()
+
+        verify(exactly = 1) { host.pressHome() }
+        assertFalse(engine.isFarming)
+    }
+
+    /** Không có phiên nào đang chạy thì dừng KHÔNG đẩy người dùng về Home. */
+    @Test
+    fun `given idle when stop called then phone does not go home`() {
+        engine.stop()
+
+        verify(exactly = 0) { host.pressHome() }
+    }
+
+    /** Dừng hai lần liên tiếp (vd bấm Dừng rồi service bị tắt) chỉ về Home một lần. */
+    @Test
+    fun `given farming when stop called twice then phone goes home once`() {
+        engine.startFarm(FarmMode.SELECTED_LIST, listOf("testuser"))
+
+        engine.stop()
+        engine.stop()
+
+        verify(exactly = 1) { host.pressHome() }
+    }
+
+    /**
+     * Tool tự tắt vì lỗi ngay lúc khởi động (nạp cấu hình lỗi) → vẫn đi qua finally: nhả cờ isFarming và về màn hình chính.
+     * Trước v1.12.5 lỗi ở bước này làm phiên chết mà không qua finally (cờ isFarming kẹt true, không về Home).
+     */
+    @Test
+    fun `given config load fails when startFarm then engine stops itself and goes home`() {
+        coEvery { repo.loadFarmConfig() } throws RuntimeException("db lỗi")
+
+        engine.startFarm(FarmMode.SELECTED_LIST, listOf("testuser"))
+
+        assertFalse("isFarming phải về false sau lỗi khởi động", engine.isFarming)
+        verify(exactly = 1) { host.pressHome() }
     }
 }

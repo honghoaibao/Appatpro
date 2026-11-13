@@ -87,4 +87,12 @@ class LogPolishTest {
         assertEquals("Bỏ qua 1 tài khoản không được chọn: @c", p("TASK: Bỏ qua 1 acc không được chọn: @c").body)
         assertFalse(p("WARN: Task — Không có acc nào được chọn khớp với máy và Follow4Follow").detail)
     }
+
+    @Test fun `dong dong popup theo whitelist hien tren popup va Nhat ky`() {
+        val l = p("POPUP: Đóng popup — bấm 'để sau'")
+        assertFalse(l.detail)
+        assertEquals("Đã đóng hộp thoại (nút \"để sau\")", l.body)
+        // dòng tổng kết của sweep vẫn là dòng gỡ lỗi (tag POPUP mặc định ẩn)
+        assertTrue(p("POPUP: Feed vừa tải — đã đóng 1 popup").detail)
+    }
 }

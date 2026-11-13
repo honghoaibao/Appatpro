@@ -54,6 +54,12 @@ interface IFarmHost {
      */
     suspend fun doubleTapSuspend(x: Int, y: Int): Boolean
     fun pressBack(): Boolean
+    /**
+     * v1.12.5 — Về màn hình chính của điện thoại (GLOBAL_ACTION_HOME).
+     * Engine gọi trước khi dừng ở MỌI đường dừng (người dùng dừng, xong phiên, lỗi, bị huỷ) để máy không bị bỏ lại
+     * trong TikTok / Cài đặt / popup. Mặc định false (host giả trong test chưa hỗ trợ).
+     */
+    fun pressHome(): Boolean = false
     fun typeText(node: AccessibilityNodeInfo, text: String): Boolean
 
     /** Mở TikTok về màn hình chính. Trả false nếu không cài hoặc launch fail. */
