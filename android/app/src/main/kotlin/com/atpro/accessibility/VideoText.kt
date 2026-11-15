@@ -99,6 +99,24 @@ object VideoScanner {
     /** "Thích video, 449,6K lượt thích" / "Like video. 449.6K likes" — số nằm trong mô tả nút tim. */
     private val COUNT_IN_TEXT = Regex("(\\d[\\d.,]*\\s?(?:K|k|M|m|Tr|tr|N|n|Tỷ|tỷ|B|b)?)(?=\\s|$|[^\\p{L}\\p{N}])")
 
+    /**
+     * v1.12.5 — Lọc mô tả nút tim thành những cái thuộc VIDEO ĐANG HIỆN, xếp từ trên xuống.
+     *
+     * Cây giao diện của TikTok còn giữ cả video kế bên (đã dựng sẵn nhưng nằm ngoài màn hình, cùng cột x với video đang xem)
+     * → mô tả nút tim của chúng cũng có "Thích video. 9,9K lượt thích". Trước đây chỉ lọc theo cột phải nên cái đứng trước
+     * trong cây (thường là video kế bên) có thể bị chọn → đọc nhầm số tim → vượt qua ngưỡng "Chỉ tim video có từ N tim".
+     * Giờ chỉ nhận mô tả nằm hẳn trong màn hình: cột phải, tâm theo chiều dọc trong dải số đếm.
+     */
+    fun onScreenLikeDescriptions(descBoxes: List<TextBox>, screenW: Int, screenH: Int): List<String> {
+        if (screenW <= 0 || screenH <= 0) return emptyList()
+        return descBoxes.asSequence()
+            .filter { it.left >= screenW * 0.6f && it.right <= screenW }
+            .filter { val cy = (it.top + it.bottom) / 2; cy >= screenH * RAIL_TOP_FRACTION && cy <= screenH * RAIL_BOTTOM_FRACTION }
+            .sortedBy { it.top }
+            .map { it.text }
+            .toList()
+    }
+
     fun scan(boxes: List<TextBox>, screenW: Int, screenH: Int, likeButtonDescriptions: List<String> = emptyList()): VideoInfo {
         if (boxes.isEmpty() || screenW <= 0 || screenH <= 0) return VideoInfo()
 

@@ -252,9 +252,9 @@ class TikTokAccessibilityService : AccessibilityService(), IFarmHost {
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
         instance = null
-        // v1.12.5: dừng engine TRƯỚC khi huỷ scope — engine.stop() bấm Home (GLOBAL_ACTION_HOME) khi service còn kết nối;
-        // huỷ scope trước thì lệnh thử lại của engine không còn chạy được.
-        if (::engine.isInitialized) engine.stop()
+        // v1.12.5: tắt Trợ năng = tool tự tắt (không phải người dùng bấm Dừng) → goHome = true. Dừng engine TRƯỚC khi huỷ scope:
+        // engine.stop() bấm Home (GLOBAL_ACTION_HOME) khi service còn kết nối; huỷ scope trước thì lệnh thử lại không còn chạy được.
+        if (::engine.isInitialized) engine.stop(goHome = true)
         serviceScope.cancel()
         LanWebSocketServer.broadcast("serviceStatus", mapOf("status" to "disconnected"))
         return super.onUnbind(intent)

@@ -57,7 +57,9 @@ Công cụ tự động hóa chạy trực tiếp trên thiết bị Android (kh
 - **Dịch vụ khác:** Facebook (kể cả xem Reels), Instagram, X, Threads, Snapchat — mức demo/nuôi cơ bản.
 - **Lịch tự động:** màn hình phủ mở từ Tổng quan hoặc Cài đặt (`ScheduledFarmManager`), khôi phục sau khi khởi động lại máy (`BootReceiver`).
 - **Overlay:** cửa sổ nổi hiển thị trạng thái phiên chạy với **3 trạng thái** — Popup (tài khoản, tiến trình, Lượt thích · Đã thêm · Cảnh báo, trạng thái đang làm, Nhật ký hoạt động, Tạm dừng/Dừng) · Mini Popup · Floating Chip; kéo được (`OverlayFarmMonitor`, v1.12.5).
-- **Dừng an toàn:** mọi đường dừng đều đưa máy về màn hình chính điện thoại trước khi tool tắt (v1.12.5).
+- **Dừng an toàn:** tool **tự tắt** (xong phiên, hết việc, lỗi, không làm tiếp được, tắt Trợ năng) thì về màn hình chính điện thoại trước khi tắt; **người dùng tự bấm Dừng** thì ở lại màn hình hiện tại, không về màn hình chính (v1.12.5).
+- **Nuôi Facebook / Instagram:** chọn cách nuôi **Bằng app** (chạy thật) hoặc **Bằng cookie · demo** (chỉ là giao diện: dán cookie → đọc tên khoá + ID tài khoản, không lưu, không chạy thật) (v1.12.5).
+- **Thống kê (tab Nuôi acc):** tương tác + so kỳ trước, thích/follow/bình luận, video, thời gian chạy, biểu đồ đủ mọi ngày theo giờ địa phương, cộng dồn, cơ cấu, theo giờ, xếp hạng tài khoản; chỉ tính phiên đã đóng (v1.12.5).
 - **Thông báo:** Android notification + Discord webhook; kiểm tra bản mới từ GitHub Releases (`UpdateChecker`).
 
 ## Setup
@@ -145,12 +147,14 @@ gradle test        # hoặc ./gradlew test nếu đã có wrapper
 | File | Số test |
 |------|---------|
 | `NodeTraverserTest` | 39 |
-| `AutomationEngineTest` | 12 |
+| `AutomationEngineTest` | 13 |
 | `AutomationEngineIntegrationTest` | 6 |
 | `TaskNurtureTest` | 8 |
 | `FarmBehaviorTest` | 9 |
 | `PopupLoopGuardTest` | 6 |
 | `ContentScannerTest` | 23 |
+| `FarmStatsTest` | 14 |
+| `CookieDemoTest` | 13 |
 | `F4fSignerTest` | 5 |
 | `F4fApiClientTest` | 11 |
 | `Follow4FollowProviderTest` | 24 |
@@ -185,7 +189,7 @@ Chi tiết từng bản nằm trong `.claude/revision/vX.Y.Z.md`.
 
 | Bản | Điểm chính |
 |-----|-----------|
-| **v1.12.5** (45) | **Quét popup / quảng cáo / live ở mọi bước** (`ContentScanner` theo whitelist nút đóng — không bao giờ bấm OK; quét tại các mốc: vào Cài đặt, mở danh sách tài khoản, feed vừa tải, trang job; đóng popup đè lên feed); **sửa vuốt thừa** sau khi thấy nút Chuyển đổi tài khoản (vuốt ngắn + chậm + dò liên tục, bấm ngay bằng ACTION_CLICK); **mọi đường dừng đều về màn hình chính** trước khi tool tắt; **popup nổi mới** (Popup · Mini Popup · Floating Chip) |
+| **v1.12.5** (45) | **Quét popup / quảng cáo / live ở mọi bước** (`ContentScanner` theo whitelist nút đóng — không bao giờ bấm OK; quét tại các mốc: vào Cài đặt, mở danh sách tài khoản, feed vừa tải, trang job; đóng popup đè lên feed); **sửa vuốt thừa** sau khi thấy nút Chuyển đổi tài khoản (vuốt ngắn + chậm + dò liên tục, bấm ngay bằng ACTION_CLICK); **tool tự tắt thì về màn hình chính** (người dùng tự bấm Dừng thì không); **sửa tim tối thiểu** (đọc số tim đúng video đang hiện); **Facebook/Instagram: chọn nuôi bằng app hoặc cookie (demo)**; **thống kê Nuôi acc làm lại** (giờ địa phương, chỉ phiên đã đóng, so kỳ trước); **popup nổi mới** (Popup · Mini Popup · Floating Chip) |
 | v1.12.0 (44) | **Nhận nhiệm vụ theo `f4f.py` v2.8** (danh sách acc `quick-switch`, luôn kèm `uid`, thang đổi acc S1–S5, 429 chờ-thử-lại, job hết hạn, trace); **chọn tài khoản nhận nhiệm vụ riêng** (Tự động / Chọn tay, `TaskAccountSelector`); **thông báo nâng cấp** (4 nhóm, giờ yên tĩnh, tổng kết nhiệm vụ + xu, tiến độ trên thông báo đang chạy, mở đúng tab, nút gửi thử); 401 giữa phiên dừng cả lượt (ADR-0014) |
 | v1.11.0 (43) | **Sửa bấm nhầm "Đăng xuất" khi chuyển acc** ("Đăng xuất" chứa chữ x bị coi là nút đóng; nhận diện popup + chọn dòng theo acc đang dùng; `openSwitchList()` có chặn + huỷ hộp đăng xuất); **thanh kéo mới** `AtSlider`; nuôi lâu tối đa 50 job, thời lượng ≥ 30s; **tab Nuôi acc riêng** cho kiếm tiền; **ngưỡng số tim tối thiểu**; logic hashtag mới (không phân biệt dấu, ranh giới từ); **nhật ký dễ đọc** (`LogPolish`, chip "Chi tiết"); hiệu ứng popup/thẻ/nhật ký (ADR-0013) |
 | v1.10.0 (42) | **Back về feed** sau báo cáo job (phân loại trang theo thanh điều hướng); **bảng xếp hạng F4F hiện xu** (`parseCoinText`); F4F làm lại (bỏ Giới thiệu, ô Xu chờ · Làm hôm nay · Tổng xu); **Thống kê kiếm tiền + biểu đồ** (`EarningsStore`, Canvas); Quyền/Thông báo tách riêng, thẻ quyền bố cục dọc + chặn cỡ chữ hệ thống; Cài đặt/Tài khoản/Lịch tinh gọn; **popup nhỏ + thanh đếm ngược**; tối ưu pin (memo cây node, gom ghi log); bỏ chữ thừa (ADR-0012) |

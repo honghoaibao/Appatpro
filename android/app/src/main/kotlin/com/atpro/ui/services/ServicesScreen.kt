@@ -166,7 +166,7 @@ fun ServicesScreen(
 
             ServiceRow(
                 title    = "Facebook",
-                subtitle = "Nuôi tài khoản",
+                subtitle = "Nuôi tài khoản · bằng app hoặc cookie (demo)",
                 modifier = Modifier.staggerIn(4),
                 onClick  = onOpenFacebookService,
             ) { PlatformLogo(R.drawable.ic_logo_facebook, "Facebook") }
@@ -186,7 +186,7 @@ fun ServicesScreen(
 
             ServiceRow(
                 title    = "Instagram",
-                subtitle = "Lướt và thích",
+                subtitle = "Lướt và thích · bằng app hoặc cookie (demo)",
                 modifier = Modifier.staggerIn(7),
                 onClick  = onOpenInstagramService,
             ) { PlatformLogo(R.drawable.ic_logo_instagram, "Instagram") }

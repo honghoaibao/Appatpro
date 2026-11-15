@@ -390,7 +390,23 @@ private fun IdleView(
         Spacer(Modifier.weight(1f))
 
         // ── Điều khiển + nút chính ──
+        // v1.12.5: Facebook / Instagram có hai cách nuôi — Bằng app (chạy thật) và Bằng cookie (demo, chỉ là giao diện).
+        val cookiePlatform = cookiePlatformOf(state.serviceMode)
+        var methodIndex by remember(state.serviceMode) { mutableStateOf(0) }
+        val cookieMode = cookiePlatform != null && methodIndex == 1
+
         Column(Modifier.fillMaxWidth().staggerIn(2)) {
+            if (cookiePlatform != null) {
+                FarmMethodSelector(cookiePlatform, methodIndex, onSelect = { methodIndex = it })
+                Spacer(Modifier.height(14.dp))
+            }
+            if (cookiePlatform != null && cookieMode) {
+                // Danh sách có thể dài → cuộn trong khung giới hạn chiều cao, không đẩy nút ra khỏi màn hình
+                Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
+                    CookieDemoPanel(cookiePlatform)
+                }
+                Spacer(Modifier.height(14.dp))
+            }
             // v1.12.0: chế độ nhiệm vụ có cách chọn tài khoản riêng (Cài đặt → Nhiệm vụ → Tài khoản): hiện tóm tắt thay cho ô gõ tay.
             AnimatedVisibility(visible = state.serviceMode == com.atpro.automation.ServiceMode.TASK) {
                 Column {
@@ -415,7 +431,7 @@ private fun IdleView(
                     Spacer(Modifier.height(16.dp))
                 }
             }
-            AnimatedVisibility(visible = !state.isDemoMode && state.serviceMode != com.atpro.automation.ServiceMode.TASK) {
+            AnimatedVisibility(visible = !state.isDemoMode && !cookieMode && state.serviceMode != com.atpro.automation.ServiceMode.TASK) {
                 Column {
                     AtSegmented(
                         options       = listOf("Toàn bộ máy", "Danh sách chọn"),
@@ -440,14 +456,14 @@ private fun IdleView(
             }
 
             AtButton(
-                text    = startLabel,
+                text    = if (cookieMode) "Chạy bằng cookie · sắp có" else startLabel,
                 onClick = startAction,
-                enabled = state.canStart,
+                enabled = state.canStart && !cookieMode,   // cookie: chỉ là giao diện demo, chưa chạy thật
                 icon    = Icons.Rounded.PlayArrow,
             )
 
             AnimatedVisibility(
-                visible = state.startHint != null,
+                visible = state.startHint != null && !cookieMode,
                 enter   = fadeIn(tween(200)) + expandVertically(tween(200)),
                 exit    = fadeOut(tween(150)) + shrinkVertically(tween(150)),
             ) {

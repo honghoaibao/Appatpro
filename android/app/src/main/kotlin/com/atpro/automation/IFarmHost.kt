@@ -56,8 +56,8 @@ interface IFarmHost {
     fun pressBack(): Boolean
     /**
      * v1.12.5 — Về màn hình chính của điện thoại (GLOBAL_ACTION_HOME).
-     * Engine gọi trước khi dừng ở MỌI đường dừng (người dùng dừng, xong phiên, lỗi, bị huỷ) để máy không bị bỏ lại
-     * trong TikTok / Cài đặt / popup. Mặc định false (host giả trong test chưa hỗ trợ).
+     * Engine gọi trước khi tool TỰ tắt (xong phiên, hết việc, lỗi, không làm tiếp được, tắt Trợ năng) để máy không bị bỏ lại
+     * trong TikTok / Cài đặt / popup. KHÔNG gọi khi người dùng tự bấm Dừng. Mặc định false (host giả trong test chưa hỗ trợ).
      */
     fun pressHome(): Boolean = false
     fun typeText(node: AccessibilityNodeInfo, text: String): Boolean

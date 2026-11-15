@@ -4,11 +4,13 @@ import android.content.Context
 import androidx.lifecycle.*
 import com.atpro.data.EarningsStore
 import com.atpro.data.EarningsSummary
+import com.atpro.data.FarmSessionRow
+import com.atpro.data.FarmStatsSummary
 import com.atpro.data.summarizeEarnings
+import com.atpro.data.summarizeFarmStats
 import com.atpro.db.AtProDatabase
 import com.atpro.db.dao.SessionDao
-import com.atpro.db.entity.DailyStatRow
-import com.atpro.db.dao.TotalsRow
+import com.atpro.db.entity.SessionEntity
 import com.atpro.tasks.TaskResult
 import com.atpro.tasks.f4f.F4fAuth
 import com.atpro.tasks.f4f.F4fAuthState
@@ -24,7 +26,8 @@ import java.util.concurrent.TimeUnit
 /**
  * StatsViewModel — dữ liệu cho màn Thống kê.
  *
- * Nuôi acc : SessionDao.getTotals(since) + getDailyStats(since).
+ * Nuôi acc (v1.12.5): các phiên đã đóng ([SessionDao.observeClosedSince]) tổng hợp bằng [summarizeFarmStats] — ngày theo giờ
+ *            địa phương, chỉ phiên đã đóng, so với kỳ trước, tự cập nhật khi có phiên mới đóng.
  * Kiếm tiền (v1.10.0): [EarningsStore] (nhật ký thu nhập từng job, ghi từ engine) tổng hợp bằng [summarizeEarnings];
  *            số liệu phía server (xu chờ / hôm nay / tổng) lấy từ Follow4Follow khi đã đăng nhập.
  * Khoảng thời gian (7 ngày / 30 ngày / Tất cả) dùng chung cho cả hai tab.
@@ -53,25 +56,27 @@ class StatsViewModel(
 
     // flatMapLatest (experimental trong coroutines 1.7.x): cần thiết để HUỶ lần tải cũ khi đổi khoảng thời gian.
     @OptIn(ExperimentalCoroutinesApi::class)
-    val uiState: StateFlow<StatsUiState> = _range
+    val farm: StateFlow<FarmStatsUiState> = _range
         .flatMapLatest { r ->
-            val since = r.days?.let {
-                System.currentTimeMillis() - TimeUnit.DAYS.toMillis(it.toLong())
-            } ?: 0L
-            loadStats(since)
+            // Lấy dư để đủ cả kỳ hiện tại + kỳ liền trước + lệch múi giờ/ranh giới ngày: (2N + 2) ngày; Tất cả = từ đầu.
+            val since = r.days?.let { System.currentTimeMillis() - TimeUnit.DAYS.toMillis(2L * it + 2) } ?: 0L
+            sessionDao.observeClosedSince(since)
+                .map<List<SessionEntity>, FarmStatsUiState> { rows ->
+                    FarmStatsUiState(
+                        isLoading = false,
+                        summary   = summarizeFarmStats(rows.map { it.toRow() }, System.currentTimeMillis(), r.days),
+                    )
+                }
+                .onStart { emit(FarmStatsUiState(isLoading = true)) }
+                .catch { e -> emit(FarmStatsUiState(isLoading = false, error = e.message ?: "Lỗi đọc dữ liệu")) }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StatsUiState())
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), FarmStatsUiState(isLoading = true))
 
-    private fun loadStats(since: Long): Flow<StatsUiState> = flow {
-        emit(StatsUiState(isLoading = true))
-        try {
-            val totals = sessionDao.getTotals(since)
-            val daily  = sessionDao.getDailyStats(since)
-            emit(StatsUiState(isLoading = false, totals = totals, dailyStats = daily))
-        } catch (e: Exception) {
-            emit(StatsUiState(isLoading = false, error = e.message))
-        }
-    }
+    private fun SessionEntity.toRow() = FarmSessionRow(
+        accountId = accountId, startedAt = startedAt, endedAt = endedAt,
+        likes = likes, follows = follows, comments = comments, videos = videosWatched, durationSecs = durationSecs,
+    )
 
     // ── Kiếm tiền ─────────────────────────────────────────────
 
@@ -115,9 +120,9 @@ class StatsViewModel(
     }
 }
 
-data class StatsUiState(
-    val isLoading:  Boolean          = false,
-    val totals:     TotalsRow?       = null,
-    val dailyStats: List<DailyStatRow> = emptyList(),
-    val error:      String?          = null,
+/** Trạng thái tab "Nuôi acc": [summary] rỗng khi chưa có phiên nào đã đóng trong khoảng đang chọn. */
+data class FarmStatsUiState(
+    val isLoading: Boolean           = false,
+    val summary:   FarmStatsSummary  = FarmStatsSummary.EMPTY,
+    val error:     String?           = null,
 )

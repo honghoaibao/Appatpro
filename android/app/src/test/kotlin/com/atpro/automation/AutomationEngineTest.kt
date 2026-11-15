@@ -231,21 +231,21 @@ class AutomationEngineTest {
         assertFalse("isFarming vẫn false", engine.isFarming)
     }
 
-    // ── v1.12.5: về màn hình chính trước khi dừng ─────────────
+    // ── v1.12.5: về màn hình chính khi tool TỰ tắt — còn người dùng tự bấm Dừng thì KHÔNG về ───────────
 
-    /** Dừng giữa chừng (người dùng bấm Dừng) → máy phải về Home, đúng MỘT lần dù stop() và finally cùng gọi stopInternal. */
+    /** Người dùng tự bấm Dừng giữa chừng → ở lại màn hình hiện tại, không bấm Home. */
     @Test
-    fun `given farming when stop called then phone goes home exactly once`() {
+    fun `given farming when user stops then phone does not go home`() {
         engine.startFarm(FarmMode.SELECTED_LIST, listOf("testuser"))
         assertTrue(engine.isFarming)
 
         engine.stop()
 
-        verify(exactly = 1) { host.pressHome() }
+        verify(exactly = 0) { host.pressHome() }
         assertFalse(engine.isFarming)
     }
 
-    /** Không có phiên nào đang chạy thì dừng KHÔNG đẩy người dùng về Home. */
+    /** Dừng khi đang rảnh cũng không bấm Home. */
     @Test
     fun `given idle when stop called then phone does not go home`() {
         engine.stop()
@@ -253,14 +253,28 @@ class AutomationEngineTest {
         verify(exactly = 0) { host.pressHome() }
     }
 
-    /** Dừng hai lần liên tiếp (vd bấm Dừng rồi service bị tắt) chỉ về Home một lần. */
+    /** Tool bị tắt không do người dùng bấm (vd tắt Trợ năng) → về Home đúng một lần dù stop() gọi hai lần. */
     @Test
-    fun `given farming when stop called twice then phone goes home once`() {
+    fun `given farming when stopped by system then phone goes home exactly once`() {
         engine.startFarm(FarmMode.SELECTED_LIST, listOf("testuser"))
 
-        engine.stop()
-        engine.stop()
+        engine.stop(goHome = true)
+        engine.stop(goHome = true)
 
+        verify(exactly = 1) { host.pressHome() }
+    }
+
+    /** Cờ "người dùng dừng" không được rò sang phiên sau: phiên mới tự tắt vì lỗi vẫn phải về Home. */
+    @Test
+    fun `given user stopped before when next session fails by itself then phone goes home`() {
+        engine.startFarm(FarmMode.SELECTED_LIST, listOf("testuser"))
+        engine.stop()
+        verify(exactly = 0) { host.pressHome() }
+
+        coEvery { repo.loadFarmConfig() } throws RuntimeException("db lỗi")
+        engine.startFarm(FarmMode.SELECTED_LIST, listOf("testuser"))
+
+        assertFalse(engine.isFarming)
         verify(exactly = 1) { host.pressHome() }
     }
 

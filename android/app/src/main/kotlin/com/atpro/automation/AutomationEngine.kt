@@ -729,7 +729,23 @@ class AutomationEngine(
         }
     }
 
-    fun stop() {
+    /**
+     * Cờ "lần dừng này do NGƯỜI DÙNG bấm" — đặt trong [stop], đọc và xoá trong [stopInternal].
+     * @Volatile: finally của farmJob có thể chạy trên luồng khác ngay khi job bị huỷ.
+     */
+    @Volatile private var userStopPending = false
+
+    /**
+     * Dừng phiên đang chạy.
+     *
+     * v1.12.5 — Người dùng TỰ bấm Dừng (popup nổi, Dashboard, thông báo, WebSocket) → ở lại màn hình hiện tại,
+     * KHÔNG về màn hình chính (mặc định `goHome = false`). Tool tự kết thúc (hết việc, lỗi, không làm tiếp được) đi qua
+     * `finally` của farmJob → [stopInternal] → luôn về màn hình chính. `goHome = true` dành cho nơi gọi không phải người
+     * dùng bấm (vd service Trợ năng bị tắt).
+     */
+    fun stop(goHome: Boolean = false) {
+        // Đặt cờ TRƯỚC khi huỷ job: finally của farmJob có thể chạy ngay khi job bị huỷ.
+        if (isFarming && !goHome) userStopPending = true
         farmJob?.cancel()
         watchdogJob?.cancel()
         host.hideFarmOverlay()
@@ -1948,7 +1964,9 @@ class AutomationEngine(
                     else          -> true
                 }
                 if (shouldLike) {
-                    val action = if (contentMatch) "LIKE: Khớp từ khoá" else "LIKE: Thích"
+                    // v1.12.5: khi có ngưỡng số tim, hiện số tim đã đọc để kiểm chứng ngay trên popup nổi.
+                    val readLikes = verdict.likes?.takeIf { config.minLikesToLike > 0 }?.let { " · ${CountParser.format(it)} tim" } ?: ""
+                    val action = if (contentMatch) "LIKE: Khớp từ khoá$readLikes" else "LIKE: Thích$readLikes"
                     OverlayFarmMonitor.update(idx + 1, total, account,
                         sessionSecsRemain, totalSecsRemain, action)
                     // [v1.2.0] Micro-pause trước like — người thật dừng ngắn khi thích video
@@ -3235,13 +3253,15 @@ class AutomationEngine(
     }
 
     private fun stopInternal(reason: String) {
-        // v1.12.5: chỉ "đang chạy" mới cần về Home. stop() rồi finally của farmJob cùng gọi stopInternal → lần sau bỏ qua.
+        // v1.12.5: chỉ "đang chạy" mới xét về Home. stop() rồi finally của farmJob cùng gọi stopInternal → lần sau bỏ qua.
         val wasRunning = isFarming
+        val byUser = wasRunning && userStopPending      // người dùng tự bấm Dừng → không về Home
+        if (wasRunning) userStopPending = false
         _liveFarmStats.update { LiveFarmStats() }
         isFarming = false
         isPaused  = false
         isResting = false
-        if (wasRunning) goHomeBeforeStop(reason)
+        if (wasRunning && !byUser) goHomeBeforeStop(reason)
         AtProNotificationManager.clearRunStatus()   // v1.12.0: thông báo "đang chạy" về dòng mặc định
         LanWebSocketServer.broadcast("farmStatus",
             mapOf("status" to "stopped", "reason" to reason))
@@ -3261,9 +3281,9 @@ class AutomationEngine(
     }
 
     /**
-     * v1.12.5 — Về màn hình chính điện thoại TRƯỚC KHI tool tắt, ở MỌI đường dừng: người dùng bấm Dừng (Dashboard / popup /
-     * thông báo), xong phiên, hết acc, lỗi không mong đợi, bị huỷ, service bị tắt. Máy không bị bỏ lại trong TikTok,
-     * Cài đặt, danh sách tài khoản hay một popup.
+     * v1.12.5 — Về màn hình chính điện thoại TRƯỚC KHI tool TỰ tắt: xong phiên, hết acc, lỗi không mong đợi, không làm tiếp
+     * được, service Trợ năng bị tắt. Máy không bị bỏ lại trong TikTok, Cài đặt, danh sách tài khoản hay một popup.
+     * KHÔNG gọi khi người dùng tự bấm Dừng (xem [stop]) — lúc đó họ đang chủ động điều khiển máy.
      *
      * `performGlobalAction` không suspend nên chạy được cả khi coroutine đã bị huỷ. Nếu hệ thống từ chối lần đầu thì thử
      * lại đúng một lần sau 400ms (scope của service không bị huỷ theo farmJob).

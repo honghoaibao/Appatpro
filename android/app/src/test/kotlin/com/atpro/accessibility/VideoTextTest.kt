@@ -138,4 +138,35 @@ class VideoTextTest {
         assertEquals(LikeCountGate.PASS, likeCountGate(1_000, 5_000))
         assertEquals(LikeCountGate.TOO_FEW, likeCountGate(1_000, 999))
     }
+
+    // ── v1.12.5: số tim đọc từ mô tả nút tim phải là của video ĐANG HIỆN ─────
+
+    private fun d(text: String, top: Int) = TextBox(text, left = 980, top = top, right = 1070, bottom = top + 150)
+
+    @Test fun `bo qua mo ta nut tim cua video ke ben nam ngoai man hinh`() {
+        // màn 1080x2400: video đang xem có nút tim ở y≈1100; video kế bên (đã dựng sẵn) nằm ngoài màn hình, đứng TRƯỚC trong cây
+        val neighbor = d("Thích video. 9,9K lượt thích", top = 3500)
+        val previous = d("Thích video. 8,8K lượt thích", top = -1300)
+        val current  = d("Thích video. 120 lượt thích", top = 1100)
+        val picked = VideoScanner.onScreenLikeDescriptions(listOf(neighbor, previous, current), 1080, 2400)
+        assertEquals(listOf("Thích video. 120 lượt thích"), picked)
+    }
+
+    @Test fun `nguong tim khong bi vuot qua boi video ke ben`() {
+        val boxes = listOf(TextBox("Thích video. 120 lượt thích", 980, 1100, 1070, 1250))
+        val descs = VideoScanner.onScreenLikeDescriptions(
+            listOf(d("Thích video. 9,9K lượt thích", top = 3500), d("Thích video. 120 lượt thích", top = 1100)), 1080, 2400)
+        val info = VideoScanner.scan(boxes, 1080, 2400, descs)
+        assertEquals(120L, info.likes)
+        assertEquals(LikeCountGate.TOO_FEW, likeCountGate(minLikes = 1_000, videoLikes = info.likes))
+    }
+
+    @Test fun `mo ta ngoai cot phai hoac ngoai dai doc bi bo`() {
+        val left   = TextBox("Thích video. 5K lượt thích", 100, 1100, 300, 1250)      // không ở cột phải
+        val top    = TextBox("Thích video. 5K lượt thích", 980, 10, 1070, 120)        // thanh trạng thái
+        val bottom = TextBox("Thích video. 5K lượt thích", 980, 2300, 1070, 2390)    // thanh điều hướng
+        assertTrue(VideoScanner.onScreenLikeDescriptions(listOf(left, top, bottom), 1080, 2400).isEmpty())
+        assertTrue(VideoScanner.onScreenLikeDescriptions(emptyList(), 1080, 2400).isEmpty())
+        assertTrue(VideoScanner.onScreenLikeDescriptions(listOf(d("x 1", 1100)), 0, 0).isEmpty())
+    }
 }

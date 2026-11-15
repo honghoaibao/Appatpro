@@ -1865,7 +1865,7 @@ object NodeTraverser {
     fun readVideoInfo(root: AccessibilityNodeInfo?, screenWidth: Int, screenHeight: Int): VideoInfo {
         root ?: return VideoInfo()
         val boxes = ArrayList<TextBox>(64)
-        val likeDescs = ArrayList<String>(2)
+        val likeDescBoxes = ArrayList<TextBox>(4)
         val r = Rect()
         for (n in traverseAll(root)) {
             val text = n.text?.toString()?.trim()
@@ -1877,10 +1877,12 @@ object NodeTraverser {
                 val low = desc.lowercase()
                 // nút tim: có "thích"/"like" kèm số, nằm ở cột phải
                 if ((low.contains("thích") || low.contains("like")) && desc.any { it.isDigit() } && r.left > screenWidth * 0.6f)
-                    likeDescs.add(desc)
+                    likeDescBoxes.add(TextBox(desc, r.left, r.top, r.right, r.bottom))
             }
         }
-        return VideoScanner.scan(boxes, screenWidth, screenHeight, likeDescs)
+        // v1.12.5: chỉ nhận mô tả nút tim của video ĐANG HIỆN (bỏ video kế bên còn nằm trong cây) — xem VideoScanner.onScreenLikeDescriptions.
+        return VideoScanner.scan(boxes, screenWidth, screenHeight,
+            VideoScanner.onScreenLikeDescriptions(likeDescBoxes, screenWidth, screenHeight))
     }
 
     /** v1.10.0 — bản chụp duyệt cây gần nhất (xem [traverseAll]). */

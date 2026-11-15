@@ -40,8 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.atpro.data.EarningsSummary
-import com.atpro.db.dao.TotalsRow
-import com.atpro.db.entity.DailyStatRow
+import com.atpro.data.formatDuration
 import com.atpro.ui.f4f.WalletNumbers
 import com.atpro.ui.f4f.fmt
 import com.atpro.ui.theme.AnimatedNumber
@@ -61,6 +60,8 @@ import com.atpro.ui.theme.staggerIn
 // ─────────────────────────────────────────────────────────────────────────────
 //  StatsScreen — v1.10.0: làm lại.
 //  Hai tab: "Nuôi acc" (hoạt động) và "Kiếm tiền" (thu nhập theo job + số liệu Follow4Follow).
+//  v1.12.5: tab "Nuôi acc" làm lại — hero tương tác + so kỳ trước, thêm bình luận/thời gian chạy, biểu đồ đủ mọi ngày
+//  (giờ địa phương), cộng dồn, cơ cấu, theo giờ, xếp hạng tài khoản; số liệu từ summarizeFarmStats().
 //  Bỏ tab nền tảng demo (chỉ là trang trống) và danh sách chi tiết từng ngày/tài khoản → thay bằng biểu đồ.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -78,7 +79,7 @@ fun StatsScreen(
     vm:           StatsViewModel,
     onNavigateUp: (() -> Unit)? = null,
 ) {
-    val state    by vm.uiState.collectAsStateWithLifecycle()
+    val state    by vm.farm.collectAsStateWithLifecycle()
     val earnings by vm.earnings.collectAsStateWithLifecycle()
     val server   by vm.server.collectAsStateWithLifecycle()
     val range    by vm.range.collectAsStateWithLifecycle()
@@ -130,62 +131,125 @@ fun StatsScreen(
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun FarmStats(state: StatsUiState) {
-    val totals = state.totals
+private fun FarmStats(state: FarmStatsUiState) {
+    val s = state.summary
     when {
-        state.isLoading && totals == null -> StatsSkeleton()
-        totals == null || (totals.sessionCount == 0 && state.dailyStats.isEmpty()) ->
-            AtEmptyState(Icons.Rounded.BarChart, "Chưa có dữ liệu")
+        state.isLoading && s.isEmpty -> StatsSkeleton()
+        state.error != null && s.isEmpty ->
+            AtEmptyState(Icons.Rounded.BarChart, "Không tải được thống kê", subtitle = state.error)
+        s.isEmpty ->
+            AtEmptyState(Icons.Rounded.BarChart, "Chưa có dữ liệu", subtitle = "Chạy nuôi acc để xem thống kê ở đây")
         else -> Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(Modifier.fillMaxWidth().staggerIn(0), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AtStatTile("Phiên",  totals.sessionCount.toString(), Modifier.weight(1f))
-                AtStatTile("Video",  totals.videosWatched.toString(), Modifier.weight(1f))
-                AtStatTile("Thích",  totals.likes.toString(), Modifier.weight(1f), valueColor = Pink)
-                AtStatTile("Follow", totals.follows.toString(), Modifier.weight(1f), valueColor = Sky)
+            // Tổng tương tác (thích + follow + bình luận) và so với kỳ trước cùng độ dài
+            AtHeroCard(Modifier.fillMaxWidth().staggerIn(0)) {
+                Text("Tương tác", color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.Bottom) {
+                    AnimatedNumber(s.interactions, AtType.Title.copy(fontSize = 36.sp), color = Color.White)
+                    Spacer(Modifier.weight(1f))
+                    s.changePercent?.let { pct ->
+                        val up = pct >= 0
+                        Text(
+                            "${if (up) "▲" else "▼"} ${"%.0f".format(kotlin.math.abs(pct))}%",
+                            color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(Color.White.copy(alpha = 0.18f))
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "${s.sessions} phiên  ·  TB ${"%.0f".format(s.avgVideosPerSession)} video/phiên  ·  ${s.activeDays} ngày có chạy",
+                    color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp,
+                )
             }
 
-            val byDay = remember(state.dailyStats) {
-                state.dailyStats.groupBy { it.date }.toSortedMap().map { (date, rows) ->
-                    Triple(date, rows.sumOf { it.likes }, rows.sumOf { it.follows })
+            Row(Modifier.fillMaxWidth().staggerIn(1), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AtStatTile("Hôm nay", s.todayInteractions.toString(), Modifier.weight(1f), valueColor = Green)
+                AtStatTile("Phiên hôm nay", s.todaySessions.toString(), Modifier.weight(1f))
+                AtStatTile("Ngày tốt nhất", s.bestDay?.interactions?.toString() ?: "—", Modifier.weight(1f))
+            }
+            Row(Modifier.fillMaxWidth().staggerIn(2), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AtStatTile("Thích",     s.likes.toString(),    Modifier.weight(1f), valueColor = Pink)
+                AtStatTile("Follow",    s.follows.toString(),  Modifier.weight(1f), valueColor = Sky)
+                AtStatTile("Bình luận", s.comments.toString(), Modifier.weight(1f), valueColor = Amber)
+            }
+            Row(Modifier.fillMaxWidth().staggerIn(3), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AtStatTile("Video",     s.videos.toString(),               Modifier.weight(1f))
+                AtStatTile("Thời gian", formatDuration(s.durationSecs),    Modifier.weight(1f))
+                AtStatTile("TB/phiên",  formatDuration(s.avgDurationSecs), Modifier.weight(1f))
+            }
+
+            ChartCard("Theo ngày", Modifier.staggerIn(4)) {
+                Legend(listOf(Pink to "Thích", Blue to "Follow & bình luận"))
+                Spacer(Modifier.height(10.dp))
+                AtBarChart(
+                    values     = s.days.map { it.interactions.toFloat() },
+                    lower      = s.days.map { it.likes.toFloat() },
+                    labels     = s.days.map { it.label },
+                    color      = Blue,
+                    lowerColor = Pink,
+                )
+            }
+
+            if (s.days.size > 1) {
+                val cumulative = remember(s.days) {
+                    var run = 0f
+                    s.days.map { run += it.interactions; run }
+                }
+                ChartCard("Cộng dồn", Modifier.staggerIn(5)) {
+                    AtAreaChart(cumulative, s.days.map { it.label }, color = Green)
                 }
             }
-            if (byDay.isNotEmpty()) {
-                ChartCard("Theo ngày", Modifier.staggerIn(1)) {
-                    Legend(listOf(Pink to "Thích", Blue to "Follow"))
-                    Spacer(Modifier.height(10.dp))
-                    AtBarChart(
-                        values     = byDay.map { (it.second + it.third).toFloat() },
-                        lower      = byDay.map { it.second.toFloat() },
-                        labels     = byDay.map { it.first.takeLast(5).replace('-', '/').split('/').reversed().joinToString("/") },
-                        color      = Blue,
-                        lowerColor = Pink,
+
+            if (s.interactions > 0) ChartCard("Cơ cấu tương tác", Modifier.staggerIn(6)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AtDonutChart(
+                        parts = listOf(s.likes.toFloat() to Pink, s.follows.toFloat() to Sky, s.comments.toFloat() to Amber),
+                        centerTop = "${s.interactions}",
+                        centerBottom = "tương tác",
                     )
+                    Spacer(Modifier.padding(start = 18.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        AtLegendRow(Pink,  "Thích",     s.likes.toString())
+                        AtLegendRow(Sky,   "Follow",    s.follows.toString())
+                        AtLegendRow(Amber, "Bình luận", s.comments.toString())
+                    }
                 }
             }
 
-            ChartCard("Tỉ lệ trên video", Modifier.staggerIn(2)) {
+            ChartCard("Tỉ lệ trên video", Modifier.staggerIn(7)) {
                 AtRankBars(
                     items  = listOf(
-                        "Thích"      to totals.likeRate,
-                        "Follow"     to totals.followRate,
-                        "Bình luận"  to totals.commentRate,
+                        "Thích"      to s.likeRate,
+                        "Follow"     to s.followRate,
+                        "Bình luận"  to s.commentRate,
                     ),
                     color  = Pink,
                     format = { "%.1f%%".format(it) },
                 )
             }
 
-            val topAccounts = remember(state.dailyStats) {
-                state.dailyStats.groupBy { it.accountId }
-                    .map { (acc, rows) -> "@$acc" to rows.sumOf { it.likes + it.follows }.toFloat() }
-                    .sortedByDescending { it.second }.take(5)
+            ChartCard("Theo giờ bắt đầu phiên", Modifier.staggerIn(8)) {
+                AtBarChart(
+                    values = s.hourInteractions.map { it.toFloat() },
+                    labels = (0..23).map { "${it}h" },
+                    color  = Amber,
+                    height = 110.dp,
+                )
             }
-            if (topAccounts.size > 1) {
-                ChartCard("Tài khoản", Modifier.staggerIn(3)) {
-                    AtRankBars(topAccounts, color = Sky)
+
+            if (s.accounts.size > 1) {
+                ChartCard("Tài khoản", Modifier.staggerIn(9)) {
+                    AtRankBars(
+                        items = s.accounts.map { "@${it.account}" to it.interactions.toFloat() },
+                        color = Sky,
+                    )
                 }
             }
             Spacer(Modifier.height(20.dp))

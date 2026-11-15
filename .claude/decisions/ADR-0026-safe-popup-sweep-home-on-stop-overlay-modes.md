@@ -1,9 +1,9 @@
-# ADR-0026 — Quét popup an toàn theo whitelist ở mọi mốc, dừng phải về Home, popup nổi 3 trạng thái (v1.12.5)
+# ADR-0026 — Quét popup an toàn theo whitelist ở mọi mốc, tool tự tắt thì về Home, popup nổi 3 trạng thái (v1.12.5)
 
 ## Bối cảnh
 - Popup của TikTok hiện ở bất kỳ bước nào (mở Cài đặt, mở danh sách tài khoản, feed vừa tải, trang job vừa mở) và có khi hiện **trễ**. Cơ chế cũ chỉ xử lý ở vài điểm cố định; Tier 1 GENERIC và Tier 2 (từ khoá) cố ý **bỏ qua feed** vì từng bấm Back nhầm (FIX-WAITFEED-POPUP, FIX-POPUP-FALSE-POS) → popup đè lên feed (vd "Liên kết email") không được đóng, và `waitFeedLoad()` không dọn popup nào.
 - Nhận diện quảng cáo/live cũ khớp theo từ khoá rời rạc, bỏ sót nhãn gộp dòng ("Dola · Được tài trợ").
-- Máy bị bỏ lại trong TikTok/Cài đặt khi tool dừng; mọi đường dừng đều đi qua `AutomationEngine.stopInternal()`.
+- Máy bị bỏ lại trong TikTok/Cài đặt khi tool tự tắt (lỗi, hết việc, không làm tiếp được); mọi đường dừng đều đi qua `AutomationEngine.stopInternal()`.
 - `openSwitchList()` vuốt thừa: vuốt nhanh gây trôi quán tính, và luôn căn hàng vào giữa dù bấm được ngay bằng ACTION_CLICK.
 
 ## Quyết định
@@ -11,7 +11,7 @@
 2. **Quét theo "mốc" thay vì chạy nền song song.** `PopupHandler.sweep()` được gọi tuần tự trong cùng coroutine tại các mốc đã biết (xem `popup_ad_live_scan.md`) → không đua với thao tác đang làm. Từ chối thiết kế "sentinel" chạy nền: nó có thể đóng nhầm màn hình tool mở có chủ đích (bảng chuyển đổi tài khoản có nút X "Đóng").
 3. **Màn hình tool mở có chủ đích được bảo vệ:** hộp đăng xuất (để engine huỷ) và bảng chuyển đổi tài khoản (chỉ nút đóng *mềm* được bấm). Chống lặp vòng dùng lại `PopupLoopGuard`.
 4. **Quảng cáo/live: hợp của quét mới và tầng cũ** (không thay thế) — chỉ tăng độ phủ; luật nhãn chỉ xét chữ ngắn (≤ 60) để caption dài không kích hoạt.
-5. **Về Home ở `stopInternal()`**, đúng một lần cho mỗi phiên (`wasRunning`), qua `IFarmHost.pressHome()` (mặc định false để host giả trong test không vỡ). Chấp nhận hệ quả: bấm Dừng trong chính app cũng ra màn hình chính. Để "tự tắt do lỗi" cũng đi qua đường này, bước nạp cấu hình/mở popup của 7 hàm `start*` được đưa vào trong `try`, và `onUnbind` dừng engine trước khi huỷ scope.
+5. **Về Home ở `stopInternal()` CHỈ khi tool tự tắt**, đúng một lần cho mỗi phiên (`wasRunning`), qua `IFarmHost.pressHome()` (mặc định false để host giả trong test không vỡ). **Người dùng tự bấm Dừng thì KHÔNG về Home** (yêu cầu bổ sung — họ đang chủ động điều khiển máy): `stop()` mặc định `goHome = false` và đặt cờ `userStopPending` trước khi huỷ job (finally của farmJob có thể chạy ngay), `stopInternal` đọc + xoá cờ; `stop(goHome = true)` dành cho nơi gọi không phải người dùng (service Trợ năng bị tắt). Để "tự tắt do lỗi" đi qua đường này, bước nạp cấu hình/mở popup của 7 hàm `start*` được đưa vào trong `try`, và `onUnbind` dừng engine trước khi huỷ scope.
 6. **Vuốt tìm nút chuyển đổi tài khoản: ngắn + chậm + dò liên tục; hàng bấm được bằng ACTION_CLICK thì không căn giữa** (0 cú vuốt); chỉ bấm theo toạ độ mới nhích tối đa 1 lần.
 7. **Popup nổi: một cửa sổ, 3 trạng thái** (Popup / Mini / Chip) giữ nguyên API công khai; dữ liệu nhật ký giữ khi thu nhỏ, View dựng lại khi mở.
 

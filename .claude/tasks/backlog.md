@@ -5,7 +5,10 @@
 - [ ] CI-006 — Build Debug/CI thật cho v1.12.5 (`OverlayFarmMonitor` viết lại, `ContentScanner`, `AutomationEngine`); gửi log nếu có lỗi biên dịch
 - [ ] QA-019 — Máy thật: popup hiện trễ ở Cài đặt / danh sách tài khoản / feed vừa tải / trang job được đóng (log "Đã đóng hộp thoại (nút …)"); bảng chuyển đổi tài khoản không bị đóng nhầm; "Liên kết email" chỉ bấm "Để sau"
 - [ ] QA-020 — Máy thật: chuyển acc ≥ 5 lần, sau log "Đã tìm thấy nút chuyển đổi tài khoản" không còn cú vuốt nào
-- [ ] QA-021 — Máy thật: 5 cách dừng (nút Dừng ở popup nổi, thông báo, Dashboard, hết phiên, tắt Trợ năng) và các ca tự tắt do lỗi đều về màn hình chính; Dừng trong app AT PRO cũng ra màn hình chính (đúng yêu cầu)
+- [ ] QA-021 — Máy thật: người dùng bấm Dừng (popup nổi / thông báo / Dashboard) → ở lại màn hình hiện tại; tool tự tắt (hết phiên, lỗi, tắt Trợ năng) → về màn hình chính
+- [ ] QA-022 — Máy thật: đặt "Chỉ tim video có từ N tim" (vd 5K) rồi nuôi ~30 video — mọi dòng "LIKE: Thích · X tim" phải có X ≥ N; nếu vẫn tim dưới ngưỡng, gửi các dòng đó
+- [ ] QA-023 — Màn Chạy của Facebook/Instagram: chọn Bằng cookie · demo — dán cookie (header / JSON / cookies.txt), thêm/xoá, nút chính bị vô hiệu, máy màn nhỏ không tràn
+- [ ] QA-024 — Màn Thống kê › Nuôi acc: số phiên/ngày khớp thực tế (phiên 00:00–07:00 đúng ngày), đổi 7/30 ngày/Tất cả, tự cập nhật khi có phiên mới đóng
 - [ ] UI-004 — Popup nổi: kiểm máy 360dp / cỡ chữ lớn (header không tràn), nhấn giữ Mini → Chip, "Xem tất cả", tiêu hao pin khi để lâu
 - [ ] ENG-002 — Theo dõi từ khoá whitelist (`ScanKeywords.DEFAULT`) trên các bản TikTok mới; bổ sung chữ nút đóng thực tế gặp
 

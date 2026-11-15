@@ -39,7 +39,9 @@ When code or docs deviate, flag it and align.
 | **ContentScanner** | Bộ quét một lần cây giao diện → POPUP / SPONSORED / APP_INSTALL / LIVE / CLEAN theo chữ hiển thị; chỉ bấm nút đóng nằm trong whitelist (v1.12.5) |
 | **Sweep (quét mốc)** | `PopupHandler.sweep()` — dọn popup an toàn tại một bước của luồng (vào Cài đặt, mở danh sách tài khoản, feed vừa tải…), có tuỳ chọn quét trễ 1,2s |
 | **Nút đóng mềm / cứng** | Mềm: `Để sau`, `Not now`, `Bỏ qua`… (chỉ popup mới có). Cứng: `Đóng`, `Hủy`… (cũng là nhãn nút X của bảng chuyển đổi tài khoản nên bị cấm khi bảng đang hiện) |
-| **Về Home khi dừng** | `goHomeBeforeStop()` — mọi đường dừng gọi `GLOBAL_ACTION_HOME` đúng một lần trước khi tool tắt (v1.12.5) |
+| **Về Home khi tự tắt** | `goHomeBeforeStop()` — khi tool TỰ tắt (lỗi, hết việc, tắt Trợ năng) gọi `GLOBAL_ACTION_HOME` đúng một lần; người dùng tự bấm Dừng thì không (`stop(goHome = false)`, v1.12.5) |
+| **Nuôi bằng cookie (demo)** | Lựa chọn trong màn Chạy của Facebook/Instagram — chỉ là giao diện: dán cookie, đọc tên khoá + ID (`CookieDemo`), không lưu, không chạy thật (v1.12.5) |
+| **summarizeFarmStats** | Tổng hợp thống kê Nuôi acc: giờ địa phương, chỉ phiên đã đóng, so kỳ trước, biểu đồ đủ ngày (`data/FarmStats.kt`, v1.12.5) |
 | **FarmForegroundService** | Android foreground service that keeps AutomationEngine alive while the screen is off or the app is backgrounded |
 | **ScheduledFarmManager** | Manages start/stop schedules for farm runs (`FarmSchedule`) |
 | **FarmSchedule** | A named schedule: days of week + start/stop time |

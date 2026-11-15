@@ -17,6 +17,14 @@ interface SessionDao {
     @Query("SELECT * FROM sessions WHERE accountId = :accountId ORDER BY startedAt DESC LIMIT :limit")
     suspend fun getForAccount(accountId: String, limit: Int = 30): List<SessionEntity>
 
+    /**
+     * v1.12.5 — Mọi phiên ĐÃ ĐÓNG (endedAt != null) kể từ [since], cũ → mới. Flow tự phát lại khi có phiên mới đóng nên
+     * màn Thống kê cập nhật theo thời gian thực. Việc gộp theo ngày giờ địa phương / kỳ trước làm ở `summarizeFarmStats`
+     * (không dùng strftime UTC như `getDailyStats`).
+     */
+    @Query("SELECT * FROM sessions WHERE endedAt IS NOT NULL AND startedAt >= :since ORDER BY startedAt ASC")
+    fun observeClosedSince(since: Long): Flow<List<SessionEntity>>
+
     @Insert
     suspend fun insert(session: SessionEntity): Long
 
