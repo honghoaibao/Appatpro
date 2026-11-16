@@ -38,6 +38,11 @@ sealed interface BackupCasResult {
         val checksum: String,
     ) : BackupCasResult
     data class UpToDate(val revision: Long) : BackupCasResult
+    data class RestoreRequired(
+        val snapshot: BackupSnapshot,
+        val checkpoint: BackupRestoreCheckpoint,
+    ) : BackupCasResult
+    data object EmptyLocalNoRemoteBackup : BackupCasResult
     data class Conflicted(val conflicts: List<BackupMergeConflict>) : BackupCasResult
     data class RetryLater(val attempts: Int) : BackupCasResult
     data class Failed(val failure: BackupRemoteFailure) : BackupCasResult
@@ -131,6 +136,47 @@ class BackupCasCoordinator(
             if (expectedRevision < localBuild.localExpectedRevision) {
                 return BackupCasResult.Failed(
                     BackupRemoteFailure("remote_revision_behind_local_checkpoint", retryable = false)
+                )
+            }
+
+            // Never create a cloud row from a blank installation. An empty local state with
+            // a non-zero checkpoint is already rejected above when the remote row is missing.
+            if (remote == null && BackupLocalStatePolicy.isTrulyEmpty(localBuild)) {
+                return BackupCasResult.EmptyLocalNoRemoteBackup
+            }
+
+            // A genuinely empty local installation must restore a validated remote snapshot
+            // before any upload decision, even when its stored checkpoint/checksum looks current.
+            if (remote != null && BackupLocalStatePolicy.isTrulyEmpty(localBuild)) {
+                val remoteSnapshot = try {
+                    codec.decode(remote.payload, remote.checksum, remote.schemaVersion).also {
+                        BackupSnapshotValidator.validate(it)
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    return BackupCasResult.Failed(
+                        BackupRemoteFailure("remote_snapshot_invalid", retryable = false)
+                    )
+                }
+                val merged = when (val merge = try {
+                    BackupMergeEngine.merge(local, remoteSnapshot)
+                } catch (_: Exception) {
+                    return BackupCasResult.Failed(
+                        BackupRemoteFailure("snapshot_merge_invalid", retryable = false)
+                    )
+                }) {
+                    is BackupMergeResult.Conflicted -> return BackupCasResult.Conflicted(merge.conflicts)
+                    is BackupMergeResult.Merged -> merge.snapshot
+                }
+                return BackupCasResult.RestoreRequired(
+                    snapshot = merged,
+                    checkpoint = BackupRestoreCheckpoint(
+                        expectedLocalRevision = localBuild.localExpectedRevision,
+                        remoteRevision = remote.revision,
+                        remoteChecksum = remote.checksum,
+                        remoteSchemaVersion = remote.schemaVersion,
+                    ),
                 )
             }
 
