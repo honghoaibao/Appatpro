@@ -322,9 +322,6 @@ class BackupRestoreCoordinator(context: Context) {
             val finalEligibleConfigs = LinkedHashMap<String, ConfigEntity>()
             val scheduleIdsToCancel = linkedSetOf<String>()
 
-            currentConfigs.filter { BackupConfigPolicy.datasetFor(it.key) == "schedules" }
-                .forEach { scheduleIdsToCancel += it.key.removePrefix(SCHEDULE_PREFIX) }
-
             currentConfigs.forEach { current ->
                 when (BackupConfigPolicy.datasetFor(current.key)) {
                     "safeConfigs" -> {
@@ -352,44 +349,49 @@ class BackupRestoreCoordinator(context: Context) {
                     }
                     "schedules" -> {
                         val scheduleId = current.key.removePrefix(SCHEDULE_PREFIX)
-                        scheduleIdsToCancel += scheduleId
-                        if (scheduleId in scheduleDeleteIds) {
-                            if (scheduleDeletes.any {
-                                    it.entityKey == scheduleId &&
-                                        it.sourceInstallId == metadata.installationId
-                                }
-                            ) {
-                                throw BackupRestoreException(
-                                    "Same-installation schedule delete/recreate needs explicit resolution: $scheduleId"
-                                )
+                        val incoming = incomingSchedules[scheduleId]
+                        if (scheduleId in scheduleDeleteIds && scheduleDeletes.any {
+                                it.entityKey == scheduleId &&
+                                    it.sourceInstallId == metadata.installationId
                             }
-                        } else {
-                            val incoming = incomingSchedules[scheduleId]
-                            if (incoming != null) {
-                                val currentDefinition = decodeSchedule(current.value, scheduleId)
-                                    ?: throw BackupRestoreException(
-                                        "Existing schedule cannot be safely compared during restore: $scheduleId"
+                        ) {
+                            throw BackupRestoreException(
+                                "Same-installation schedule delete/recreate needs explicit resolution: $scheduleId"
+                            )
+                        }
+
+                        when (BackupScheduleRestorePolicy.decide(
+                            hasLocalSchedule = true,
+                            hasIncomingSchedule = incoming != null,
+                            deletedByTombstone = scheduleId in scheduleDeleteIds,
+                        )) {
+                            BackupScheduleRestoreAction.REMOVE_LOCAL -> {
+                                scheduleIdsToCancel += scheduleId
+                            }
+                            BackupScheduleRestoreAction.PRESERVE_LOCAL -> {
+                                if (incoming != null) {
+                                    val currentDefinition = decodeSchedule(current.value, scheduleId)
+                                        ?: throw BackupRestoreException(
+                                            "Existing schedule cannot be safely compared during restore: $scheduleId"
+                                        )
+                                    if (!sameScheduleDefinition(currentDefinition, incoming)) {
+                                        throw BackupRestoreException(
+                                            "Schedule changed locally after merge staging: $scheduleId"
+                                        )
+                                    }
+                                    // Keep the local enabled/disabled choice. A cloud restore must
+                                    // not turn off a schedule the user already enabled on this device.
+                                    finalEligibleConfigs[current.key] = current.copy(
+                                        updatedAt = maxOf(current.updatedAt, incoming.updatedAt)
                                     )
-                                if (!sameScheduleDefinition(currentDefinition, incoming)) {
-                                    throw BackupRestoreException(
-                                        "Schedule changed locally after merge staging: $scheduleId"
-                                    )
-                                }
-                                finalEligibleConfigs[current.key] = scheduleConfig(incoming)
-                                    .copy(updatedAt = maxOf(current.updatedAt, incoming.updatedAt))
-                            } else {
-                                // A schedule created after staging is retained but disabled.
-                                val currentDefinition = decodeSchedule(current.value, scheduleId)
-                                finalEligibleConfigs[current.key] = if (currentDefinition == null) {
-                                    current
                                 } else {
-                                    ConfigEntity(
-                                        current.key,
-                                        scheduleJson.encodeToString(currentDefinition.copy(enabled = false)),
-                                        current.updatedAt,
-                                    )
+                                    // A local schedule created after snapshot capture is untouched.
+                                    finalEligibleConfigs[current.key] = current
                                 }
                             }
+                            BackupScheduleRestoreAction.IMPORT_DISABLED ->
+                                throw BackupRestoreException("Local schedule restore plan is inconsistent")
+                            BackupScheduleRestoreAction.NO_OP -> Unit
                         }
                     }
                     else -> Unit // Unknown/device-local settings are deliberately untouched.
@@ -405,10 +407,21 @@ class BackupRestoreCoordinator(context: Context) {
                 }
             }
             incomingSchedules.values.forEach { incoming ->
-                if (incoming.scheduleId !in scheduleDeleteIds) {
-                    val key = SCHEDULE_PREFIX + incoming.scheduleId
-                    finalEligibleConfigs[key] = scheduleConfig(incoming)
-                    scheduleIdsToCancel += incoming.scheduleId
+                val key = SCHEDULE_PREFIX + incoming.scheduleId
+                when (BackupScheduleRestorePolicy.decide(
+                    hasLocalSchedule = currentConfigs.any { it.key == key },
+                    hasIncomingSchedule = true,
+                    deletedByTombstone = incoming.scheduleId in scheduleDeleteIds,
+                )) {
+                    BackupScheduleRestoreAction.PRESERVE_LOCAL -> Unit
+                    BackupScheduleRestoreAction.IMPORT_DISABLED -> {
+                        // A schedule arriving from another installation is imported disabled.
+                        finalEligibleConfigs[key] = scheduleConfig(incoming)
+                        scheduleIdsToCancel += incoming.scheduleId
+                    }
+                    BackupScheduleRestoreAction.REMOVE_LOCAL ->
+                        scheduleIdsToCancel += incoming.scheduleId
+                    BackupScheduleRestoreAction.NO_OP -> Unit
                 }
             }
             scheduleDeleteIds.forEach { scheduleIdsToCancel += it }

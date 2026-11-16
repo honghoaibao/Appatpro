@@ -522,3 +522,20 @@ It is run with Robolectric 4.11.1 and contains 13 tests covering email-confirmat
 - The 13 new JVM tests were authored but not executed. Android/Kotlin compilation and device-level Keystore/navigation behavior remain unverified.
 - No GitHub Actions workflow was dispatched, no PR was opened, and `main` remains unchanged.
 - Keep the single Android build/JUnit gate deferred until the user separately authorizes it.
+
+
+## Phase 6.3 — Multi-device restore hardening (2026-11-16)
+
+### Schedule restore correction
+
+- Fixed an unintended side effect in `BackupRestoreCoordinator`: the previous restore path added every local schedule to the cancellation set and rewrote matching schedules as disabled on every successful cloud sync.
+- A schedule already present on this installation now keeps its local configuration and enabled/disabled choice when the incoming snapshot has the same definition. A local schedule created after snapshot capture is also preserved unchanged.
+- A schedule that exists only in the incoming cloud snapshot is imported disabled, and its scheduled work is cancelled defensively. Cloud restore never silently activates automation.
+- A schedule with a durable tombstone is removed and its scheduled work is cancelled. Same-installation delete/recreate ambiguity and concurrent definition changes still fail closed and require a later merge.
+- Added the pure `BackupScheduleRestorePolicy` and five JVM unit tests for preserve-local, import-disabled, tombstone-wins and no-op decisions.
+
+### Verification boundary
+
+- Source and tests were committed to `feature/supabase-completion-2026-11-16`.
+- The new tests are authored but not executed. Android build, Room integration and device-level WorkManager schedule cancellation remain unverified.
+- No Supabase schema, Auth setting, remote row or production data was changed. No PR was opened, `main` was not changed, and no GitHub Actions workflow was dispatched.
