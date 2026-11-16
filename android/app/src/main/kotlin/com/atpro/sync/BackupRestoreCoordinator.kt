@@ -204,9 +204,11 @@ class BackupRestoreCoordinator(context: Context) {
                 val incoming = incomingAccounts[current.username]
                 when {
                     incoming != null -> {
+                        // createdAt is reconciled across installations by preserving
+                        // the earliest timestamp. A newer local value may come from re-adding
+                        // the same account after reinstall, not from a concurrent status edit.
                         if (incoming.status != current.status ||
-                            incoming.checkpoint != current.checkpoint ||
-                            incoming.createdAt != current.createdAt
+                            incoming.checkpoint != current.checkpoint
                         ) {
                             throw BackupRestoreException(
                                 "Account changed locally after merge staging: ${current.username}"

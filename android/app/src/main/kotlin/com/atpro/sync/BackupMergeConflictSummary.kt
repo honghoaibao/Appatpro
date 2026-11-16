@@ -39,7 +39,6 @@ internal object BackupMergeConflictSummary {
             .take(MAX_KEY_LENGTH)
         val reason = when (conflict.kind) {
             BackupMergeConflictKind.ACCOUNT_STATUS -> "trạng thái tài khoản khác nhau"
-            BackupMergeConflictKind.ACCOUNT_CREATION_TIME -> "thời điểm tạo tài khoản khác nhau"
             BackupMergeConflictKind.SESSION_CONTENT -> "nội dung phiên khác nhau"
             BackupMergeConflictKind.CONFIG_VALUE -> "giá trị cấu hình khác nhau"
             BackupMergeConflictKind.SCHEDULE_DEFINITION -> "định nghĩa lịch khác nhau"
