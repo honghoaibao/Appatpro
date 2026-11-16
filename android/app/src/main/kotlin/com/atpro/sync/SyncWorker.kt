@@ -160,7 +160,13 @@ class SyncWorker(
                     // Restore may import Earnings rows and create a new dirty generation.
                     // Reconcile that durable work now; while this worker is RUNNING the scheduler
                     // appends at most one follow-up to the same unique chain.
-                    SyncWorkScheduler.scheduleIfPending(applicationContext)
+                    try {
+                        SyncWorkScheduler.scheduleIfPending(applicationContext)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        // The dirty generation remains durable; startup preflight can schedule it later.
+                    }
                     completed(SyncStatusCodes.SYNC_COMMITTED)
                 }
                 BackupCasResult.EmptyLocalNoRemoteBackup ->
