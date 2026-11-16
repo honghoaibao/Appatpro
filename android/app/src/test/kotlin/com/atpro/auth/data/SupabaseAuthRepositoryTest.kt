@@ -261,6 +261,23 @@ class SupabaseAuthRepositoryTest {
     }
 
     @Test
+    fun refreshPersistenceFailureDiscardsTheConsumedOldRefreshToken() = runBlocking {
+        val transport = QueueTransport(
+            listOf(response(200, tokenBody(access = "access-rotated", refresh = "refresh-rotated"))),
+        )
+        val store = MemorySessionStore(signedInSession()).apply { failWrite = true }
+        val repo = repository(transport, store)
+        repo.restoreSession()
+
+        val result = repo.refreshSession()
+
+        assertTrue(result is AuthResult.Failure)
+        assertNull(store.value)
+        assertNull(repo.session.value)
+        assertEquals(1, store.clearCount)
+    }
+
+    @Test
     fun localRestoreDoesNotCallNetwork() = runBlocking {
         val transport = QueueTransport(emptyList())
         val saved = signedInSession()
