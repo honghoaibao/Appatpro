@@ -128,6 +128,18 @@ class SyncStatusTest {
         }
     }
 
+    @Test fun `mo ta xung dot hien ten muc can xu ly`() {
+        val now = 100 * min
+        val state = SyncStatusSnapshot(
+            outcome = SyncOutcome.MERGE_CONFLICT,
+            conflictDetails = "Tài khoản [sample_user]: trạng thái tài khoản khác nhau",
+        )
+        assertEquals(
+            "Hai thiết bị cùng sửa một mục · Tài khoản [sample_user]: trạng thái tài khoản khác nhau",
+            SyncStatusText.detail(state, now),
+        )
+    }
+
     // ── Chính sách thông báo ──────────────────────────────────
     @Test fun `chay nen chi bao khi vao trang thai can xu ly`() {
         assertTrue(SyncNotifyPolicy.shouldNotify(SyncOutcome.COMMITTED, SyncOutcome.AUTH_EXPIRED, manual = false))

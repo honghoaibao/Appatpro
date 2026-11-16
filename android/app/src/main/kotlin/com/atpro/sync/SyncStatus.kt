@@ -11,6 +11,7 @@ import com.atpro.notification.NotifText
 object SyncStatusCodes {
     const val OUTPUT_STATUS = "sync_status"
     const val OUTPUT_PENDING_COUNT = "pending_count"
+    const val OUTPUT_CONFLICT_DETAILS = "conflict_details"
 
     /** Đầu vào của lần chạy do người dùng bấm "Đồng bộ ngay": chạy cả khi không có thay đổi chờ gửi. */
     const val INPUT_MANUAL = "manual"
@@ -103,6 +104,7 @@ data class SyncStatusSnapshot(
     val pending: Int = 0,
     val retrying: Boolean = false,
     val runningSince: Long = 0L,
+    val conflictDetails: String? = null,
 ) {
     /** Tiến trình chết giữa chừng thì cờ chạy không được kẹt mãi. */
     fun isRunning(nowMs: Long): Boolean =
@@ -161,6 +163,9 @@ object SyncStatusText {
                 }
             }
             if (reason != null) parts += reason
+            if (s.outcome == SyncOutcome.MERGE_CONFLICT) {
+                s.conflictDetails?.takeIf { it.isNotBlank() }?.let(parts::add)
+            }
             if (s.lastSuccessAt > 0L) parts += "Lần cuối ${relative(nowMs, s.lastSuccessAt)}"
             else if (s.outcome == SyncOutcome.NEVER && reason == null) parts += "Chưa có lần nào"
         }

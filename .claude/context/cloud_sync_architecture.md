@@ -539,3 +539,13 @@ It is run with Robolectric 4.11.1 and contains 13 tests covering email-confirmat
 - Source and tests were committed to `feature/supabase-completion-2026-11-16`.
 - The new tests are authored but not executed. Android build, Room integration and device-level WorkManager schedule cancellation remain unverified.
 - No Supabase schema, Auth setting, remote row or production data was changed. No PR was opened, `main` was not changed, and no GitHub Actions workflow was dispatched.
+
+
+## Phase 6.4 — Merge conflict diagnostics (2026-11-16)
+
+- The worker now preserves a concise summary of the first three deterministic merge conflicts in its result Data, then the device-local sync status store persists it.
+- Settings → Sao lưu dữ liệu can show the dataset label, bounded entity key and fixed conflict reason (for example, account status, safe configuration value or schedule definition).
+- The diagnostic never includes entity values, configuration values, session contents, access tokens, refresh tokens, email or request bodies. Unknown dataset names are not echoed.
+- Summary formatting is deterministic and bounded to 320 characters / three conflicts, with an omitted-item count when needed.
+- Added pure formatter tests and a status-text test. Tests are authored, not executed.
+- The diagnostic is a guide to the conflicting logical items; it does not choose a winner or mutate either device's data. Users must make the corresponding setting/status agree on the devices and run sync again.

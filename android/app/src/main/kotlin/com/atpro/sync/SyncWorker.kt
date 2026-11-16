@@ -49,7 +49,8 @@ class SyncWorker(
         if (result is Result.Success) {
             val outcome = SyncOutcome.fromStatusCode(result.outputData.getString(SyncStatusCodes.OUTPUT_STATUS))
             val pending = result.outputData.getInt(SyncStatusCodes.OUTPUT_PENDING_COUNT, 0)
-            SyncStatusStore.record(outcome, pending)
+            val conflictDetails = result.outputData.getString(SyncStatusCodes.OUTPUT_CONFLICT_DETAILS)
+            SyncStatusStore.record(outcome, pending, conflictDetails = conflictDetails)
             if (SyncNotifyPolicy.shouldNotify(previous, outcome, manual)) {
                 AtProNotificationManager.notifySync(outcome, manual)
             }
@@ -184,7 +185,11 @@ class SyncWorker(
                     else completed(SyncStatusCodes.REMOTE_REJECTED, outboxDao.getPendingCount())
                 }
                 is BackupCasResult.Conflicted ->
-                    completed(SyncStatusCodes.MERGE_CONFLICT, outboxDao.getPendingCount())
+                    completed(
+                        SyncStatusCodes.MERGE_CONFLICT,
+                        outboxDao.getPendingCount(),
+                        conflictDetails = BackupMergeConflictSummary.format(result.conflicts),
+                    )
                 is BackupCasResult.Rejected ->
                     completed(SyncStatusCodes.CAS_REJECTED, outboxDao.getPendingCount())
             }
@@ -199,11 +204,15 @@ class SyncWorker(
     private fun completed(
         status: String,
         pendingCount: Int = 0,
-    ): Result = Result.success(
-        Data.Builder()
+        conflictDetails: String? = null,
+    ): Result {
+        val output = Data.Builder()
             .putString(SyncStatusCodes.OUTPUT_STATUS, status)
             .putInt(SyncStatusCodes.OUTPUT_PENDING_COUNT, pendingCount)
-            .build(),
-    )
+        conflictDetails?.takeIf { it.isNotBlank() }?.let {
+            output.putString(SyncStatusCodes.OUTPUT_CONFLICT_DETAILS, it)
+        }
+        return Result.success(output.build())
+    }
 
 }

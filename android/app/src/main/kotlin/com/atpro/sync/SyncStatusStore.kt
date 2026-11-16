@@ -20,6 +20,7 @@ object SyncStatusStore {
     private const val K_LAST_SUCCESS = "last_success"
     private const val K_PENDING = "pending"
     private const val K_RETRYING = "retrying"
+    private const val K_CONFLICT_DETAILS = "conflict_details"
 
     private val _state = MutableStateFlow(SyncStatusSnapshot())
     val state: StateFlow<SyncStatusSnapshot> = _state
@@ -40,6 +41,9 @@ object SyncStatusStore {
             pending = p.getInt(K_PENDING, 0).coerceAtLeast(0),
             retrying = p.getBoolean(K_RETRYING, false),
             runningSince = 0L,
+            conflictDetails = if (outcome == SyncOutcome.MERGE_CONFLICT) {
+                p.getString(K_CONFLICT_DETAILS, null)?.take(BackupMergeConflictSummary.MAX_SUMMARY_LENGTH)
+            } else null,
         )
     }
 
@@ -74,7 +78,12 @@ object SyncStatusStore {
      * @param pending số thay đổi còn chờ; `null` = giữ số cũ.
      */
     @Synchronized
-    fun record(outcome: SyncOutcome?, pending: Int?, nowMs: Long = System.currentTimeMillis()) {
+    fun record(
+        outcome: SyncOutcome?,
+        pending: Int?,
+        nowMs: Long = System.currentTimeMillis(),
+        conflictDetails: String? = null,
+    ) {
         val cur = _state.value
         val next = if (outcome == null) {
             cur.copy(lastAttemptAt = nowMs, retrying = true, runningSince = 0L, pending = pending ?: cur.pending)
@@ -86,6 +95,10 @@ object SyncStatusStore {
                 pending = if (outcome.isSuccess) pending ?: 0 else pending ?: cur.pending,
                 retrying = false,
                 runningSince = 0L,
+                conflictDetails = if (outcome == SyncOutcome.MERGE_CONFLICT) {
+                    conflictDetails?.take(BackupMergeConflictSummary.MAX_SUMMARY_LENGTH)
+                        ?: cur.conflictDetails
+                } else null,
             )
         }
         _state.value = next
@@ -103,6 +116,7 @@ object SyncStatusStore {
             ?.remove(K_LAST_SUCCESS)
             ?.remove(K_PENDING)
             ?.remove(K_RETRYING)
+            ?.remove(K_CONFLICT_DETAILS)
             ?.apply()
     }
 
@@ -113,6 +127,7 @@ object SyncStatusStore {
             ?.putLong(K_LAST_SUCCESS, s.lastSuccessAt)
             ?.putInt(K_PENDING, s.pending)
             ?.putBoolean(K_RETRYING, s.retrying)
+            ?.putString(K_CONFLICT_DETAILS, s.conflictDetails)
             ?.apply()
     }
 }
