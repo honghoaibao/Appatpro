@@ -16,6 +16,7 @@
 - When no worker is running, a local mutation request uses `KEEP` so an already queued request captures the newest Room/Outbox state. When a worker is running, at most one follow-up is appended with `APPEND_OR_REPLACE`; additional writes coalesce into the queued follow-up.
 - Bootstrap requests do not cancel a running worker. They append after it. A pending non-running non-bootstrap request may be replaced by bootstrap because the forced worker also captures pending local data. An already queued bootstrap or manual remote-check satisfies the bootstrap request.
 - Manual sync retains the existing 30-second cooldown and shared unique-work name; its queue decision is serialized with automatic scheduling by the scheduler mutex.
+- The restore-only worker path now rechecks durable pending state after journal replay/checkpoint completion. If restore imported Earnings rows and advanced the dirty generation, it appends one follow-up to the same unique chain; a scheduler failure does not turn an already completed restore into a sync failure.
 - No ConnectivityManager callback or polling loop was added. WorkManager's CONNECTED constraint retains queued work while the device is offline.
 
 ## Tests and source inspection
