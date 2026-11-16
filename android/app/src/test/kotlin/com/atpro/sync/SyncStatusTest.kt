@@ -18,6 +18,7 @@ class SyncStatusTest {
         assertEquals(SyncOutcome.SIGNED_OUT, SyncOutcome.fromStatusCode(SyncStatusCodes.SIGNED_OUT))
         assertEquals(SyncOutcome.NOT_LINKED, SyncOutcome.fromStatusCode(SyncStatusCodes.OWNER_NOT_BOUND))
         assertEquals(SyncOutcome.OWNER_CHANGED, SyncOutcome.fromStatusCode(SyncStatusCodes.AUTH_OWNER_CHANGED))
+        assertEquals(SyncOutcome.SIGNED_OUT, SyncOutcome.fromStatusCode(SyncStatusCodes.AUTH_SESSION_INVALIDATED))
         assertEquals(SyncOutcome.AUTH_EXPIRED, SyncOutcome.fromStatusCode(SyncStatusCodes.AUTH_REFRESH_FAILED))
         assertEquals(SyncOutcome.MERGE_CONFLICT, SyncOutcome.fromStatusCode(SyncStatusCodes.MERGE_CONFLICT))
         listOf(
@@ -37,6 +38,14 @@ class SyncStatusTest {
     @Test fun `ma la hoac thieu thi coi la loi`() {
         assertEquals(SyncOutcome.FAILED, SyncOutcome.fromStatusCode(null))
         assertEquals(SyncOutcome.FAILED, SyncOutcome.fromStatusCode("khong_biet"))
+    }
+
+    @Test fun `session invalidated duoc the hien nhu signed out va khong phat canh bao loi`() {
+        val outcome = SyncOutcome.fromStatusCode(SyncStatusCodes.AUTH_SESSION_INVALIDATED)
+        assertEquals(SyncOutcome.SIGNED_OUT, outcome)
+        assertEquals("Chưa đăng nhập", SyncStatusText.headline(SyncStatusSnapshot(outcome = outcome), 10_000L))
+        assertFalse(outcome.needsAttention)
+        assertFalse(SyncNotifyPolicy.shouldNotify(SyncOutcome.COMMITTED, outcome, manual = false))
     }
 
     @Test fun `thanh cong va can xu ly khong giao nhau`() {

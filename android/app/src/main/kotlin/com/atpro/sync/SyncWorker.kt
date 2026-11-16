@@ -30,7 +30,6 @@ class SyncWorker(
         val forceRemoteCheck = inputData.getBoolean(SyncStatusCodes.INPUT_FORCE_REMOTE_CHECK, false)
         SyncStatusStore.init(applicationContext)
         val previous = SyncStatusStore.state.value.outcome
-        SyncStatusStore.markRunning()
         var result: Result? = null
         try {
             val finished = runSync(manual, forceRemoteCheck)
@@ -46,10 +45,19 @@ class SyncWorker(
         val app = applicationContext as? AtProApplication
         val context = executionContext
         if (context != null && app != null && !app.syncSessionGuard.isCurrent(context)) {
-            if (!app.syncSessionGuard.hasActiveSession()) SyncStatusStore.clear()
+            if (!app.syncSessionGuard.hasActiveSession()) {
+                SyncStatusStore.clear()
+            } else {
+                // The old run ended during a same-process session transition (for example,
+                // a failed local logout); do not leave its spinner visible.
+                SyncStatusStore.stopRunning()
+            }
             return
         }
-        if (context == null && app?.syncSessionGuard?.hasActiveSession() == true) return
+        if (context == null && app?.syncSessionGuard?.hasActiveSession() == true) {
+            SyncStatusStore.stopRunning()
+            return
+        }
         if (result == null) {
             SyncStatusStore.stopRunning()
             return
@@ -98,6 +106,8 @@ class SyncWorker(
                 installationId = syncMetadata.installationId,
             ) ?: return completed(SyncStatusCodes.AUTH_SESSION_INVALIDATED)
             executionContext = activeContext
+            // Only a worker that passed Auth + durable owner checks may show RUNNING.
+            SyncStatusStore.markRunning()
 
             val pendingCount = outboxDao.getPendingCount()
             val earningsDirty = EarningsStore.isDirty()

@@ -184,7 +184,6 @@ object SyncWorkScheduler {
                 buildRequest(manual = true, tags = listOf(MANUAL_WORK_TAG)),
             )
             SyncStatusStore.markManualRequest(now)
-            SyncStatusStore.markRunning(now)
             ManualSyncRequest.STARTED
         }
     }
