@@ -50,7 +50,9 @@ object SyncStatusStore {
     /** Persist immediately so queued/offline requests also respect the cooldown. */
     @Synchronized
     fun markManualRequest(nowMs: Long) {
-        prefs?.edit()?.putLong(K_LAST_MANUAL_REQUEST, nowMs)?.apply()
+        // requestManual runs on Dispatchers.IO; commit prevents an offline queued request
+        // from losing its cooldown window if the app process is terminated immediately.
+        prefs?.edit()?.putLong(K_LAST_MANUAL_REQUEST, nowMs)?.commit()
     }
 
     /** Một lần chạy bắt đầu (hoặc vừa được xếp lịch theo yêu cầu người dùng). */
