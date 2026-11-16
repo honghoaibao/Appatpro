@@ -1,5 +1,7 @@
 package com.atpro.sync
 
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
@@ -36,6 +38,28 @@ class BackupRestoreJournalCodecTest {
         assertEquals(6L, record.remoteCheckpoint?.remoteRevision)
         assertEquals(remoteChecksum, record.remoteCheckpoint?.remoteChecksum)
         assertEquals(3, record.remoteCheckpoint?.remoteSchemaVersion)
+    }
+
+    @Test
+    fun remoteCheckpointRoundTripsThroughJournalSerialization() {
+        val checkpoint = BackupRestoreCheckpoint(
+            expectedLocalRevision = 2L,
+            remoteRevision = 9L,
+            remoteChecksum = "c".repeat(64),
+            remoteSchemaVersion = 3,
+        )
+        val record = BackupRestoreJournalRecord(
+            journalVersion = 1,
+            ownerUserId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            schemaVersion = BackupSnapshot.CURRENT_FORMAT_VERSION,
+            payload = "Zm9v",
+            checksum = "0".repeat(64),
+            remoteCheckpoint = checkpoint,
+        )
+        val encoded = Json { encodeDefaults = true }.encodeToString(record)
+        val decoded = BackupRestoreJournalCodec.decodeRecord(encoded)
+
+        assertEquals(checkpoint, decoded.remoteCheckpoint)
     }
 
     @Test
