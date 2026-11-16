@@ -205,6 +205,52 @@ class BackupCasCoordinatorTest {
     }
 
     @Test
+    fun emptyLocalWithRemoteReadFailureNeverFallsBackToEmptyUpload() = runBlocking {
+        val remote = FakeRemote().apply {
+            reads += BackupRemoteReadResult.Failed(
+                BackupRemoteFailure("network_io", retryable = true)
+            )
+        }
+
+        val result = BackupCasCoordinator(
+            remote,
+            BackupSnapshotProvider { buildResult(snapshotValue = emptySnapshot()) },
+            BackupOwnerBindingValidator { true },
+            FakeCodec(),
+        ).run(authSession())
+
+        assertTrue(result is BackupCasResult.Failed)
+        assertTrue((result as BackupCasResult.Failed).failure.retryable)
+        assertTrue(remote.expectedRevisions.isEmpty())
+    }
+
+    @Test
+    fun invalidRemoteSnapshotBlocksRestoreAndAnyCloudWrite() = runBlocking {
+        val remote = FakeRemote().apply {
+            reads += BackupRemoteReadResult.Found(
+                RemoteBackupRecord(
+                    revision = 2L,
+                    schemaVersion = 3,
+                    payload = Base64.getEncoder().encodeToString("unknown-payload".toByteArray()),
+                    checksum = "a".repeat(64),
+                    updatedAt = null,
+                )
+            )
+        }
+
+        val result = BackupCasCoordinator(
+            remote,
+            BackupSnapshotProvider { buildResult(snapshotValue = emptySnapshot()) },
+            BackupOwnerBindingValidator { true },
+            FakeCodec(),
+        ).run(authSession())
+
+        assertTrue(result is BackupCasResult.Failed)
+        assertEquals("remote_snapshot_invalid", (result as BackupCasResult.Failed).failure.code)
+        assertTrue(remote.expectedRevisions.isEmpty())
+    }
+
+    @Test
     fun revisionConflictRereadsRemoteRebuildsLocalAndRemergesBeforeRetry() = runBlocking {
         val codec = FakeCodec()
         val remoteSnapshot = snapshot(source = installB, createdAt = 20L)
