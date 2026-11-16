@@ -42,7 +42,14 @@ class SyncWorker(
         }
     }
 
-    private fun reportOutcome(result: Result?, manual: Boolean, previous: SyncOutcome) {
+    private suspend fun reportOutcome(result: Result?, manual: Boolean, previous: SyncOutcome) {
+        val app = applicationContext as? AtProApplication
+        val context = executionContext
+        if (context != null && app != null && !app.syncSessionGuard.isCurrent(context)) {
+            if (!app.syncSessionGuard.hasActiveSession()) SyncStatusStore.clear()
+            return
+        }
+        if (context == null && app?.syncSessionGuard?.hasActiveSession() == true) return
         if (result == null) {
             SyncStatusStore.stopRunning()
             return
@@ -61,6 +68,8 @@ class SyncWorker(
         }
     }
 
+    private var executionContext: SyncExecutionContext? = null
+
     private suspend fun runSync(manual: Boolean, forceRemoteCheck: Boolean): Result {
         val app = applicationContext as? AtProApplication
             ?: return completed(SyncStatusCodes.APPLICATION_UNAVAILABLE)
@@ -77,6 +86,18 @@ class SyncWorker(
             if (!app.backupOwnershipManager.isBoundToCurrentUser(initialSession.user.id)) {
                 return completed(SyncStatusCodes.OWNER_NOT_BOUND)
             }
+            val syncMetadata = database.syncMetadataDao().get()
+                ?: return completed(SyncStatusCodes.OWNER_NOT_BOUND)
+            if (!BackupMetadataRules.isStructurallyValid(syncMetadata) ||
+                syncMetadata.ownerUserId != initialSession.user.id
+            ) {
+                return completed(SyncStatusCodes.OWNER_NOT_BOUND)
+            }
+            val activeContext = app.syncSessionGuard.capture(
+                ownerUserId = initialSession.user.id,
+                installationId = syncMetadata.installationId,
+            ) ?: return completed(SyncStatusCodes.AUTH_SESSION_INVALIDATED)
+            executionContext = activeContext
 
             val pendingCount = outboxDao.getPendingCount()
             val earningsDirty = EarningsStore.isDirty()
@@ -118,14 +139,16 @@ class SyncWorker(
                 ownerBindingValidator = BackupOwnerBindingValidator { ownerId ->
                     app.backupOwnershipManager.isBoundToCurrentUser(ownerId)
                 },
+                executionGuard = app.syncSessionGuard,
             )
             val acknowledgementCoordinator = BackupAcknowledgementCoordinator(
                 applicationContext,
                 app.backupOwnershipManager,
+                app.syncSessionGuard,
             )
 
             var activeSession: AuthSession = initialSession
-            var casResult = casCoordinator.run(activeSession)
+            var casResult = casCoordinator.run(activeSession, activeContext)
 
             // One serialized refresh attempt per worker execution. Never switch Auth owners.
             if (casResult is BackupCasResult.Failed && casResult.failure.httpStatus == 401) {
@@ -137,7 +160,10 @@ class SyncWorker(
                             return completed(SyncStatusCodes.AUTH_OWNER_CHANGED, pendingCount)
                         }
                         activeSession = refresh.value
-                        casResult = casCoordinator.run(activeSession)
+                        if (!app.syncSessionGuard.isCurrent(activeContext)) {
+                            return completed(SyncStatusCodes.AUTH_SESSION_INVALIDATED, pendingCount)
+                        }
+                        casResult = casCoordinator.run(activeSession, activeContext)
                     }
                     is AuthResult.Failure -> {
                         return if (refresh.retryable) {
@@ -149,17 +175,35 @@ class SyncWorker(
                 }
             }
 
+            if (!app.syncSessionGuard.isCurrent(activeContext)) {
+                return completed(SyncStatusCodes.AUTH_SESSION_INVALIDATED, pendingCount)
+            }
+
             when (val result = casResult) {
+                BackupCasResult.SessionInvalidated ->
+                    completed(SyncStatusCodes.AUTH_SESSION_INVALIDATED, pendingCount)
                 is BackupCasResult.RestoreRequired -> {
-                    BackupRestoreCoordinator(applicationContext).restore(
-                        mergedSnapshot = result.snapshot,
-                        authenticatedOwnerUserId = activeSession.user.id,
-                        remoteCheckpoint = result.checkpoint,
-                    )
+                    when (app.syncSessionGuard.withLease(activeContext) {
+                        BackupRestoreCoordinator(applicationContext).restore(
+                            mergedSnapshot = result.snapshot,
+                            authenticatedOwnerUserId = activeSession.user.id,
+                            remoteCheckpoint = result.checkpoint,
+                        )
+                    }) {
+                        SyncGuardExecution.Invalidated ->
+                            return completed(SyncStatusCodes.AUTH_SESSION_INVALIDATED, pendingCount)
+                        is SyncGuardExecution.Completed -> Unit
+                    }
+                    if (!app.syncSessionGuard.isCurrent(activeContext)) {
+                        return completed(SyncStatusCodes.AUTH_SESSION_INVALIDATED, pendingCount)
+                    }
                     app.backupOwnershipManager.refresh(activeSession.user.id)
                     // Restore may import Earnings rows and create a new dirty generation.
                     // Reconcile that durable work now; while this worker is RUNNING the scheduler
                     // appends at most one follow-up to the same unique chain.
+                    if (!app.syncSessionGuard.isCurrent(activeContext)) {
+                        return completed(SyncStatusCodes.AUTH_SESSION_INVALIDATED, pendingCount)
+                    }
                     try {
                         SyncWorkScheduler.scheduleIfPending(applicationContext)
                     } catch (cancelled: CancellationException) {
@@ -173,7 +217,11 @@ class SyncWorker(
                     completed(SyncStatusCodes.EMPTY_LOCAL_NO_REMOTE_BACKUP)
                 is BackupCasResult.UpToDate -> completed(SyncStatusCodes.NO_PENDING_DATA)
                 is BackupCasResult.Committed -> {
-                    when (val acknowledged = acknowledgementCoordinator.acknowledge(activeSession, result)) {
+                    when (val acknowledged = acknowledgementCoordinator.acknowledge(
+                        activeSession,
+                        result,
+                        activeContext,
+                    )) {
                         is BackupAcknowledgementResult.Acknowledged -> {
                             val remainingOutbox = outboxDao.getPendingCount()
                             val earningsStillDirty = EarningsStore.isDirty()
@@ -187,17 +235,24 @@ class SyncWorker(
                         is BackupAcknowledgementResult.Partial -> {
                             val blocked = outboxDao.getByEventIds(listOf(acknowledged.blockedEventId))
                                 .singleOrNull() ?: return Result.retry()
-                            outboxDao.markRetry(
-                                eventId = blocked.eventId,
-                                nextAttemptAt = SyncRetryPolicy.nextAttemptAt(
-                                    System.currentTimeMillis(),
-                                    blocked.attempts,
-                                ),
-                                lastErrorCode = "snapshot_entity_not_represented",
-                            )
-                            Result.retry()
+                            when (app.syncSessionGuard.withLease(activeContext) {
+                                outboxDao.markRetry(
+                                    eventId = blocked.eventId,
+                                    nextAttemptAt = SyncRetryPolicy.nextAttemptAt(
+                                        System.currentTimeMillis(),
+                                        blocked.attempts,
+                                    ),
+                                    lastErrorCode = "snapshot_entity_not_represented",
+                                )
+                            }) {
+                                SyncGuardExecution.Invalidated ->
+                                    completed(SyncStatusCodes.AUTH_SESSION_INVALIDATED, pendingCount)
+                                is SyncGuardExecution.Completed -> Result.retry()
+                            }
                         }
                         is BackupAcknowledgementResult.RetryRequired -> Result.retry()
+                        BackupAcknowledgementResult.SessionInvalidated ->
+                            completed(SyncStatusCodes.AUTH_SESSION_INVALIDATED, outboxDao.getPendingCount())
                         is BackupAcknowledgementResult.Rejected ->
                             completed(SyncStatusCodes.ACKNOWLEDGEMENT_REJECTED, outboxDao.getPendingCount())
                     }

@@ -27,6 +27,7 @@ object SyncStatusCodes {
     const val INVALID_OUTBOX_EVENT = "invalid_outbox_event"
     const val OVERSIZED_EVENT = "oversized_event"
     const val AUTH_OWNER_CHANGED = "auth_owner_changed"
+    const val AUTH_SESSION_INVALIDATED = "auth_session_invalidated"
     const val AUTH_REFRESH_FAILED = "auth_refresh_failed"
     const val SYNC_COMMITTED = "sync_committed"
     const val ACKNOWLEDGEMENT_REJECTED = "acknowledgement_rejected"
@@ -86,6 +87,7 @@ enum class SyncOutcome {
             SyncStatusCodes.SIGNED_OUT -> SIGNED_OUT
             SyncStatusCodes.OWNER_NOT_BOUND -> NOT_LINKED
             SyncStatusCodes.AUTH_OWNER_CHANGED -> OWNER_CHANGED
+            SyncStatusCodes.AUTH_SESSION_INVALIDATED -> SIGNED_OUT
             SyncStatusCodes.AUTH_REFRESH_FAILED -> AUTH_EXPIRED
             SyncStatusCodes.MERGE_CONFLICT -> MERGE_CONFLICT
             SyncStatusCodes.ACKNOWLEDGEMENT_REJECTED,

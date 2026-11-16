@@ -8,6 +8,7 @@ import com.atpro.network.supabase.SupabaseHttpClient
 import com.atpro.network.supabase.SupabaseHttpRequest
 import com.atpro.network.supabase.SupabaseHttpResponse
 import com.atpro.network.supabase.SupabaseHttpTransport
+import com.atpro.sync.SyncSessionGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -74,6 +75,7 @@ class SupabaseAuthRepositoryTest {
         transport: QueueTransport,
         store: MemorySessionStore = MemorySessionStore(),
         now: Long = 100_000L,
+        syncSessionGuard: SyncSessionGuard = SyncSessionGuard(),
     ): SupabaseAuthRepository = SupabaseAuthRepository(
         httpClient = SupabaseHttpClient(
             config = SupabaseClientConfig(
@@ -85,6 +87,7 @@ class SupabaseAuthRepositoryTest {
         sessionStore = store,
         ioDispatcher = Dispatchers.Unconfined,
         nowEpochSeconds = { now },
+        syncSessionGuard = syncSessionGuard,
     )
 
     private fun response(status: Int, body: String = "") =
@@ -327,16 +330,37 @@ class SupabaseAuthRepositoryTest {
     }
 
     @Test
+    fun signOutInvalidatesTheCapturedWorkerGeneration() = runBlocking {
+        val guard = SyncSessionGuard()
+        val store = MemorySessionStore(signedInSession())
+        val repo = repository(QueueTransport(emptyList()), store, syncSessionGuard = guard)
+        repo.restoreSession()
+        val context = guard.capture(USER_ID, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!!
+        assertTrue(guard.isCurrent(context))
+
+        repo.signOut()
+
+        assertFalse(guard.isCurrent(context))
+        assertFalse(guard.hasActiveSession())
+    }
+
+    @Test
     fun localClearFailureDoesNotEmitSignedOutStateOrCallServer() = runBlocking {
         val transport = QueueTransport(emptyList())
         val original = signedInSession()
         val store = MemorySessionStore(original).apply { failClear = true }
-        val repo = repository(transport, store)
+        val guard = SyncSessionGuard()
+        val repo = repository(transport, store, syncSessionGuard = guard)
         repo.restoreSession()
+        val oldContext = guard.capture(USER_ID, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!!
 
         val result = repo.signOut()
+        val newContext = guard.capture(USER_ID, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 
         assertTrue(result is AuthResult.Failure)
+        assertFalse(guard.isCurrent(oldContext))
+        assertTrue(newContext != null)
+        assertTrue(guard.isCurrent(newContext!!))
         assertEquals(original, repo.session.value)
         assertEquals(original, store.value)
         assertTrue(transport.requests.isEmpty())

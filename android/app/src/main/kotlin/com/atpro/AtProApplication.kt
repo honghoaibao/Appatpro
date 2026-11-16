@@ -13,6 +13,7 @@ import com.atpro.ui.theme.AtThemeState
 import com.atpro.db.AtProDatabase
 import com.atpro.sync.BackupOwnershipManager
 import com.atpro.sync.BackupRestoreCoordinator
+import com.atpro.sync.SyncSessionGuard
 import com.atpro.sync.SyncStatusStore
 import com.atpro.sync.SyncWorkScheduler
 import kotlinx.coroutines.*
@@ -26,9 +27,15 @@ class AtProApplication : MultiDexApplication() {
         BackupOwnershipManager(AtProDatabase.getInstance(applicationContext))
     }
 
+    /** Shared Auth/WorkManager fence; all workers and logout observe the same generation. */
+    val syncSessionGuard: SyncSessionGuard by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        SyncSessionGuard()
+    }
+
     val authRepository: AuthRepository by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         SupabaseAuthRepository(
             sessionStore = AndroidKeystoreAuthSessionStore(applicationContext),
+            syncSessionGuard = syncSessionGuard,
         )
     }
 

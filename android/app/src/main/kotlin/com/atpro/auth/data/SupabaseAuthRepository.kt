@@ -8,6 +8,7 @@ import com.atpro.auth.domain.AuthUser
 import com.atpro.network.supabase.SupabaseHttpClient
 import com.atpro.network.supabase.SupabaseHttpRequest
 import com.atpro.network.supabase.SupabaseHttpResponse
+import com.atpro.sync.SyncSessionGuard
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -35,6 +36,7 @@ class SupabaseAuthRepository(
     private val sessionStore: AuthSessionStore,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val nowEpochSeconds: () -> Long = { System.currentTimeMillis() / 1_000L },
+    private val syncSessionGuard: SyncSessionGuard = SyncSessionGuard(),
 ) : AuthRepository {
 
     private val sessionMutex = Mutex()
@@ -49,10 +51,16 @@ class SupabaseAuthRepository(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
+            syncSessionGuard.invalidate()
             mutableSession.value = null
             return@withLock null
         }
 
+        if (saved == null) {
+            syncSessionGuard.invalidate()
+        } else {
+            syncSessionGuard.activate(saved.user.id)
+        }
         mutableSession.value = saved
         saved
     }
@@ -216,10 +224,14 @@ class SupabaseAuthRepository(
     override suspend fun signOut(): AuthResult<Unit> {
         var localClearFailed = false
 
+        // Invalidate immediately; repeat under sessionMutex to cover an in-flight login/refresh.
+        syncSessionGuard.invalidate()
+
         // Serialize only the local mutation. Once the encrypted session is removed,
         // release the mutex before best-effort remote revocation so a new login is
         // not blocked by a slow/offline server response.
         val current = sessionMutex.withLock {
+            syncSessionGuard.invalidate()
             val saved = try {
                 withContext(ioDispatcher) { sessionStore.read() } ?: mutableSession.value
             } catch (cancelled: CancellationException) {
@@ -239,6 +251,9 @@ class SupabaseAuthRepository(
             if (!localClearFailed) {
                 // Emit signed-out only after persistent storage has actually been cleared.
                 mutableSession.value = null
+            } else {
+                // A failed clear retains the live session under a new generation only.
+                saved?.user?.id?.let { syncSessionGuard.activate(it) }
             }
             saved
         }
@@ -282,6 +297,7 @@ class SupabaseAuthRepository(
         try {
             withContext(NonCancellable + ioDispatcher) {
                 sessionStore.write(session)
+                syncSessionGuard.activate(session.user.id)
                 mutableSession.value = session
                 persisted = true
             }
@@ -305,6 +321,7 @@ class SupabaseAuthRepository(
             // The in-memory token is still discarded; persistent storage failure is surfaced
             // by the refresh result and must not leave this process using a consumed token.
         }
+        syncSessionGuard.invalidate()
         mutableSession.value = null
     }
 
@@ -312,6 +329,7 @@ class SupabaseAuthRepository(
         withContext(ioDispatcher) {
             sessionStore.write(session)
         }
+        syncSessionGuard.activate(session.user.id)
         mutableSession.value = session
     }
 
@@ -320,6 +338,7 @@ class SupabaseAuthRepository(
         withContext(ioDispatcher) {
             sessionStore.clear()
         }
+        syncSessionGuard.invalidate()
         mutableSession.value = null
     }
 

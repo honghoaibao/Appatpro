@@ -126,6 +126,7 @@ sealed interface BackupAcknowledgementResult {
 
     data class RetryRequired(val reason: String) : BackupAcknowledgementResult
     data class Rejected(val reason: String) : BackupAcknowledgementResult
+    data object SessionInvalidated : BackupAcknowledgementResult
 }
 
 /**
@@ -138,10 +139,12 @@ class BackupAcknowledgementCoordinator internal constructor(
     private val room: BackupAcknowledgementRoomPort,
     private val earnings: BackupAcknowledgementEarningsPort,
     private val refreshOwnership: suspend (String) -> Unit = {},
+    private val executionGuard: SyncSessionGuard? = null,
 ) {
     constructor(
         context: Context,
         ownershipManager: BackupOwnershipManager,
+        executionGuard: SyncSessionGuard? = null,
     ) : this(
         LocalBackupRestorePort(context.applicationContext),
         RoomBackupAcknowledgementPort(AtProDatabase.getInstance(context.applicationContext)),
@@ -152,11 +155,30 @@ class BackupAcknowledgementCoordinator internal constructor(
             override fun dirtyState(): EarningsDirtyState = EarningsStore.dirtyState()
         },
         { ownerId -> ownershipManager.refresh(ownerId) },
+        executionGuard,
     ) {
         EarningsStore.init(context.applicationContext)
     }
 
     suspend fun acknowledge(
+        session: AuthSession,
+        committed: BackupCasResult.Committed,
+        executionContext: SyncExecutionContext? = null,
+    ): BackupAcknowledgementResult {
+        val guard = executionGuard
+        if (guard != null) {
+            val context = executionContext ?: return BackupAcknowledgementResult.SessionInvalidated
+            return when (val guarded = guard.withLease(context) {
+                acknowledgeWithinLease(session, committed)
+            }) {
+                SyncGuardExecution.Invalidated -> BackupAcknowledgementResult.SessionInvalidated
+                is SyncGuardExecution.Completed -> guarded.value
+            }
+        }
+        return acknowledgeWithinLease(session, committed)
+    }
+
+    private suspend fun acknowledgeWithinLease(
         session: AuthSession,
         committed: BackupCasResult.Committed,
     ): BackupAcknowledgementResult {

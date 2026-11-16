@@ -109,6 +109,44 @@ class BackupCasCoordinatorTest {
     }
 
     @Test
+    fun sessionInvalidationAfterRemoteReadPreventsCasWrite() = runBlocking {
+        val guard = SyncSessionGuard()
+        guard.activate(owner)
+        val context = guard.capture(owner, installA)!!
+        var commitCalls = 0
+        val remote = object : BackupRemoteStore {
+            override suspend fun read(
+                ownerUserId: String,
+                accessToken: String,
+            ): BackupRemoteReadResult {
+                guard.invalidate()
+                return BackupRemoteReadResult.Missing
+            }
+
+            override suspend fun commit(
+                expectedRevision: Long,
+                encoded: EncodedBackupPayload,
+                accessToken: String,
+            ): BackupRemoteCommitResult {
+                commitCalls++
+                return BackupRemoteCommitResult.Committed(expectedRevision + 1L)
+            }
+        }
+        val coordinator = BackupCasCoordinator(
+            remote,
+            BackupSnapshotProvider { buildResult() },
+            BackupOwnerBindingValidator { true },
+            FakeCodec(),
+            executionGuard = guard,
+        )
+
+        val result = coordinator.run(authSession(), context)
+
+        assertTrue(result is BackupCasResult.SessionInvalidated)
+        assertEquals(0, commitCalls)
+    }
+
+    @Test
     fun missingRemoteRowCreatesRevisionOneFromLocalV3() = runBlocking {
         val remote = FakeRemote().apply {
             reads += BackupRemoteReadResult.Missing
