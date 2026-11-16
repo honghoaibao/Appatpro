@@ -22,6 +22,7 @@ object SyncStatusCodes {
     const val SIGNED_OUT = "signed_out"
     const val OWNER_NOT_BOUND = "owner_not_bound"
     const val NO_PENDING_DATA = "no_pending_data"
+    const val EMPTY_LOCAL_NO_REMOTE_BACKUP = "empty_local_no_remote_backup"
     const val OUTBOX_HEAD_UNAVAILABLE = "outbox_head_unavailable"
     const val INVALID_OUTBOX_EVENT = "invalid_outbox_event"
     const val OVERSIZED_EVENT = "oversized_event"
@@ -52,6 +53,8 @@ enum class SyncOutcome {
     COMMITTED,
     /** Không có gì chờ gửi. */
     UP_TO_DATE,
+    /** Local data is empty and no remote backup exists yet; wait for the first real mutation. */
+    EMPTY_READY,
     SIGNED_OUT,
     /** Dữ liệu trên máy chưa liên kết với tài khoản đang đăng nhập. */
     NOT_LINKED,
@@ -79,6 +82,7 @@ enum class SyncOutcome {
         fun fromStatusCode(code: String?): SyncOutcome = when (code) {
             SyncStatusCodes.SYNC_COMMITTED -> COMMITTED
             SyncStatusCodes.NO_PENDING_DATA -> UP_TO_DATE
+            SyncStatusCodes.EMPTY_LOCAL_NO_REMOTE_BACKUP -> EMPTY_READY
             SyncStatusCodes.SIGNED_OUT -> SIGNED_OUT
             SyncStatusCodes.OWNER_NOT_BOUND -> NOT_LINKED
             SyncStatusCodes.AUTH_OWNER_CHANGED -> OWNER_CHANGED
@@ -136,6 +140,7 @@ object SyncStatusText {
         s.retrying -> "Chờ thử lại"
         else -> when (s.outcome) {
             SyncOutcome.NEVER -> "Chưa đồng bộ"
+            SyncOutcome.EMPTY_READY -> "Chưa có dữ liệu"
             SyncOutcome.COMMITTED, SyncOutcome.UP_TO_DATE -> "Đã đồng bộ"
             SyncOutcome.SIGNED_OUT -> "Chưa đăng nhập"
             SyncOutcome.NOT_LINKED -> "Chưa liên kết dữ liệu"
@@ -196,6 +201,8 @@ object SyncStatusText {
             NotifText("Đồng bộ lỗi", "Dữ liệu trên máy vẫn giữ nguyên")
         SyncOutcome.SIGNED_OUT ->
             NotifText("Chưa đăng nhập", "Đăng nhập AT PRO để đồng bộ dữ liệu")
+        SyncOutcome.EMPTY_READY ->
+            NotifText("Chưa có dữ liệu", "Dữ liệu mới sẽ được sao lưu tự động")
         SyncOutcome.NEVER ->
             NotifText("Chưa đồng bộ", "Chưa có lần đồng bộ nào")
     }
@@ -213,7 +220,8 @@ object SyncNotifyPolicy {
      * - Chưa đăng nhập / chưa có lần nào / không có gì để gửi: không báo.
      */
     fun shouldNotify(previous: SyncOutcome, current: SyncOutcome, manual: Boolean): Boolean = when {
-        current == SyncOutcome.NEVER || current == SyncOutcome.SIGNED_OUT -> manual
+        current == SyncOutcome.NEVER || current == SyncOutcome.SIGNED_OUT ||
+            current == SyncOutcome.EMPTY_READY -> manual
         manual -> true
         current.needsAttention -> current != previous
         current == SyncOutcome.COMMITTED -> previous.needsAttention
