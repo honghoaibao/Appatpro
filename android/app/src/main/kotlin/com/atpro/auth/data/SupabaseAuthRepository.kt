@@ -410,7 +410,7 @@ class SupabaseAuthRepository(
         val authenticatedUser = user
             ?: return AuthResult.Failure("Không xác minh được tài khoản.")
 
-        val explicitExpiry = optLong("expires_at", 0L)
+        val explicitExpiry = optLong("expires_at", 0L).takeIf { it > 0L }
         val expiresIn = optLong("expires_in", 0L)
             .takeIf { it > 0L }
             ?: DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS
