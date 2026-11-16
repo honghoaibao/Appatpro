@@ -344,7 +344,6 @@ class SupabaseAuthRepository(
 
     /** Only definitive refresh-session rejection clears the durable local session. */
     private fun SupabaseHttpResponse.isInvalidRefreshSession(): Boolean {
-        if (statusCode == UNAUTHORIZED_STATUS) return true
         if (statusCode !in 400..422) return false
 
         return try {
