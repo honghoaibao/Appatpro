@@ -209,7 +209,7 @@ class SupabaseAuthRepository(
             is AuthResult.Failure -> return@safely parsed
         }
 
-        persistSession(refreshed)
+        persistRefreshedSession(refreshed)
         AuthResult.Success(refreshed)
     }
 
@@ -272,6 +272,38 @@ class SupabaseAuthRepository(
         }
     }
 
+    /**
+     * A successful refresh consumes the previous refresh token. Persist the rotated pair
+     * non-cancellably; if storage fails, discard the stale local pair instead of retrying
+     * a token that the server may already have invalidated.
+     */
+    private suspend fun persistRefreshedSession(session: AuthSession) {
+        try {
+            withContext(NonCancellable + ioDispatcher) {
+                sessionStore.write(session)
+            }
+        } catch (cancelled: CancellationException) {
+            clearAfterFailedRefresh()
+            throw cancelled
+        } catch (error: Exception) {
+            clearAfterFailedRefresh()
+            throw error
+        }
+        mutableSession.value = session
+    }
+
+    private suspend fun clearAfterFailedRefresh() {
+        try {
+            withContext(NonCancellable + ioDispatcher) {
+                sessionStore.clear()
+            }
+        } catch (_: Exception) {
+            // The in-memory token is still discarded; persistent storage failure is surfaced
+            // by the refresh result and must not leave this process using a consumed token.
+        }
+        mutableSession.value = null
+    }
+
     private suspend fun persistSession(session: AuthSession) {
         withContext(ioDispatcher) {
             sessionStore.write(session)
@@ -327,7 +359,7 @@ class SupabaseAuthRepository(
                 ?.lowercase()
                 .orEmpty()
 
-            code in INVALID_REFRESH_ERROR_CODES ||
+            (code != null && code in INVALID_REFRESH_ERROR_CODES) ||
                 message.contains("invalid refresh token") ||
                 message.contains("refresh token not found") ||
                 message.contains("refresh token already used")
