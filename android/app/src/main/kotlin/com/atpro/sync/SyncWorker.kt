@@ -157,6 +157,10 @@ class SyncWorker(
                         remoteCheckpoint = result.checkpoint,
                     )
                     app.backupOwnershipManager.refresh(activeSession.user.id)
+                    // Restore may import Earnings rows and create a new dirty generation.
+                    // Reconcile that durable work now; while this worker is RUNNING the scheduler
+                    // appends at most one follow-up to the same unique chain.
+                    SyncWorkScheduler.scheduleIfPending(applicationContext)
                     completed(SyncStatusCodes.SYNC_COMMITTED)
                 }
                 BackupCasResult.EmptyLocalNoRemoteBackup ->
