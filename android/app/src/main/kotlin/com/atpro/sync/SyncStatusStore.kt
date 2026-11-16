@@ -16,6 +16,7 @@ object SyncStatusStore {
     private const val PREFS = "atpro_sync_status"
     private const val K_OUTCOME = "outcome"
     private const val K_LAST_ATTEMPT = "last_attempt"
+    private const val K_LAST_MANUAL_REQUEST = "last_manual_request"
     private const val K_LAST_SUCCESS = "last_success"
     private const val K_PENDING = "pending"
     private const val K_RETRYING = "retrying"
@@ -40,6 +41,16 @@ object SyncStatusStore {
             retrying = p.getBoolean(K_RETRYING, false),
             runningSince = 0L,
         )
+    }
+
+    /** Timestamp of the last accepted manual request, independent of worker completion. */
+    @Synchronized
+    fun lastManualRequestAt(): Long = prefs?.getLong(K_LAST_MANUAL_REQUEST, 0L) ?: 0L
+
+    /** Persist immediately so queued/offline requests also respect the cooldown. */
+    @Synchronized
+    fun markManualRequest(nowMs: Long) {
+        prefs?.edit()?.putLong(K_LAST_MANUAL_REQUEST, nowMs)?.apply()
     }
 
     /** Một lần chạy bắt đầu (hoặc vừa được xếp lịch theo yêu cầu người dùng). */
