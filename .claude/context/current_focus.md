@@ -3,11 +3,13 @@
 ## Current execution state — 2026-11-16
 
 - Active branch: `feature/supabase-completion-2026-11-16`.
-- Current reviewed head: `06125f8ae0057898ca29d7facdcb88cadda0a754`.
+- Latest branch HEAD after documentation updates: `1904de1cd67319f7b5863316c4ea546d55088547` (documentation-only commits after the CI-verified code baseline).
+- Runtime-code baseline verified by CI: `06125f8ae0057898ca29d7facdcb88cadda0a754`.
 - App: v1.12.6 / versionCode 46. GitHub Actions run [#286](https://github.com/honghoaibao/Appatpro/actions/runs/43831656216) passed JUnit, Android APK build and artifact upload. Artifact: `atpro-v1.12.6-b47`.
 - Source implementation: Auth/session hardening, Room-first Outbox, snapshot v3, CAS, restore journal, exact acknowledgement, retry/backoff, manual sync, status UI and conflict diagnostics are present on this branch.
 - Phase 3–4 implementation and branch audit are complete. Follow-up source hardening is recorded in revision notes `phase6.1` through `phase6.4`.
 - **Not yet verified on a physical Android device:** Android Keystore recovery/rotation, WorkManager scheduling and cancellation, network loss/reconnection, process death during queued work, and Room restore/journal replay.
+- Runtime verification plan committed at `790393c079ff1e92eb45035ace3f317560ce66ab`.
 - **Current task: Phase 5 — Runtime Verification.** First validate one-device Auth + automatic/manual sync + offline recovery + logout. Two-device restore/conflict scenarios remain a separate Phase 6 gate.
 - No Supabase production schema, Auth settings, keys, RPCs or remote records are to be changed during runtime QA. Hosted email confirmation remains unchanged.
 - Keep `main` unchanged and do not dispatch GitHub Actions again without separate explicit authorization.
