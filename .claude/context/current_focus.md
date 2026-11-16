@@ -1,5 +1,19 @@
 # Current Focus
 
+## Current execution state — 2026-11-16 (Phase 5 Automatic-first Sync)
+
+- Active branch: `feature/supabase-completion-2026-11-16`.
+- Baseline remains v1.12.6 / versionCode 46.
+- Phase 5 Sub-phase A (Audit) and B (Architecture Design) are complete.
+- Phase 5 Sub-phase C1 (Sync Bootstrap Foundation) is implemented on this branch. It adds empty-local classification, restore-only handling for a valid remote backup, a no-blank-upload result when both sides are empty, fail-closed remote-read/validation behavior, journaled remote-checkpoint updates, and explicit EMPTY_READY status.
+- C1 tests added for local-state classification, bootstrap CAS decisions, remote invalid/read failure, journal checkpoint metadata, and empty-state UI copy.
+- Source-level contract inspection after edits: 11/11 checks passed.
+- **Not verified:** Android compile, JUnit/Robolectric, APK build, and physical-device RT-07 through RT-14. GitHub Actions was not run. See `.claude/revision/phase5-c1-bootstrap-foundation-2026-11-16.md`.
+- C1 consumes `INPUT_FORCE_REMOTE_CHECK` in SyncWorker, but scheduler trigger wiring remains for C2.
+- Next: await approval before C2 — Automatic Trigger Lifecycle. Do not run GitHub Actions, change Supabase production resources, or merge `main` without separate authorization.
+- Full app-data clear/uninstall removes local metadata and tombstones; the app cannot infer prior explicit deletion from erased local evidence. Cloud recovery after fresh owner confirmation remains the source of truth.
+
+
 ## Current execution state — 2026-11-16
 
 - Active branch: `feature/supabase-completion-2026-11-16`.
