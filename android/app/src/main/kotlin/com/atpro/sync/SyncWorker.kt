@@ -27,12 +27,13 @@ class SyncWorker(
 
     override suspend fun doWork(): Result {
         val manual = inputData.getBoolean(SyncStatusCodes.INPUT_MANUAL, false)
+        val forceRemoteCheck = inputData.getBoolean(SyncStatusCodes.INPUT_FORCE_REMOTE_CHECK, false)
         SyncStatusStore.init(applicationContext)
         val previous = SyncStatusStore.state.value.outcome
         SyncStatusStore.markRunning()
         var result: Result? = null
         try {
-            val finished = runSync(manual)
+            val finished = runSync(manual, forceRemoteCheck)
             result = finished
             return finished
         } finally {
@@ -60,7 +61,7 @@ class SyncWorker(
         }
     }
 
-    private suspend fun runSync(manual: Boolean): Result {
+    private suspend fun runSync(manual: Boolean, forceRemoteCheck: Boolean): Result {
         val app = applicationContext as? AtProApplication
             ?: return completed(SyncStatusCodes.APPLICATION_UNAVAILABLE)
 
@@ -80,7 +81,7 @@ class SyncWorker(
             val pendingCount = outboxDao.getPendingCount()
             val earningsDirty = EarningsStore.isDirty()
             // Người dùng bấm "Đồng bộ ngay": vẫn chạy một vòng đọc–gộp–gửi để kéo dữ liệu từ thiết bị khác về.
-            if (pendingCount == 0 && !earningsDirty && !manual) {
+            if (pendingCount == 0 && !earningsDirty && !manual && !forceRemoteCheck) {
                 return completed(SyncStatusCodes.NO_PENDING_DATA)
             }
 
@@ -149,6 +150,18 @@ class SyncWorker(
             }
 
             when (val result = casResult) {
+                is BackupCasResult.RestoreRequired -> {
+                    BackupRestoreCoordinator(applicationContext).restore(
+                        mergedSnapshot = result.snapshot,
+                        authenticatedOwnerUserId = activeSession.user.id,
+                        remoteCheckpoint = result.checkpoint,
+                    )
+                    app.backupOwnershipManager.refresh(activeSession.user.id)
+                    completed(SyncStatusCodes.SYNC_COMMITTED)
+                }
+                BackupCasResult.EmptyLocalNoRemoteBackup ->
+                    completed(SyncStatusCodes.EMPTY_LOCAL_NO_REMOTE_BACKUP)
+                is BackupCasResult.UpToDate -> completed(SyncStatusCodes.NO_PENDING_DATA)
                 is BackupCasResult.Committed -> {
                     when (val acknowledged = acknowledgementCoordinator.acknowledge(activeSession, result)) {
                         is BackupAcknowledgementResult.Acknowledged -> {
