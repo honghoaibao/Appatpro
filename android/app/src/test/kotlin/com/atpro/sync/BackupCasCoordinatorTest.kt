@@ -140,6 +140,32 @@ class BackupCasCoordinatorTest {
     }
 
     @Test
+    fun emptyLocalWithMissingRemoteAndExistingCheckpointFailsClosed() = runBlocking {
+        val remote = FakeRemote().apply {
+            reads += BackupRemoteReadResult.Missing
+        }
+
+        val result = BackupCasCoordinator(
+            remote,
+            BackupSnapshotProvider {
+                buildResult(
+                    snapshotValue = emptySnapshot(),
+                    localExpectedRevision = 3L,
+                )
+            },
+            BackupOwnerBindingValidator { true },
+            FakeCodec(),
+        ).run(authSession())
+
+        assertTrue(result is BackupCasResult.Failed)
+        assertEquals(
+            "remote_revision_behind_local_checkpoint",
+            (result as BackupCasResult.Failed).failure.code,
+        )
+        assertTrue(remote.expectedRevisions.isEmpty())
+    }
+
+    @Test
     fun emptyLocalRestoresFoundRemoteWithoutCreatingAnotherRevision() = runBlocking {
         val codec = FakeCodec()
         val remoteSnapshot = snapshot(source = installB)
