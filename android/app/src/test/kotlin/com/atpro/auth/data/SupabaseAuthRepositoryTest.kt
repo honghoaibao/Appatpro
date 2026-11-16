@@ -11,8 +11,6 @@ import com.atpro.network.supabase.SupabaseHttpTransport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.awaitAll
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -227,6 +225,24 @@ class SupabaseAuthRepositoryTest {
     fun unrelatedBadRequestDoesNotDestroySavedRefreshSession() = runBlocking {
         val transport = QueueTransport(
             listOf(response(400, """{"code":"invalid_credentials","message":"Invalid credentials"}""")),
+        )
+        val original = signedInSession()
+        val store = MemorySessionStore(original)
+        val repo = repository(transport, store)
+        repo.restoreSession()
+
+        val result = repo.refreshSession()
+
+        assertTrue(result is AuthResult.Failure)
+        assertEquals(original, store.value)
+        assertEquals(original, repo.session.value)
+        assertEquals(0, store.clearCount)
+    }
+
+    @Test
+    fun unauthorizedApiKeyFailureDoesNotClearTheUserRefreshSession() = runBlocking {
+        val transport = QueueTransport(
+            listOf(response(401, """{"code":"invalid_api_key","message":"Invalid API key"}""")),
         )
         val original = signedInSession()
         val store = MemorySessionStore(original)
