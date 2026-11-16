@@ -18,10 +18,10 @@ internal object SyncWorkSchedulingPolicy {
     fun forLocalMutation(
         hasPendingData: Boolean,
         hasRunningWork: Boolean,
-        hasQueuedLocalFollowUp: Boolean,
+        hasQueuedFollowUp: Boolean,
     ): SyncEnqueueAction = when {
         !hasPendingData -> SyncEnqueueAction.SKIP
-        hasRunningWork && hasQueuedLocalFollowUp -> SyncEnqueueAction.SKIP
+        hasRunningWork && hasQueuedFollowUp -> SyncEnqueueAction.SKIP
         hasRunningWork -> SyncEnqueueAction.APPEND_AFTER_RUNNING
         else -> SyncEnqueueAction.KEEP
     }
