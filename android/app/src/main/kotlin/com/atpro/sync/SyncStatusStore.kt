@@ -97,7 +97,6 @@ object SyncStatusStore {
                 runningSince = 0L,
                 conflictDetails = if (outcome == SyncOutcome.MERGE_CONFLICT) {
                     conflictDetails?.take(BackupMergeConflictSummary.MAX_SUMMARY_LENGTH)
-                        ?: cur.conflictDetails
                 } else null,
             )
         }

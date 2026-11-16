@@ -61,7 +61,7 @@ class BackupMergeConflictSummaryTest {
 
         val result = BackupMergeConflictSummary.format(conflicts)
 
-        assertEquals(3, result!!.split("; ").size - 1 + 1)
+        assertEquals(3, result!!.split("; ").size)
         assertTrue(result.contains("(+2 mục khác)"))
         assertTrue(result.length <= BackupMergeConflictSummary.MAX_SUMMARY_LENGTH)
     }
