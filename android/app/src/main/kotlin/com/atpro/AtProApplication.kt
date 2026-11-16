@@ -43,6 +43,17 @@ class AtProApplication : MultiDexApplication() {
         _ctx = applicationContext
         // Configure the file store before any automation service can record a reward.
         EarningsStore.init(this)
+        EarningsStore.setSyncTrigger {
+            appScope.launch {
+                try {
+                    SyncWorkScheduler.scheduleIfPending(this@AtProApplication)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Log.w("AtProApp", "Could not schedule sync after earnings write", error)
+                }
+            }
+        }
 
         // A staged restore journal is replayed before WorkManager preflight or UI/services
         // can observe a half-applied Room + Earnings state. Normal startup does no blocking IO.
