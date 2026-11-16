@@ -15,6 +15,8 @@ object SyncStatusCodes {
 
     /** Đầu vào của lần chạy do người dùng bấm "Đồng bộ ngay": chạy cả khi không có thay đổi chờ gửi. */
     const val INPUT_MANUAL = "manual"
+    /** Automatic initial/periodic check, including an empty local Outbox. */
+    const val INPUT_FORCE_REMOTE_CHECK = "force_remote_check"
 
     const val APPLICATION_UNAVAILABLE = "application_unavailable"
     const val SIGNED_OUT = "signed_out"

@@ -37,6 +37,7 @@ sealed interface BackupCasResult {
         val attempts: Int,
         val checksum: String,
     ) : BackupCasResult
+    data class UpToDate(val revision: Long) : BackupCasResult
     data class Conflicted(val conflicts: List<BackupMergeConflict>) : BackupCasResult
     data class RetryLater(val attempts: Int) : BackupCasResult
     data class Failed(val failure: BackupRemoteFailure) : BackupCasResult
@@ -131,6 +132,20 @@ class BackupCasCoordinator(
                 return BackupCasResult.Failed(
                     BackupRemoteFailure("remote_revision_behind_local_checkpoint", retryable = false)
                 )
+            }
+
+            // An app-entry/periodic check must not create a new cloud revision when this
+            // installation has no pending mutations and already holds this exact v3 revision.
+            // A checksum mismatch or legacy schema follows the normal decode/merge/CAS path.
+            if (remote != null &&
+                expectedRevision == localBuild.localExpectedRevision &&
+                localBuild.outboxEvents.isEmpty() &&
+                !localBuild.earningsDirty &&
+                remote.schemaVersion == BackupSnapshot.CURRENT_FORMAT_VERSION &&
+                localBuild.localExpectedChecksum != null &&
+                remote.checksum == localBuild.localExpectedChecksum
+            ) {
+                return BackupCasResult.UpToDate(expectedRevision)
             }
 
             val candidate = if (remote == null) {
