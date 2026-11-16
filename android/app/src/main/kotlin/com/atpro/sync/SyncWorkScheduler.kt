@@ -28,6 +28,9 @@ object SyncWorkScheduler {
     const val UNIQUE_WORK_NAME = "atpro_backup_sync"
     const val DEBOUNCE_SECONDS = 20L
 
+    /** Tag used to identify a queued manual sync; WorkInfo exposes tags, not request inputData. */
+    private const val MANUAL_WORK_TAG = "atpro_backup_sync_manual"
+
     /** Hai lần bấm "Đồng bộ ngay" cách nhau tối thiểu — mỗi vòng thành công tăng revision trên máy chủ. */
     const val MANUAL_MIN_INTERVAL_MS = 30_000L
 
@@ -77,7 +80,7 @@ object SyncWorkScheduler {
             val manualAlreadyActive = workInfos.any { info ->
                 info.state == WorkInfo.State.RUNNING ||
                     ((info.state == WorkInfo.State.ENQUEUED || info.state == WorkInfo.State.BLOCKED) &&
-                        info.inputData.getBoolean(SyncStatusCodes.INPUT_MANUAL, false))
+                        MANUAL_WORK_TAG in info.tags)
             }
             if (manualAlreadyActive) return@withLock ManualSyncRequest.ALREADY_RUNNING
 
@@ -99,6 +102,7 @@ object SyncWorkScheduler {
                 .setInputData(workDataOf(SyncStatusCodes.INPUT_MANUAL to true))
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30L, TimeUnit.SECONDS)
                 .addTag(UNIQUE_WORK_NAME)
+                .addTag(MANUAL_WORK_TAG)
                 .build()
             workManager.enqueueUniqueWork(UNIQUE_WORK_NAME, ExistingWorkPolicy.REPLACE, request)
             SyncStatusStore.markManualRequest(now)
