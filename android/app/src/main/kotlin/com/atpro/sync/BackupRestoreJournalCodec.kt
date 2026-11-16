@@ -109,6 +109,7 @@ internal object BackupRestoreJournalCodec {
         ) {
             throw BackupRestoreException("Unsupported or invalid local restore journal metadata")
         }
+        validateRemoteCheckpoint(record.remoteCheckpoint)
         return record
     }
 }
