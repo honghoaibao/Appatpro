@@ -11,7 +11,7 @@ class BackupRestoreJournalCodecTest {
         ownerUserId: String = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         remoteCheckpointJson: String? = null,
     ): String {
-        val checkpoint = remoteCheckpointJson?.let { ",\\"remoteCheckpoint\\":$it" }.orEmpty()
+        val checkpoint = remoteCheckpointJson?.let { ""","remoteCheckpoint":$it""" }.orEmpty()
         return """{"journalVersion":$journalVersion,"ownerUserId":"$ownerUserId","schemaVersion":$schemaVersion,"payload":"Zm9v","checksum":"0000000000000000000000000000000000000000000000000000000000000000"$checkpoint}"""
     }
 
