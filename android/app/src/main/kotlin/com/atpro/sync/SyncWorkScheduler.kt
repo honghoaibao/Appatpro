@@ -110,7 +110,10 @@ object SyncWorkScheduler {
             val workManager = WorkManager.getInstance(appContext)
             val active = activeWork(workManager)
             val isRunning = active.any { it.state == WorkInfo.State.RUNNING }
-            val hasActiveBootstrap = active.any { BOOTSTRAP_WORK_TAG in it.tags }
+            // Manual sync also performs a forced remote read, so it satisfies a pending bootstrap.
+            val hasActiveBootstrap = active.any {
+                BOOTSTRAP_WORK_TAG in it.tags || MANUAL_WORK_TAG in it.tags
+            }
 
             when (
                 SyncWorkSchedulingPolicy.forBootstrap(
