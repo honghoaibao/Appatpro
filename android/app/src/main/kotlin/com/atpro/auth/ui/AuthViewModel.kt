@@ -68,11 +68,11 @@ class AuthViewModel(
         val password = current.password
 
         if (email.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
-            showMessage("Vui lòng nhập địa chỉ email hợp lệ.", isError = true)
+            showMessage("Nhập email hợp lệ.", isError = true)
             return
         }
         if (password.isBlank()) {
-            showMessage("Vui lòng nhập mật khẩu.", isError = true)
+            showMessage("Nhập mật khẩu.", isError = true)
             return
         }
         if (current.isRegisterMode && password != current.confirmPassword) {
@@ -93,7 +93,7 @@ class AuthViewModel(
                                         password = "",
                                         confirmPassword = "",
                                         isSubmitting = false,
-                                        message = "Tài khoản đã được tạo. Hãy kiểm tra email để xác nhận trước khi đăng nhập.",
+                                        message = "Đã tạo tài khoản. Xác nhận qua email rồi đăng nhập.",
                                         isError = false,
                                     )
                                 }

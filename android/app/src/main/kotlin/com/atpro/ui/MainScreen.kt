@@ -38,6 +38,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.atpro.auth.domain.AuthRepository
 import com.atpro.sync.BackupOwnershipManager
+import com.atpro.sync.ManualSyncRequest
+import com.atpro.sync.SyncStatusStore
 import com.atpro.sync.SyncWorkScheduler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -102,6 +104,7 @@ fun MainScreen(
     val context = LocalContext.current
     val authSession by authRepository.session.collectAsStateWithLifecycle()
     val backupOwnershipState by backupOwnershipManager.state.collectAsStateWithLifecycle()
+    val syncStatus by SyncStatusStore.state.collectAsStateWithLifecycle()
     val ownershipScope = rememberCoroutineScope()
 
     LaunchedEffect(authSession?.user?.id) {
@@ -230,15 +233,32 @@ fun MainScreen(
                                 } else {
                                     val message = when (result) {
                                         com.atpro.sync.BackupOwnerBindingResult.DifferentAccount ->
-                                            "Dữ liệu cục bộ đang thuộc một tài khoản AT PRO khác."
+                                            "Dữ liệu trên máy thuộc tài khoản khác."
                                         com.atpro.sync.BackupOwnerBindingResult.ConfirmationRequired ->
-                                            "Cần xác nhận liên kết trước khi tiếp tục."
+                                            "Cần liên kết dữ liệu trước."
                                         com.atpro.sync.BackupOwnerBindingResult.SignedOut ->
-                                            "Vui lòng đăng nhập lại."
-                                        else -> "Không thể liên kết dữ liệu sao lưu trên thiết bị này."
+                                            "Đăng nhập lại để tiếp tục."
+                                        else -> "Không liên kết được dữ liệu."
                                     }
                                     Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                                 }
+                            }
+                        },
+                        syncStatus = syncStatus,
+                        onSyncNow = {
+                            ownershipScope.launch {
+                                val message = try {
+                                    when (SyncWorkScheduler.requestManual(context)) {
+                                        ManualSyncRequest.STARTED -> "Đang đồng bộ"
+                                        ManualSyncRequest.ALREADY_RUNNING -> "Đang đồng bộ, đợi xong rồi thử lại"
+                                        ManualSyncRequest.TOO_SOON -> "Vừa đồng bộ xong, thử lại sau ít giây"
+                                    }
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (_: Exception) {
+                                    "Không bắt đầu được đồng bộ"
+                                }
+                                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                             }
                         },
                         onSignOut = onSignOut,

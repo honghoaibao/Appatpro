@@ -260,7 +260,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
 
             Spacer(Modifier.height(18.dp))
             Text(
-                text = "Dữ liệu trên thiết bị vẫn hoạt động khi ngoại tuyến.",
+                text = "Không có mạng vẫn dùng được dữ liệu trên máy.",
                 color = AtColors.TextMuted,
                 fontSize = 11.sp,
                 textAlign = TextAlign.Center,
@@ -288,7 +288,7 @@ fun AuthCheckingScreen() {
             )
             Spacer(Modifier.height(16.dp))
             Text(
-                text = "Đang kiểm tra tài khoản...",
+                text = "Đang kiểm tra tài khoản",
                 color = AtColors.TextSec,
                 fontSize = 13.sp,
             )

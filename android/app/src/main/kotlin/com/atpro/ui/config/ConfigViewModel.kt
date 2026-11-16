@@ -143,6 +143,7 @@ class ConfigViewModel(
             notifSessions             = repo.getConfigBool ("notif_sessions", true),
             notifAccounts             = repo.getConfigBool ("notif_accounts", true),
             notifTasks                = repo.getConfigBool ("notif_tasks",    true),
+            notifSync                 = repo.getConfigBool ("notif_sync",     true),
             notifQuietEnabled         = repo.getConfigBool ("notif_quiet_enabled", false),
             notifQuietStart           = repo.getConfigInt  ("notif_quiet_start", 23).coerceIn(0, 23),
             notifQuietEnd             = repo.getConfigInt  ("notif_quiet_end",   7).coerceIn(0, 23),
@@ -279,6 +280,7 @@ class ConfigViewModel(
             repo.setConfig("notif_sessions",               "${s.notifSessions}")
             repo.setConfig("notif_accounts",               "${s.notifAccounts}")
             repo.setConfig("notif_tasks",                  "${s.notifTasks}")
+            repo.setConfig("notif_sync",                   "${s.notifSync}")
             repo.setConfig("notif_quiet_enabled",          "${s.notifQuietEnabled}")
             repo.setConfig("notif_quiet_start",            "${s.notifQuietStart}")
             repo.setConfig("notif_quiet_end",              "${s.notifQuietEnd}")
@@ -354,6 +356,7 @@ class ConfigViewModel(
                 sessions       = s.notifSessions,
                 accounts       = s.notifAccounts,
                 tasks          = s.notifTasks,
+                sync           = s.notifSync,
                 quietEnabled   = s.notifQuietEnabled,
                 quietStartHour = s.notifQuietStart,
                 quietEndHour   = s.notifQuietEnd,
@@ -438,6 +441,7 @@ data class ConfigUiState(
     val notifSessions:            Boolean = true,
     val notifAccounts:            Boolean = true,
     val notifTasks:               Boolean = true,
+    val notifSync:                Boolean = true,
     val notifQuietEnabled:        Boolean = false,
     val notifQuietStart:          Int     = 23,
     val notifQuietEnd:            Int     = 7,

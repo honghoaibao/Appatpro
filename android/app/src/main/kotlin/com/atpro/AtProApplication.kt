@@ -13,6 +13,7 @@ import com.atpro.ui.theme.AtThemeState
 import com.atpro.db.AtProDatabase
 import com.atpro.sync.BackupOwnershipManager
 import com.atpro.sync.BackupRestoreCoordinator
+import com.atpro.sync.SyncStatusStore
 import com.atpro.sync.SyncWorkScheduler
 import kotlinx.coroutines.*
 
@@ -63,6 +64,7 @@ class AtProApplication : MultiDexApplication() {
 
         // Notification channels must be created early (v1.12.0: tạo ở AtProNotificationManager.ensureChannels)
         AtProNotificationManager.ensureChannels(this)
+        SyncStatusStore.init(this)
 
         appScope.launch {
             runCatching { AtProNotificationManager.loadConfig() }

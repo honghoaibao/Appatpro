@@ -18,6 +18,8 @@ enum class NotifCategory {
     ACCOUNT,
     /** Nhiệm vụ kiếm tiền: bắt đầu, từng acc, tổng kết + xu. */
     TASK,
+    /** Đồng bộ Supabase: cần đăng nhập lại, xung đột, bị từ chối, hoặc kết quả sau khi bấm "Đồng bộ ngay". */
+    SYNC,
 }
 
 data class NotificationPrefs(
@@ -27,6 +29,7 @@ data class NotificationPrefs(
     val sessions: Boolean = true,
     val accounts: Boolean = true,
     val tasks: Boolean = true,
+    val sync: Boolean = true,
     /** Giờ yên tĩnh: trong khoảng này thông báo vẫn hiện nhưng KHÔNG phát âm/rung. */
     val quietEnabled: Boolean = false,
     val quietStartHour: Int = 23,
@@ -37,6 +40,7 @@ data class NotificationPrefs(
         NotifCategory.SESSION -> sessions
         NotifCategory.ACCOUNT -> accounts
         NotifCategory.TASK    -> tasks
+        NotifCategory.SYNC    -> sync
     }
 }
 
@@ -153,7 +157,7 @@ object NotificationText {
 
     fun f4fSessionExpired() = NotifText(
         "Follow4Follow cần đăng nhập lại",
-        "Phiên đăng nhập đã hết hạn nên nhiệm vụ đã dừng. Mở ứng dụng → Dịch vụ để đăng nhập lại.",
+        "Phiên đăng nhập hết hạn, nhiệm vụ đã dừng",
     )
 
     fun dailyLimit(account: String, detail: String) = NotifText(

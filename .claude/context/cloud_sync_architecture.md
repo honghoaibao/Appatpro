@@ -439,3 +439,10 @@ Phase 5.6 completes the local side of a successful remote CAS, without activatin
 - Restore filters merged cloud history to the device's 90-day local window. Each device therefore avoids accumulating the full long-term cloud history.
 - After server CAS, local restore and exact Outbox acknowledgement succeed, the Room acknowledgement transaction re-runs local session cleanup. The row is pruned only after its pending UPSERT is removed; remote history and tombstones remain untouched.
 - Timestamps are used only for local retention. The merge engine does not use cross-device wall-clock timestamps to choose session versions.
+
+## v1.12.6 — Trạng thái hiển thị và đồng bộ thủ công
+
+- `SyncWorker.doWork()` bọc `runSync(manual)`. Kết quả (`SyncOutcome`) ghi vào `SyncStatusStore` (SharedPreferences `atpro_sync_status`, không có token/email). Lỗi tạm = cờ `retrying`.
+- Cài đặt → Sao lưu dữ liệu đọc `SyncStatusStore.state`: tiêu đề, "Lần cuối …", số thay đổi chờ gửi, nút **Đồng bộ ngay**.
+- `SyncWorkScheduler.requestManual()`: cùng tên công việc, từ chối khi đang RUNNING, `REPLACE` khi đang chờ debounce; `manual=true` bỏ qua bước thoát sớm "không có gì chờ gửi" để máy mới vẫn kéo được dữ liệu. ≥ 30 giây giữa hai lần.
+- Thông báo nhóm Đồng bộ: xem ADR-0027. Đăng xuất: `cancel()` + `clear()`.

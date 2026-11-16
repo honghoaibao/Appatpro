@@ -70,11 +70,16 @@ object OverlayFarmMonitor {
     private const val C_MUTED   = 0xFFA9B8CE.toInt()
     private const val C_DIM     = 0xFF7285A3.toInt()
 
-    private const val PANEL_WIDTH_DP = 340
-    private const val MINI_WIDTH_DP  = 300
-    private const val LOG_ROWS_SMALL = 3
-    private const val LOG_ROWS_LARGE = 8
-    private const val LOG_ROW_DP     = 24
+    // v1.12.6: popup nhỏ lại — rộng 264dp (trước 340), cao ≈ 256dp (trước ≈ 430dp, mở rộng nhật ký ≈ 550dp ≈ 2/3 màn hình).
+    private const val PANEL_WIDTH_DP = 264
+    private const val MINI_WIDTH_DP  = 232
+    private const val LOG_ROWS_SMALL = 2
+    private const val LOG_ROW_DP     = 19
+    /** Phần cố định của popup (mọi thứ trừ các dòng nhật ký), dùng để giới hạn chiều cao khi mở rộng nhật ký. */
+    private const val FIXED_PANEL_DP = 232
+    /** Popup (kể cả khi mở rộng nhật ký) không cao quá tỉ lệ này của màn hình. */
+    private const val MAX_HEIGHT_FRACTION = 0.40f
+    private const val LOG_ROWS_LARGE_MAX = 6
     private const val MAX_LOG_ROWS   = 40
 
     /** Ba trạng thái hiển thị của cùng một cửa sổ nổi. */
@@ -93,6 +98,7 @@ object OverlayFarmMonitor {
     private var miniPanel: View? = null
     private var chipPanel: View? = null
     private var panelWidthPx = 0
+    private var logRowsLarge = 4
     private var miniWidthPx  = 0
 
     // Nền tảng + chế độ (suy ra từ nhãn dịch vụ khi show())
@@ -112,7 +118,6 @@ object OverlayFarmMonitor {
     private var tvReward:  TextView? = null
     private var tvProgress: TextView? = null
     private var tvPercent:  TextView? = null
-    private var progressRing: ProgressRing? = null
     private var progressFillFull: View? = null
     private var progressFillMini: View? = null
     private var tvMiniDone: TextView? = null
@@ -144,7 +149,6 @@ object OverlayFarmMonitor {
     private var tvAction:    TextView? = null
     private var tvActionSub: TextView? = null
     private var spinner:     ArcSpinner? = null
-    private var signalBars:  SignalBars? = null
     private var cdGroup:     View?     = null
     private var cdFill:      View?     = null
     private var cdLabel      = ""
@@ -258,10 +262,10 @@ object OverlayFarmMonitor {
             fullPanel = null; miniPanel = null; chipPanel = null
             pillTexts.clear(); pillDots.clear(); timeTexts.clear(); btnPauseResume = null
             tvUser = null; tvModeChip = null; tvReward = null; tvProgress = null; tvPercent = null
-            progressRing = null; progressFillFull = null; progressFillMini = null
+            progressFillFull = null; progressFillMini = null
             tvMiniDone = null; tvMiniLikes = null; tvMiniWarn = null
             tvLikes = null; tvAdded = null; tvWarn = null; warnCardBg = null
-            tvAction = null; tvActionSub = null; spinner = null; signalBars = null; cdGroup = null; cdFill = null
+            tvAction = null; tvActionSub = null; spinner = null; cdGroup = null; cdFill = null
             logList = null; tvLogHint = null; logBox = null; logLarge = false; logData.clear()
             mode = Mode.FULL; isPaused = false; isTaskMode = false
             lastAccountText = ""; lastActionText = ""; lastShownAction = ""; curAction = null; curActionDots = false
@@ -571,29 +575,19 @@ object OverlayFarmMonitor {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        // chấm mốc thời gian (đường nối dọc do khung nhật ký vẽ chung)
+        // chấm mốc (màu = loại dòng: xanh INFO, vàng WARN, đỏ ERROR…); đường nối dọc do khung nhật ký vẽ chung
         val dot = View(ctx).apply {
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(row.entry.badgeColor) }
         }
-        line.addView(dot, LinearLayout.LayoutParams(d(8), d(8)).apply { setMargins(d(2), 0, d(8), 0) })
+        line.addView(dot, LinearLayout.LayoutParams(d(6), d(6)).apply { setMargins(d(1), 0, d(6), 0) })
         val tvTime = TextView(ctx).apply {
-            text = row.time; textSize = 10f; setTextColor(C_DIM)
+            text = row.time; setTextSize(TypedValue.COMPLEX_UNIT_DIP, 9f); setTextColor(C_DIM)
             typeface = Typeface.MONOSPACE; includeFontPadding = false
         }
-        line.addView(tvTime, LinearLayout.LayoutParams(d(54), LinearLayout.LayoutParams.WRAP_CONTENT))
-        val badge = TextView(ctx).apply {
-            text = row.entry.badge; textSize = 8.5f; setTextColor(row.entry.badgeColor)
-            typeface = Typeface.DEFAULT_BOLD; includeFontPadding = false; gravity = Gravity.CENTER
-            setPadding(d(6), d(2), d(6), d(2))
-            background = GradientDrawable().apply {
-                setColor(row.entry.badgeColor and 0x00FFFFFF or 0x2E000000); cornerRadius = d(6).toFloat()
-            }
-        }
-        line.addView(badge, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            .apply { setMargins(0, 0, d(7), 0) })
+        line.addView(tvTime, LinearLayout.LayoutParams(d(46), LinearLayout.LayoutParams.WRAP_CONTENT))
         val tvMsg = TextView(ctx).apply {
             text = if (row.count > 1) "${row.line}  ×${row.count}" else row.line
-            textSize = 10.5f; setTextColor(row.entry.color)
+            setTextSize(TypedValue.COMPLEX_UNIT_DIP, 10f); setTextColor(row.entry.color)
             maxLines = 1; ellipsize = TextUtils.TruncateAt.END; includeFontPadding = false
         }
         line.addView(tvMsg, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
@@ -624,9 +618,9 @@ object OverlayFarmMonitor {
         logLarge = !logLarge
         val box = logBox ?: return
         val lp = box.layoutParams
-        lp.height = dp(box.context, (if (logLarge) LOG_ROWS_LARGE else LOG_ROWS_SMALL) * LOG_ROW_DP + 4)
+        lp.height = dp(box.context, (if (logLarge) logRowsLarge else LOG_ROWS_SMALL) * LOG_ROW_DP + 2)
         box.layoutParams = lp
-        tvLogHint?.text = if (logLarge) "Thu gọn  ‹" else "Xem tất cả  ›"
+        tvLogHint?.text = if (logLarge) "Thu gọn ‹" else "Mở rộng ›"
         scrollLogToEnd()
     }
 
@@ -681,8 +675,7 @@ object OverlayFarmMonitor {
     private fun renderProgress() {
         tvProgress?.text = "$doneCount / $totalCount"
         tvPercent?.text  = "${(progressFraction * 100f).toInt()}%"
-        tvMiniDone?.text = "Hoàn thành: $doneCount/$totalCount"
-        progressRing?.setProgress(progressFraction)
+        tvMiniDone?.text = "$doneCount/$totalCount xong"
         progressFillFull?.animate()?.scaleX(progressFraction)?.setDuration(250L)?.start()
         progressFillMini?.animate()?.scaleX(progressFraction)?.setDuration(250L)?.start()
     }
@@ -818,47 +811,7 @@ object OverlayFarmMonitor {
         fun stop() { anim?.cancel(); anim = null }
     }
 
-    /** Vòng tiến trình có dấu ✓ ở giữa. */
-    private class ProgressRing(context: Context, private val arc: Int, private val track: Int, private val check: Drawable?) : View(context) {
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
-        private val oval = RectF()
-        private var fraction = 0f
 
-        fun setProgress(f: Float) { fraction = f.coerceIn(0f, 1f); invalidate() }
-
-        override fun onDraw(canvas: Canvas) {
-            val w = width.toFloat(); val h = height.toFloat()
-            val sw = minOf(w, h) * 0.10f
-            paint.strokeWidth = sw
-            oval.set(sw, sw, w - sw, h - sw)
-            paint.color = track; canvas.drawArc(oval, 0f, 360f, false, paint)
-            if (fraction > 0f) { paint.color = arc; canvas.drawArc(oval, -90f, 360f * fraction, false, paint) }
-            check?.let {
-                val pad = (minOf(w, h) * 0.30f).toInt()
-                it.setBounds(pad, pad, width - pad, height - pad)
-                it.draw(canvas)
-            }
-        }
-    }
-
-    /** Bốn cột sóng bên phải ô trạng thái (tĩnh — không tốn pin). */
-    private class SignalBars(context: Context, private var color: Int) : View(context) {
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        private val rect = RectF()
-        fun setBarColor(c: Int) { color = c; invalidate() }
-        override fun onDraw(canvas: Canvas) {
-            val w = width.toFloat(); val h = height.toFloat()
-            val gap = w * 0.12f
-            val bw = (w - gap * 3) / 4f
-            val heights = floatArrayOf(0.35f, 0.55f, 0.78f, 1f)
-            paint.color = color
-            for (i in 0 until 4) {
-                val left = i * (bw + gap)
-                rect.set(left, h * (1f - heights[i]), left + bw, h)
-                canvas.drawRoundRect(rect, bw * 0.25f, bw * 0.25f, paint)
-            }
-        }
-    }
 
     // ─────────────────────────────────────────────────────────
     //  View builder
@@ -891,7 +844,7 @@ object OverlayFarmMonitor {
 
     private fun text(ctx: Context, t: String, sizeSp: Float, color: Int, bold: Boolean = false, mono: Boolean = false): TextView =
         TextView(ctx).apply {
-            text = t; textSize = sizeSp; setTextColor(color)
+            text = t; setTextSize(TypedValue.COMPLEX_UNIT_DIP, sizeSp); setTextColor(color)
             typeface = when {
                 bold -> Typeface.DEFAULT_BOLD
                 mono -> Typeface.MONOSPACE
@@ -906,8 +859,8 @@ object OverlayFarmMonitor {
             setImageDrawable(tinted(ctx, res, C_MUTED))
             scaleType = ImageView.ScaleType.CENTER_INSIDE
             setPadding(dp(ctx, 5), dp(ctx, 5), dp(ctx, 5), dp(ctx, 5))
-            background = roundBg(C_CARD, 16, ctx, C_BORDER)
-            layoutParams = LinearLayout.LayoutParams(dp(ctx, 26), dp(ctx, 26)).apply { setMargins(dp(ctx, 4), 0, 0, 0) }
+            background = roundBg(C_CARD, 14, ctx, C_BORDER)
+            layoutParams = LinearLayout.LayoutParams(dp(ctx, 24), dp(ctx, 24)).apply { setMargins(dp(ctx, 4), 0, 0, 0) }
             pressEffect(this)
             setOnClickListener { onClick() }
         }
@@ -945,13 +898,13 @@ object OverlayFarmMonitor {
 
     /** Viên thuốc trạng thái "● Đang chạy" — chạm để Tạm dừng / Tiếp tục. */
     private fun statusPill(ctx: Context, withChevron: Boolean): View {
-        val tv = text(ctx, "Đang chạy", 11f, C_GREEN, bold = true)
+        val tv = text(ctx, "Đang chạy", 10.5f, C_GREEN, bold = true)
         pillTexts.add(tv)
         return LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(ctx, 9), dp(ctx, 5), dp(ctx, 9), dp(ctx, 5))
-            background = roundBg(C_GREEN and 0x00FFFFFF or 0x1F000000, 14, ctx, C_GREEN and 0x00FFFFFF or 0x55000000)
+            setPadding(dp(ctx, 7), dp(ctx, 3), dp(ctx, 7), dp(ctx, 3))
+            background = roundBg(C_GREEN and 0x00FFFFFF or 0x1F000000, 12, ctx, C_GREEN and 0x00FFFFFF or 0x55000000)
             addView(statusDot(ctx))
             addView(tv)
             if (withChevron) addView(icon(ctx, R.drawable.ic_ov_chev_down, C_GREEN, 12).apply {
@@ -980,172 +933,149 @@ object OverlayFarmMonitor {
         pillTexts.clear(); pillDots.clear(); timeTexts.clear()
 
         val screenW = context.resources.displayMetrics.widthPixels
-        panelWidthPx = minOf(d(PANEL_WIDTH_DP), (screenW * 0.94f).toInt())
-        miniWidthPx  = minOf(d(MINI_WIDTH_DP),  (screenW * 0.90f).toInt())
+        panelWidthPx = minOf(d(PANEL_WIDTH_DP), (screenW * 0.80f).toInt())
+        miniWidthPx  = minOf(d(MINI_WIDTH_DP),  (screenW * 0.72f).toInt())
+        // Mở rộng nhật ký không được đẩy popup vượt MAX_HEIGHT_FRACTION chiều cao màn hình.
+        val screenHdp = context.resources.displayMetrics.heightPixels / context.resources.displayMetrics.density
+        logRowsLarge = (((screenHdp * MAX_HEIGHT_FRACTION) - FIXED_PANEL_DP) / LOG_ROW_DP).toInt()
+            .coerceIn(LOG_ROWS_SMALL, LOG_ROWS_LARGE_MAX)
 
         val wrapper = FrameLayout(context)
 
         // ═════ FULL ═════════════════════════════════════════════════════════
+        // Bố cục gọn (≈ 256dp): đầu · tài khoản + tiến trình · số liệu · việc đang làm · nhật ký · nút.
         val full = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(d(12), d(10), d(12), d(12))
-            background = roundBg(C_BG, 20, context, C_BORDER)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = d(10).toFloat()
+            setPadding(d(10), d(8), d(10), d(8))
+            background = roundBg(C_BG, 16, context, C_BORDER)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = d(8).toFloat()
         }
         fullPanel = full
         wrapper.addView(full, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
 
-        // Header: [logo] AT PRO | ● Đang chạy ⌄ ........ 00:00 [─] [✕]   (nền tảng hiện ở avatar bên dưới)
+        // Đầu: [logo] ● Đang chạy ⌄ ........ 00:00 [─] [✕]
         val header = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        header.addView(atLogo(context, 28).apply { (layoutParams as LinearLayout.LayoutParams).setMargins(0, 0, d(7), 0) })
-        header.addView(text(context, "AT PRO", 13f, C_TEXT, bold = true).apply { letterSpacing = 0.04f })
-        header.addView(vDivider(context))
+        header.addView(atLogo(context, 22).apply { (layoutParams as LinearLayout.LayoutParams).setMargins(0, 0, d(6), 0) })
         header.addView(statusPill(context, withChevron = true))
         header.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
-        val tFull = text(context, "00:00", 12f, C_TEXT, bold = true, mono = true); timeTexts.add(tFull)
+        val tFull = text(context, "00:00", 11.5f, C_TEXT, bold = true, mono = true); timeTexts.add(tFull)
         header.addView(tFull, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            .apply { setMargins(d(6), 0, d(4), 0) })
+            .apply { setMargins(d(6), 0, d(2), 0) })
         header.addView(roundIconButton(context, R.drawable.ic_ov_min) { setMode(Mode.MINI) })
         header.addView(roundIconButton(context, R.drawable.ic_ov_close) { setMode(Mode.CHIP) })
         full.addView(header)
 
-        // Thẻ tài khoản + tiến trình
-        val profile = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding(d(12), d(10), d(12), d(10))
-            background = roundBg(C_CARD, 16, context, C_BORDER)
-        }
+        // Tài khoản (trái) + tiến trình n / N (phải), thanh tiến trình mảnh bên dưới
+        val profile = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val avatar = ImageView(context).apply {
             setImageResource(platformLogo)
             contentDescription = platformName
             scaleType = ImageView.ScaleType.CENTER_CROP
-            setPadding(d(10), d(10), d(10), d(10))
+            setPadding(d(6), d(6), d(6), d(6))
             clipToOutline = true
             outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: android.graphics.Outline) { outline.setOval(0, 0, view.width, view.height) }
             }
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.BLACK); setStroke(d(2), C_ACCENT) }
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.BLACK); setStroke(d(1) + 1, C_ACCENT) }
         }
-        profile.addView(avatar, LinearLayout.LayoutParams(d(48), d(48)).apply { setMargins(0, 0, d(10), 0) })
+        profile.addView(avatar, LinearLayout.LayoutParams(d(28), d(28)).apply { setMargins(0, 0, d(8), 0) })
         val who = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        tvUser = text(context, "@—", 15f, C_TEXT, bold = true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        tvUser = text(context, "@—", 12.5f, C_TEXT, bold = true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
         who.addView(tvUser)
-        tvModeChip = text(context, "", 9.5f, C_BLUE, bold = true).apply {
-            setPadding(d(8), d(3), d(8), d(3))
-            background = roundBg(C_ACCENT and 0x00FFFFFF or 0x26000000, 8, context, C_ACCENT and 0x00FFFFFF or 0x59000000)
-            maxLines = 1; ellipsize = TextUtils.TruncateAt.END
-        }
-        who.addView(tvModeChip, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            .apply { setMargins(0, d(5), 0, 0) })
-        tvReward = text(context, "", 10f, C_AMBER, bold = true)
-        who.addView(tvReward, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            .apply { setMargins(0, d(3), 0, 0) })
-        profile.addView(who, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        profile.addView(View(context).apply { setBackgroundColor(C_BORDER) },
-            LinearLayout.LayoutParams(d(1), d(46)).apply { setMargins(d(8), 0, d(10), 0) })
-        val prog = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        val progTop = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        progressRing = ProgressRing(context, C_ACCENT, C_BORDER, tinted(context, R.drawable.ic_ov_check, C_ACCENT))
-        progTop.addView(progressRing, LinearLayout.LayoutParams(d(32), d(32)).apply { setMargins(0, 0, d(7), 0) })
-        val progTexts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        tvProgress = text(context, "0 / 0", 16f, C_TEXT, bold = true).apply { maxLines = 1 }
-        progTexts.addView(tvProgress)
-        progTexts.addView(text(context, "Tiến trình", 10.5f, C_MUTED))
-        progTop.addView(progTexts)
-        prog.addView(progTop)
-        val progBottom = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        progBottom.addView(progressBar(context, 5) { progressFillFull = it }, LinearLayout.LayoutParams(0, d(5), 1f))
-        tvPercent = text(context, "0%", 10.5f, C_TEXT, bold = true)
-        progBottom.addView(tvPercent, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        val whoSub = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        tvModeChip = text(context, "", 9f, C_BLUE, bold = true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        whoSub.addView(tvModeChip)
+        tvReward = text(context, "", 9f, C_AMBER, bold = true)
+        whoSub.addView(tvReward, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             .apply { setMargins(d(6), 0, 0, 0) })
-        prog.addView(progBottom, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            .apply { setMargins(0, d(6), 0, 0) })
-        profile.addView(prog, LinearLayout.LayoutParams(d(112), LinearLayout.LayoutParams.WRAP_CONTENT))
+        who.addView(whoSub, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { setMargins(0, d(2), 0, 0) })
+        profile.addView(who, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        val prog = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.END }
+        tvProgress = text(context, "0 / 0", 13f, C_TEXT, bold = true).apply { maxLines = 1 }
+        prog.addView(tvProgress)
+        tvPercent = text(context, "0%", 9f, C_MUTED)
+        prog.addView(tvPercent, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { setMargins(0, d(1), 0, 0) })
+        profile.addView(prog, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         full.addView(profile, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            .apply { setMargins(0, d(10), 0, 0) })
+            .apply { setMargins(0, d(6), 0, 0) })
+        full.addView(progressBar(context, 3) { progressFillFull = it },
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, d(3)).apply { setMargins(0, d(5), 0, 0) })
 
-        // 3 ô số
-        fun statCard(res: Int, color: Int, label: String, setValue: (TextView) -> Unit, setBg: ((GradientDrawable) -> Unit)? = null): View {
-            val card = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-                setPadding(d(8), d(8), d(8), d(8))
+        // Số liệu: ♥ thích · + follow · ⚠ cảnh báo — một hàng, chỉ biểu tượng + số
+        fun statCell(res: Int, color: Int, desc: String, setValue: (TextView) -> Unit, setBg: ((GradientDrawable) -> Unit)? = null): View {
+            val cell = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
+                setPadding(d(6), d(4), d(6), d(4))
+                contentDescription = desc
             }
-            val bg = roundBg(color and 0x00FFFFFF or 0x14000000, 14, context, color and 0x00FFFFFF or 0x59000000)
-            card.background = bg
+            val bg = roundBg(color and 0x00FFFFFF or 0x14000000, 10, context, color and 0x00FFFFFF or 0x59000000)
+            cell.background = bg
             setBg?.invoke(bg)
-            val badge = FrameLayout(context).apply {
-                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color and 0x00FFFFFF or 0x33000000) }
-                addView(icon(context, res, color, 15), FrameLayout.LayoutParams(d(15), d(15)).apply { gravity = Gravity.CENTER })
-            }
-            card.addView(badge, LinearLayout.LayoutParams(d(28), d(28)).apply { setMargins(0, 0, d(7), 0) })
-            val col = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-            val v = text(context, "0", 16f, C_TEXT, bold = true); setValue(v)
-            col.addView(v)
-            col.addView(text(context, label, 10f, C_MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
-            card.addView(col, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            return card
+            cell.addView(icon(context, res, color, 12), LinearLayout.LayoutParams(d(12), d(12)).apply { setMargins(0, 0, d(5), 0) })
+            val v = text(context, "0", 12f, C_TEXT, bold = true); setValue(v)
+            cell.addView(v)
+            return cell
         }
         val stats = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-        stats.addView(statCard(R.drawable.ic_ov_heart, C_PINK, "Lượt thích", { tvLikes = it }),
+        stats.addView(statCell(R.drawable.ic_ov_heart, C_PINK, "Lượt thích", { tvLikes = it }),
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        stats.addView(statCard(R.drawable.ic_ov_plus, C_ACCENT, "Đã thêm", { tvAdded = it }),
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(d(6), 0, d(6), 0) })
-        stats.addView(statCard(R.drawable.ic_ov_warn, C_AMBER, "Cảnh báo", { tvWarn = it }, { warnCardBg = it }),
+        stats.addView(statCell(R.drawable.ic_ov_plus, C_ACCENT, "Đã follow", { tvAdded = it }),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(d(5), 0, d(5), 0) })
+        stats.addView(statCell(R.drawable.ic_ov_warn, C_AMBER, "Cảnh báo", { tvWarn = it }, { warnCardBg = it }),
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         full.addView(stats, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            .apply { setMargins(0, d(8), 0, 0) })
+            .apply { setMargins(0, d(6), 0, 0) })
 
-        // Trạng thái đang làm (+ thanh đếm ngược ở đáy)
-        val statusCard = FrameLayout(context).apply { background = roundBg(C_ACCENT and 0x00FFFFFF or 0x1A000000, 16, context, C_ACCENT and 0x00FFFFFF or 0x66000000) }
+        // Việc đang làm (+ thanh đếm ngược ở đáy)
+        val statusCard = FrameLayout(context).apply { background = roundBg(C_ACCENT and 0x00FFFFFF or 0x1A000000, 12, context, C_ACCENT and 0x00FFFFFF or 0x66000000) }
         val statusRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding(d(12), d(10), d(12), d(12))
+            setPadding(d(10), d(6), d(10), d(9))
         }
         spinner = ArcSpinner(context, C_ACCENT, C_BORDER)
-        statusRow.addView(spinner, LinearLayout.LayoutParams(d(30), d(30)).apply { setMargins(0, 0, d(10), 0) })
+        statusRow.addView(spinner, LinearLayout.LayoutParams(d(18), d(18)).apply { setMargins(0, 0, d(8), 0) })
         val statusTexts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        tvAction = text(context, "Đang khởi động…", 13f, C_TEXT, bold = true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-        tvActionSub = text(context, "", 10.5f, C_MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        tvAction = text(context, "Đang khởi động…", 12f, C_TEXT, bold = true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        tvActionSub = text(context, "", 9.5f, C_MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
         statusTexts.addView(tvAction)
         statusTexts.addView(tvActionSub, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            .apply { setMargins(0, d(3), 0, 0) })
+            .apply { setMargins(0, d(1), 0, 0) })
         statusRow.addView(statusTexts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        signalBars = SignalBars(context, C_ACCENT)
-        statusRow.addView(signalBars, LinearLayout.LayoutParams(d(26), d(22)).apply { setMargins(d(8), 0, 0, 0) })
         statusCard.addView(statusRow, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
         val cdTrack = FrameLayout(context).apply { visibility = View.INVISIBLE; background = roundBg(C_BORDER and 0x00FFFFFF or 0x99000000.toInt(), 2, context) }
         val cdBar = View(context).apply { background = roundBg(C_SKY, 2, context); pivotX = 0f }
         cdFill = cdBar
-        cdTrack.addView(cdBar, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, d(3)))
+        cdTrack.addView(cdBar, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, d(2)))
         cdGroup = cdTrack
-        statusCard.addView(cdTrack, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, d(3))
-            .apply { gravity = Gravity.BOTTOM; setMargins(d(12), 0, d(12), d(5)) })
+        statusCard.addView(cdTrack, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, d(2))
+            .apply { gravity = Gravity.BOTTOM; setMargins(d(10), 0, d(10), d(4)) })
         full.addView(statusCard, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            .apply { setMargins(0, d(8), 0, 0) })
+            .apply { setMargins(0, d(6), 0, 0) })
 
-        // Nhật ký hoạt động
+        // Nhật ký: 2 dòng, "Mở rộng" tới tối đa 40% chiều cao màn hình
         val logCard = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(d(12), d(9), d(12), d(8))
-            background = roundBg(C_CARD2, 16, context, C_BORDER)
+            setPadding(d(10), d(5), d(10), d(5))
+            background = roundBg(C_CARD2, 12, context, C_BORDER)
         }
         val logHeader = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        logHeader.addView(icon(context, R.drawable.ic_ov_clock, C_ACCENT, 16), LinearLayout.LayoutParams(d(16), d(16)).apply { setMargins(0, 0, d(7), 0) })
-        logHeader.addView(text(context, "Nhật ký hoạt động", 12.5f, C_TEXT, bold = true), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        tvLogHint = text(context, "Xem tất cả  ›", 10.5f, C_BLUE)
+        logHeader.addView(text(context, "Nhật ký", 10.5f, C_TEXT, bold = true), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        tvLogHint = text(context, "Mở rộng ›", 10f, C_BLUE)
+        // Màn hình thấp: không còn chỗ để mở rộng → ẩn nút
+        if (logRowsLarge <= LOG_ROWS_SMALL) tvLogHint?.visibility = View.GONE
         logHeader.addView(tvLogHint)
         logHeader.setOnClickListener { toggleLogSize() }
-        logCard.addView(logHeader)
-        logCard.addView(View(context).apply { setBackgroundColor(C_BORDER) },
-            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, d(1)).apply { setMargins(0, d(7), 0, d(3)) })
+        logCard.addView(logHeader, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, d(16)))
 
         val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         logList = list
         // đường nối dọc giữa các chấm mốc (vẽ một lần cho cả danh sách; chấm nằm ở cột trái mỗi dòng)
         val line = View(context).apply { setBackgroundColor(C_ACCENT and 0x00FFFFFF or 0x66000000) }
         val content = FrameLayout(context).apply {
-            addView(line, FrameLayout.LayoutParams(d(2), FrameLayout.LayoutParams.MATCH_PARENT)
-                .apply { setMargins(d(5), d(LOG_ROW_DP / 2), 0, d(LOG_ROW_DP / 2)) })
+            addView(line, FrameLayout.LayoutParams(d(1) + 1, FrameLayout.LayoutParams.MATCH_PARENT)
+                .apply { setMargins(d(3), d(LOG_ROW_DP / 2), 0, d(LOG_ROW_DP / 2)) })
             addView(list, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
         }
         val sv = android.widget.ScrollView(context).apply {
@@ -1155,54 +1085,53 @@ object OverlayFarmMonitor {
             setOnClickListener { toggleLogSize() }
         }
         logBox = sv
-        logCard.addView(sv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, d(LOG_ROWS_SMALL * LOG_ROW_DP + 4)))
+        logCard.addView(sv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, d(LOG_ROWS_SMALL * LOG_ROW_DP + 2))
+            .apply { setMargins(0, d(3), 0, 0) })
         full.addView(logCard, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            .apply { setMargins(0, d(8), 0, 0) })
+            .apply { setMargins(0, d(6), 0, 0) })
 
-        // Nút điều khiển: Tạm dừng / Tiếp tục (nút chính, nền chuyển màu) · Dừng
+        // Nút: Tạm dừng / Tiếp tục (nút chính) · Dừng
         val btnRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
         val primary = TextView(context).apply {
-            textSize = 14f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD
+            setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12f); setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER; includeFontPadding = false
-            setPadding(d(10), d(12), d(10), d(12))
-            compoundDrawablePadding = d(7)
+            setPadding(d(8), d(8), d(8), d(8))
+            compoundDrawablePadding = d(5)
             background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xFF1E90FF.toInt(), C_ACCENT2))
-                .apply { cornerRadius = d(24).toFloat() }
+                .apply { cornerRadius = d(18).toFloat() }
             pressEffect(this)
             setOnClickListener { onPauseResumeClick() }
         }
         btnPauseResume = primary
-        btnRow.addView(primary, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.25f).apply { setMargins(0, 0, d(8), 0) })
+        btnRow.addView(primary, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.25f).apply { setMargins(0, 0, d(6), 0) })
         val stop = TextView(context).apply {
-            text = "Dừng"; textSize = 14f; setTextColor(C_RED); typeface = Typeface.DEFAULT_BOLD
+            text = "Dừng"; setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12f); setTextColor(C_RED); typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER; includeFontPadding = false
-            setPadding(d(10), d(12), d(10), d(12))
-            compoundDrawablePadding = d(7)
+            setPadding(d(8), d(8), d(8), d(8))
+            compoundDrawablePadding = d(5)
             tinted(context, R.drawable.ic_ov_stop, C_RED)?.let { dr ->
-                dr.setBounds(0, 0, d(14), d(14)); setCompoundDrawables(dr, null, null, null)
+                dr.setBounds(0, 0, d(12), d(12)); setCompoundDrawables(dr, null, null, null)
             }
-            background = roundBg(C_CARD, 24, context, C_BORDER)
+            background = roundBg(C_CARD, 18, context, C_BORDER)
             pressEffect(this)
             setOnClickListener { onStopClick() }
         }
         btnRow.addView(stop, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         full.addView(btnRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            .apply { setMargins(0, d(10), 0, 0) })
+            .apply { setMargins(0, d(8), 0, 0) })
 
         // ═════ MINI ═════════════════════════════════════════════════════════
         val mini = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(d(12), d(10), d(12), d(10))
-            background = roundBg(C_BG, 18, context, C_BORDER)
+            setPadding(d(10), d(8), d(10), d(8))
+            background = roundBg(C_BG, 16, context, C_BORDER)
             visibility = View.GONE
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) elevation = d(8).toFloat()
         }
         miniPanel = mini
         wrapper.addView(mini, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
         val miniTop = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        miniTop.addView(atLogo(context, 26).apply { (layoutParams as LinearLayout.LayoutParams).setMargins(0, 0, d(7), 0) })
-        miniTop.addView(text(context, "AT PRO", 13f, C_TEXT, bold = true).apply { letterSpacing = 0.04f })
-        miniTop.addView(View(context), LinearLayout.LayoutParams(d(8), 1))
+        miniTop.addView(atLogo(context, 22).apply { (layoutParams as LinearLayout.LayoutParams).setMargins(0, 0, d(6), 0) })
         miniTop.addView(statusPill(context, withChevron = false))
         miniTop.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
         val tMini = text(context, "00:00", 12f, C_TEXT, bold = true, mono = true); timeTexts.add(tMini)
@@ -1210,10 +1139,10 @@ object OverlayFarmMonitor {
             .apply { setMargins(d(6), 0, d(4), 0) })
         miniTop.addView(roundIconButton(context, R.drawable.ic_ov_chev_up) { setMode(Mode.FULL) })
         mini.addView(miniTop)
-        mini.addView(progressBar(context, 5) { progressFillMini = it },
-            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, d(5)).apply { setMargins(0, d(9), 0, 0) })
+        mini.addView(progressBar(context, 3) { progressFillMini = it },
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, d(3)).apply { setMargins(0, d(7), 0, 0) })
         val miniBottom = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        tvMiniDone = text(context, "Hoàn thành: 0/0", 11.5f, C_TEXT)
+        tvMiniDone = text(context, "0/0", 11f, C_TEXT)
         miniBottom.addView(tvMiniDone, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         miniBottom.addView(vDivider(context, 14))
         miniBottom.addView(icon(context, R.drawable.ic_ov_heart, C_PINK, 14))
@@ -1223,7 +1152,7 @@ object OverlayFarmMonitor {
         miniBottom.addView(icon(context, R.drawable.ic_ov_warn, C_AMBER, 14))
         tvMiniWarn = text(context, "0", 12f, C_TEXT, bold = true)
         miniBottom.addView(tvMiniWarn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(d(5), 0, 0, 0) })
-        mini.addView(miniBottom, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(0, d(9), 0, 0) })
+        mini.addView(miniBottom, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(0, d(7), 0, 0) })
 
         // ═════ CHIP ═════════════════════════════════════════════════════════
         val chip = LinearLayout(context).apply {
@@ -1235,7 +1164,7 @@ object OverlayFarmMonitor {
         }
         chipPanel = chip
         wrapper.addView(chip, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT))
-        chip.addView(atLogo(context, 30).apply { (layoutParams as LinearLayout.LayoutParams).setMargins(0, 0, d(8), 0) })
+        chip.addView(atLogo(context, 26).apply { (layoutParams as LinearLayout.LayoutParams).setMargins(0, 0, d(6), 0) })
         val chipDot = statusDot(context)
         chip.addView(chipDot)
         val chipTv = text(context, "Đang chạy", 12f, C_TEXT, bold = true); pillTexts.add(chipTv)
@@ -1361,12 +1290,11 @@ object OverlayFarmMonitor {
             pillDots[i + 1].setColor(color and 0x00FFFFFF or 0x33000000)
             i += 2
         }
-        signalBars?.setBarColor(if (isPaused) C_DIM else C_ACCENT)
         btnPauseResume?.let { btn ->
             val ctx = btn.context
             btn.text = if (isPaused) "Tiếp tục" else "Tạm dừng"
             tinted(ctx, if (isPaused) R.drawable.ic_ov_play else R.drawable.ic_ov_pause, Color.WHITE)?.let { dr ->
-                val sz = dp(ctx, 16); dr.setBounds(0, 0, sz, sz); btn.setCompoundDrawables(dr, null, null, null)
+                val sz = dp(ctx, 13); dr.setBounds(0, 0, sz, sz); btn.setCompoundDrawables(dr, null, null, null)
             }
         }
         if (!isPaused && !cdActive) tvActionSub?.text = ""

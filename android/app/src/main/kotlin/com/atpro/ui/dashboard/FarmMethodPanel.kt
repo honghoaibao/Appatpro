@@ -73,8 +73,8 @@ internal fun FarmMethodSelector(
         )
         AtSegmented(options = listOf("Bằng app", "Bằng cookie · demo"), selectedIndex = selected, onSelect = onSelect)
         Text(
-            if (selected == 0) "Điều khiển ứng dụng ${platform.displayName} trên máy qua dịch vụ Trợ năng."
-            else "Dùng cookie đăng nhập, không cần mở ứng dụng. Đang là bản demo — chưa chạy thật.",
+            if (selected == 0) "Điều khiển ứng dụng ${platform.displayName} trên máy qua Trợ năng."
+            else "Dùng cookie đăng nhập, không mở ứng dụng. Bản demo, chưa chạy thật.",
             color = AtColors.TextMuted, fontSize = 12.sp,
             modifier = Modifier.padding(top = 8.dp),
         )
@@ -102,7 +102,7 @@ internal fun CookieDemoPanel(platform: CookiePlatform, modifier: Modifier = Modi
             AtBadge("DEMO", AtColors.Warning)
             Spacer(Modifier.size(10.dp))
             Text(
-                "Chưa chạy thật. Cookie chỉ nằm tạm trên màn hình này, không được lưu và không gửi đi đâu.",
+                "Chưa chạy thật. Cookie chỉ giữ tạm trên màn hình này, không lưu, không gửi đi.",
                 color = AtColors.TextSec, fontSize = 12.sp,
             )
         }
@@ -127,7 +127,7 @@ internal fun CookieDemoPanel(platform: CookiePlatform, modifier: Modifier = Modi
                 val check = CookieDemo.parse(input, platform)
                 when {
                     check == null ->
-                        message = "Không đọc được cookie — dán dạng tên=giá trị; tên=giá trị"
+                        message = "Không đọc được cookie. Dán dạng tên=giá trị; tên=giá trị"
                     items.size >= CookieDemo.MAX_ITEMS ->
                         message = "Tối đa ${CookieDemo.MAX_ITEMS} cookie trong danh sách"
                     check.accountId != null && items.any { it.accountId == check.accountId } ->
@@ -142,7 +142,7 @@ internal fun CookieDemoPanel(platform: CookiePlatform, modifier: Modifier = Modi
         )
 
         if (items.isEmpty()) {
-            Text("Chưa có cookie nào. Dán cookie ở trên để thêm.", color = AtColors.TextMuted, fontSize = 12.sp)
+            Text("Chưa có cookie.", color = AtColors.TextMuted, fontSize = 12.sp)
         } else {
             Text(
                 "${items.size} cookie · ${items.count { it.isComplete }} đủ khoá",

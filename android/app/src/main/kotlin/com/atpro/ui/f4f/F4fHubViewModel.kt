@@ -192,7 +192,7 @@ class F4fHubViewModel(
                         withdrawBusy = false,
                         // Lỗi mạng khi gửi: server CÓ THỂ đã nhận → nhắc kiểm tra lịch sử trước khi gửi lại.
                         result = F4fActionResult(
-                            if (r.message.startsWith("Lỗi mạng")) "${r.message}. Hãy kiểm tra Lịch sử rút tiền trước khi gửi lại." else r.message,
+                            if (r.message.startsWith("Lỗi mạng")) "${r.message}. Xem Lịch sử rút tiền trước khi gửi lại." else r.message,
                             false,
                         ),
                     )

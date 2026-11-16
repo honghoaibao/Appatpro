@@ -14,11 +14,14 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.atpro.R
 import com.atpro.data.LocalRepository
+import com.atpro.sync.SyncNotifyPolicy
+import com.atpro.sync.SyncOutcome
+import com.atpro.sync.SyncStatusText
 import com.atpro.ui.dashboard.DashboardActivity
 import java.util.Calendar
 
 /**
- * AtProNotificationManager — v1.12.0 (nâng cấp từ v1.1.2).
+ * AtProNotificationManager — v1.12.0 (nâng cấp từ v1.1.2); v1.12.6 thêm nhóm Đồng bộ.
  *
  * Thông báo hệ thống Android thuần — không còn Telegram / Discord.
  *
@@ -37,8 +40,9 @@ import java.util.Calendar
  *   atpro_done   (DEFAULT) — phiên nuôi, tổng kết nhiệm vụ
  *   atpro_task   (LOW)     — từng tài khoản làm nhiệm vụ
  *   atpro_farm   (LOW)     — từng tài khoản nuôi xong
+ *   atpro_sync   (DEFAULT) — đồng bộ Supabase (v1.12.6): sự cố cần xử lý, kết quả "Đồng bộ ngay"
  *
- * Config: khoá `enable_system_notifications`, `notif_alerts`, `notif_sessions`, `notif_accounts`, `notif_tasks`,
+ * Config: khoá `enable_system_notifications`, `notif_alerts`, `notif_sessions`, `notif_accounts`, `notif_tasks`, `notif_sync`,
  *         `notif_quiet_enabled`, `notif_quiet_start`, `notif_quiet_end`.
  */
 object AtProNotificationManager {
@@ -49,6 +53,7 @@ object AtProNotificationManager {
     const val CH_DONE  = "atpro_done"
     const val CH_TASK  = "atpro_task"
     const val CH_FARM  = "atpro_farm"
+    const val CH_SYNC  = "atpro_sync"
 
     private const val GROUP_ACCOUNTS = "atpro_group_accounts"
     private const val SUMMARY_ID     = 2999
@@ -63,6 +68,7 @@ object AtProNotificationManager {
         set(v) { prefs = prefs.copy(enabled = v) }
 
     private val alertThrottle = NotificationThrottle(ALERT_COOLDOWN_MS)
+    private val syncThrottle  = NotificationThrottle(SyncNotifyPolicy.PROBLEM_COOLDOWN_MS)
 
     // ── Public API — nuôi TikTok ──────────────────────────────
 
@@ -104,10 +110,27 @@ object AtProNotificationManager {
     fun notifyTaskAborted(reason: String) =
         post(NotifCategory.ALERT, "task_abort:${reason.take(40)}", NotificationText.taskAborted(reason), id = 2006, openTab = "logs")
 
+    // ── Public API — đồng bộ Supabase (v1.12.6) ───────────────
+
+    /**
+     * Báo kết quả đồng bộ. Một vị trí duy nhất (id 2010) nên kết quả mới thay kết quả cũ.
+     * Sự cố chạy nền chỉ nhắc lại sau [SyncNotifyPolicy.PROBLEM_COOLDOWN_MS]; người dùng bấm "Đồng bộ ngay" thì luôn có phản hồi.
+     * Kết quả thành công: im lặng và tự gỡ sau 20 giây.
+     */
+    fun notifySync(outcome: SyncOutcome, manual: Boolean) {
+        val now = System.currentTimeMillis()
+        if (!manual && outcome.needsAttention && !syncThrottle.allow("sync:${outcome.name}", now)) return
+        post(
+            NotifCategory.SYNC, "sync:${outcome.name}", SyncStatusText.notification(outcome, manual),
+            id = 2010, openTab = "settings",
+            silent = outcome.isSuccess, timeoutMs = if (outcome.isSuccess) 20_000L else 0L,
+        )
+    }
+
     /** Thông báo thử — bỏ qua công tắc nhóm/giờ yên tĩnh; trả false nếu hệ thống đang chặn (quyền / kênh / thông báo bị tắt). */
     fun sendTest(ctx: Context): Boolean {
         if (!canPost(ctx, CH_DONE)) return false
-        post(NotifCategory.SESSION, "test", NotifText("Thông báo hoạt động ✓", "AT PRO có thể gửi thông báo cho bạn bình thường."), id = 2900, force = true)
+        post(NotifCategory.SESSION, "test", NotifText("Thông báo hoạt động", "AT PRO gửi được thông báo trên máy này"), id = 2900, force = true)
         return true
     }
 
@@ -144,6 +167,8 @@ object AtProNotificationManager {
         group: Boolean = false,
         openTab: String? = null,
         force: Boolean = false,
+        silent: Boolean = false,
+        timeoutMs: Long = 0L,
     ) {
         try {
             val now = System.currentTimeMillis()
@@ -168,14 +193,15 @@ object AtProNotificationManager {
                 .setCategory(if (category == NotifCategory.ALERT) NotificationCompat.CATEGORY_ERROR else NotificationCompat.CATEGORY_STATUS)
                 .setPriority(priorityOf(category))
                 .setContentIntent(openApp(ctx, openTab, requestCode = key.hashCode()))
-            if (decision == NotifDecision.POST_SILENT) b.setSilent(true)
+            if (decision == NotifDecision.POST_SILENT || silent) b.setSilent(true)
+            if (timeoutMs > 0L) b.setTimeoutAfter(timeoutMs)
             if (group) b.setGroup(GROUP_ACCOUNTS)
 
             val nm = NotificationManagerCompat.from(ctx)
             // ID ổn định theo khoá: cùng loại/acc thì cập nhật thay vì chồng thêm một thông báo mới.
             val notifId = id ?: (2100 + (key.hashCode() and 0x7FFF))
             nm.notify(notifId, b.build())
-            if (group) postGroupSummary(ctx, nm)
+            if (group) postGroupSummary(ctx, nm, channel)
         } catch (e: SecurityException) {
             Log.w(TAG, "post: thiếu quyền thông báo — ${e.message}")
         } catch (e: Exception) {
@@ -184,8 +210,8 @@ object AtProNotificationManager {
     }
 
     /** Dòng tổng cho nhóm "từng tài khoản" (bắt buộc để Android gộp nhóm). */
-    private fun postGroupSummary(ctx: Context, nm: NotificationManagerCompat) {
-        val s = NotificationCompat.Builder(ctx, CH_TASK)
+    private fun postGroupSummary(ctx: Context, nm: NotificationManagerCompat, channel: String) {
+        val s = NotificationCompat.Builder(ctx, channel)
             .setSmallIcon(R.drawable.ic_stat_atpro)
             .setColor(ACCENT)
             .setContentTitle("AT PRO")
@@ -204,11 +230,12 @@ object AtProNotificationManager {
         NotifCategory.SESSION -> CH_DONE
         NotifCategory.ACCOUNT -> CH_FARM
         NotifCategory.TASK    -> CH_TASK
+        NotifCategory.SYNC    -> CH_SYNC
     }
 
     private fun priorityOf(c: NotifCategory) = when (c) {
         NotifCategory.ALERT   -> NotificationCompat.PRIORITY_HIGH
-        NotifCategory.SESSION -> NotificationCompat.PRIORITY_DEFAULT
+        NotifCategory.SESSION, NotifCategory.SYNC -> NotificationCompat.PRIORITY_DEFAULT
         NotifCategory.ACCOUNT, NotifCategory.TASK -> NotificationCompat.PRIORITY_LOW
     }
 
@@ -243,19 +270,23 @@ object AtProNotificationManager {
         nm.deleteNotificationChannel("atpro_alert")
         nm.createNotificationChannel(
             NotificationChannel(CH_ALERT, "Cảnh báo", NotificationManager.IMPORTANCE_HIGH)
-                .apply { description = "Checkpoint, tài khoản bị khoá, Follow4Follow hết phiên, đạt giới hạn, lỗi" }
+                .apply { description = "Checkpoint, khoá tài khoản, hết phiên Follow4Follow, hết lượt ngày, lỗi" }
         )
         nm.createNotificationChannel(
             NotificationChannel(CH_DONE, "Kết quả phiên", NotificationManager.IMPORTANCE_DEFAULT)
-                .apply { description = "Bắt đầu / hoàn thành phiên nuôi, tổng kết nhiệm vụ kiếm tiền" }
+                .apply { description = "Bắt đầu và hoàn thành phiên nuôi, tổng kết nhiệm vụ kiếm tiền" }
         )
         nm.createNotificationChannel(
             NotificationChannel(CH_TASK, "Nhiệm vụ kiếm tiền", NotificationManager.IMPORTANCE_LOW)
-                .apply { description = "Kết quả từng tài khoản khi làm nhiệm vụ (không phát âm)" }
+                .apply { description = "Kết quả từng tài khoản khi làm nhiệm vụ, không phát âm" }
         )
         nm.createNotificationChannel(
             NotificationChannel(CH_FARM, "Từng tài khoản nuôi", NotificationManager.IMPORTANCE_LOW)
                 .apply { description = "Mỗi tài khoản nuôi xong (không phát âm)" }
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(CH_SYNC, "Đồng bộ dữ liệu", NotificationManager.IMPORTANCE_DEFAULT)
+                .apply { description = "Cần đăng nhập lại, xung đột hoặc lỗi đồng bộ; kết quả khi bấm Đồng bộ ngay" }
         )
         Log.i(TAG, "Notification channels ready")
     }
@@ -270,6 +301,7 @@ object AtProNotificationManager {
             sessions       = repo.getConfigBool("notif_sessions", true),
             accounts       = repo.getConfigBool("notif_accounts", true),
             tasks          = repo.getConfigBool("notif_tasks", true),
+            sync           = repo.getConfigBool("notif_sync", true),
             quietEnabled   = repo.getConfigBool("notif_quiet_enabled", false),
             quietStartHour = repo.getConfigInt("notif_quiet_start", 23),
             quietEndHour   = repo.getConfigInt("notif_quiet_end", 7),

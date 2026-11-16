@@ -11,6 +11,8 @@ import com.atpro.AtProApplication
 import com.atpro.auth.domain.AuthResult
 import com.atpro.auth.ui.AuthActivity
 import com.atpro.notification.NotificationNavigator
+import com.atpro.sync.SyncStatusStore
+import com.atpro.sync.SyncWorkScheduler
 import com.atpro.ui.MainScreen
 import com.atpro.ui.accounts.AccountsViewModel
 import com.atpro.ui.logs.LogsViewModel
@@ -96,6 +98,12 @@ class DashboardActivity : AppCompatActivity() {
                         // emits a null session only after the encrypted local session is cleared.
                         app.appScope.launch {
                             val result = app.authRepository.signOut()
+                            // Phiên đã bị xóa: bỏ lần đồng bộ đang chờ và trạng thái của tài khoản cũ.
+                            // Chạy ở appScope để vẫn xong khi Activity đã đóng.
+                            if (app.authRepository.session.value == null) {
+                                SyncWorkScheduler.cancel(applicationContext)
+                                SyncStatusStore.clear()
+                            }
                             if (result is AuthResult.Failure && app.authRepository.session.value != null) {
                                 withContext(Dispatchers.Main) {
                                     Toast.makeText(

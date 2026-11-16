@@ -95,7 +95,7 @@ fun PermissionScreen(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "AT PRO cần các quyền bên dưới để chạy tự động hóa TikTok.",
+                "Cấp các quyền bên dưới để AT PRO chạy.",
                 color     = TextMuted,
                 fontSize  = 14.sp,
                 lineHeight = 20.sp,
@@ -111,7 +111,7 @@ fun PermissionScreen(
                     icon        = Icons.Rounded.Accessibility,
                     iconColor   = Purple,
                     title       = "Accessibility Service",
-                    description = "Bắt buộc. Dùng để điều khiển TikTok tự động.",
+                    description = "Bắt buộc. Điều khiển TikTok.",
                     granted     = accessibilityGranted,
                     required    = true,
                     onAction    = onOpenAccessibility,
@@ -121,7 +121,7 @@ fun PermissionScreen(
                     icon        = Icons.Rounded.Layers,
                     iconColor   = Amber,
                     title       = "Hiển thị trên ứng dụng khác",
-                    description = "Dùng để hiện popup theo dõi farm trong khi TikTok đang chạy.",
+                    description = "Hiện popup theo dõi khi đang chạy.",
                     granted     = overlayGranted,
                     required    = false,
                     onAction    = onOpenOverlay,
@@ -131,7 +131,7 @@ fun PermissionScreen(
                     icon        = Icons.Rounded.NotificationsActive,
                     iconColor   = Green,
                     title       = "Thông báo",
-                    description = "Nhận thông báo khi farm xong hoặc có lỗi.",
+                    description = "Báo khi chạy xong hoặc có lỗi.",
                     granted     = notificationGranted,
                     required    = false,
                     onAction    = onOpenNotification,
@@ -159,7 +159,7 @@ fun PermissionScreen(
                             modifier = Modifier.size(16.dp),
                         )
                         Text(
-                            "Quyền bắt buộc đã cấp — tiếp tục để bắt đầu farm.",
+                            "Đã đủ quyền bắt buộc.",
                             color    = TextSec,
                             fontSize = 12.sp,
                         )

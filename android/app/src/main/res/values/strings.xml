@@ -3,5 +3,5 @@
     <!-- App name — used by AppCompatActivity window title and system UI -->
     <string name="app_name">AT PRO</string>
     <!-- Accessibility service description (shown in Android Settings) -->
-    <string name="accessibility_service_description">AT PRO cần truy cập Accessibility Service để tự động hóa TikTok.</string>
+    <string name="accessibility_service_description">AT PRO điều khiển TikTok qua dịch vụ Trợ năng.</string>
 </resources>

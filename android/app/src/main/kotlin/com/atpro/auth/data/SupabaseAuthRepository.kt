@@ -63,10 +63,10 @@ class SupabaseAuthRepository(
     ): AuthResult<AuthSignUpResult> {
         val normalizedEmail = email.trim()
         if (normalizedEmail.isBlank() || !normalizedEmail.contains('@')) {
-            return AuthResult.Failure("Vui lòng nhập địa chỉ email hợp lệ.")
+            return AuthResult.Failure("Nhập email hợp lệ.")
         }
         if (password.isBlank()) {
-            return AuthResult.Failure("Vui lòng nhập mật khẩu.")
+            return AuthResult.Failure("Nhập mật khẩu.")
         }
 
         return sessionMutex.withLock {
@@ -106,7 +106,7 @@ class SupabaseAuthRepository(
                 }
                 val user = createdSession?.user ?: responseUser
                     ?: return@safely AuthResult.Failure(
-                        "Supabase không trả về thông tin tài khoản hợp lệ.",
+                        "Máy chủ không trả về thông tin tài khoản.",
                         statusCode = response.statusCode,
                     )
 
@@ -130,10 +130,10 @@ class SupabaseAuthRepository(
     ): AuthResult<AuthSession> {
         val normalizedEmail = email.trim()
         if (normalizedEmail.isBlank() || !normalizedEmail.contains('@')) {
-            return AuthResult.Failure("Vui lòng nhập địa chỉ email hợp lệ.")
+            return AuthResult.Failure("Nhập email hợp lệ.")
         }
         if (password.isBlank()) {
-            return AuthResult.Failure("Vui lòng nhập mật khẩu.")
+            return AuthResult.Failure("Nhập mật khẩu.")
         }
 
         return sessionMutex.withLock {
@@ -170,7 +170,7 @@ class SupabaseAuthRepository(
             safely {
                 val saved = withContext(ioDispatcher) { sessionStore.read() }
                 val current = saved ?: mutableSession.value
-                    ?: return@safely AuthResult.Failure("Không tìm thấy phiên đăng nhập cần làm mới.")
+                    ?: return@safely AuthResult.Failure("Không có phiên đăng nhập để làm mới.")
 
                 mutableSession.value = current
                 refreshSessionLocked(current)
@@ -247,7 +247,7 @@ class SupabaseAuthRepository(
 
         if (localClearFailed) {
             return AuthResult.Failure(
-                "Không thể xóa phiên đăng nhập đã lưu trên thiết bị.",
+                "Không xóa được phiên đăng nhập trên máy.",
                 retryable = false,
             )
         }
@@ -297,17 +297,17 @@ class SupabaseAuthRepository(
         throw cancelled
     } catch (_: SocketTimeoutException) {
         AuthResult.Failure(
-            message = "Kết nối Supabase quá thời gian chờ. Kiểm tra mạng rồi thử lại.",
+            message = "Kết nối quá thời gian chờ. Kiểm tra mạng.",
             retryable = true,
         )
     } catch (_: IOException) {
         AuthResult.Failure(
-            message = "Không thể kết nối Supabase. Kiểm tra kết nối mạng rồi thử lại.",
+            message = "Không kết nối được. Kiểm tra mạng.",
             retryable = true,
         )
     } catch (_: Exception) {
         AuthResult.Failure(
-            message = "Không thể hoàn tất thao tác xác thực. Vui lòng thử lại.",
+            message = "Đăng nhập không thành công. Thử lại.",
             retryable = false,
         )
     }
@@ -330,7 +330,7 @@ class SupabaseAuthRepository(
             lower.contains("invalid login credentials") ->
                 "Email hoặc mật khẩu chưa chính xác."
             lower.contains("email not confirmed") ->
-                "Email này chưa được xác nhận. Hãy kiểm tra hộp thư."
+                "Email chưa xác nhận. Xem hộp thư."
             lower.contains("user already registered") ->
                 "Email này đã được đăng ký."
             lower.contains("unable to validate email") ||
@@ -338,12 +338,12 @@ class SupabaseAuthRepository(
                 "Địa chỉ email chưa hợp lệ."
             lower.contains("password should be at least") ||
                 lower.contains("password is too short") ->
-                "Mật khẩu chưa đạt độ dài tối thiểu của hệ thống."
+                "Mật khẩu quá ngắn."
             lower.contains("too many requests") ||
                 lower.contains("rate limit") ->
-                "Thao tác quá nhanh. Vui lòng đợi một chút rồi thử lại."
+                "Thao tác quá nhanh. Đợi một lát rồi thử lại."
             else -> normalized.take(MAX_ERROR_MESSAGE_LENGTH)
-                .ifBlank { "Yêu cầu xác thực thất bại (HTTP $statusCode)." }
+                .ifBlank { "Đăng nhập thất bại (HTTP $statusCode)." }
         }
 
         return AuthResult.Failure(
@@ -366,7 +366,7 @@ class SupabaseAuthRepository(
             ?: return AuthResult.Failure("Supabase không trả về access token hợp lệ.")
         val refreshToken = optString("refresh_token")
             .takeIf { it.isNotBlank() && it != "null" }
-            ?: return AuthResult.Failure("Supabase không trả về refresh token hợp lệ.")
+            ?: return AuthResult.Failure("Máy chủ không trả về phiên đăng nhập.")
 
         var user = optJSONObject("user")?.toAuthUserOrNull() ?: fallbackUser
         if (user == null) {
@@ -384,7 +384,7 @@ class SupabaseAuthRepository(
         }
 
         val authenticatedUser = user
-            ?: return AuthResult.Failure("Không thể xác minh thông tin người dùng từ Supabase.")
+            ?: return AuthResult.Failure("Không xác minh được tài khoản.")
 
         val explicitExpiry = optLong("expires_at", 0L)
         val expiresIn = optLong("expires_in", DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS)

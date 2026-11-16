@@ -862,8 +862,8 @@ class AutomationEngine(
             mapOf("status" to "started", "total" to farmList.size))
         AtProNotificationManager.startRun()
         AtProNotificationManager.notifyFarmStarted(farmList.size)
-        notifyDiscord("🚀 **AT Pro** — Bắt đầu nuôi **${farmList.size}** tài khoản TikTok " +
-            "(~${farmList.size * config.minutesPerAccount} phút dự kiến)")
+        notifyDiscord("Bắt đầu nuôi ${farmList.size} tài khoản TikTok " +
+            "(dự kiến ${farmList.size * config.minutesPerAccount} phút)")
 
         // Bước 4: Position acc đầu tiên (popup đang mở — dùng trực tiếp)
         // v1.2.7: Nếu có normalize thì dùng postNormalizeActiveAcc (stale currentAcc gây click lại acc hiện tại)
@@ -1023,8 +1023,8 @@ class AutomationEngine(
             farmList.size * config.minutesPerAccount,
         )
         notifyDiscord(
-            "✅ **AT Pro** — Hoàn thành nuôi **${farmList.size}** tài khoản TikTok\n" +
-            "▫️ Video xem: $sessionVideos  ▫️ Tim: $sessionLikes  ▫️ Follow: $sessionFollows"
+            "Nuôi xong ${farmList.size} tài khoản TikTok\n" +
+            "Xem $sessionVideos video · Tim $sessionLikes · Follow $sessionFollows"
         )
 
         // [v1.1.9+] Thoát TikTok sau khi nuôi xong — không để app chạy nền
@@ -2864,8 +2864,7 @@ class AutomationEngine(
                         if (consecutiveUnconsumed >= 2) {
                             log("WDG: 🛑 Main loop không phản hồi ~${stuckSecs * 2}s — " +
                                 "watchdog tự can thiệp trực tiếp (kill + relaunch TikTok)")
-                            notifyDiscord("⚠️ **AT Pro** — Phát hiện nghi ngờ tool bị treo " +
-                                "(~${stuckSecs * 2}s không phản hồi), đang tự khôi phục...")
+                            notifyDiscord("Tool không phản hồi khoảng ${stuckSecs * 2} giây, đang khởi động lại TikTok")
                             try {
                                 // v1.3.1: dùng chung relaunchTikTokWithRetry() (có retry+backoff,
                                 // tự bắn Discord khi relaunch xong/thất bại) thay vì kill+launch
@@ -3026,7 +3025,7 @@ class AutomationEngine(
      * không, không cần cầm máy lên xem log.
      */
     private suspend fun relaunchTikTokWithRetry(tag: String): Boolean {
-        notifyDiscord("🔄 **AT Pro** — [$tag] Đang kill + relaunch TikTok để tự khôi phục...")
+        notifyDiscord("[$tag] Đang khởi động lại TikTok")
         host.killTikTok()
         delay(2_000)
         val launched = retry(times = 3, delayMs = 2_000) {
@@ -3034,12 +3033,12 @@ class AutomationEngine(
         }
         if (launched == null) {
             log("$tag: launchTikTok() thất bại sau 3 lần thử")
-            notifyDiscord("🛑 **AT Pro** — [$tag] launchTikTok() thất bại sau 3 lần thử — cần kiểm tra thủ công")
+            notifyDiscord("[$tag] Mở TikTok thất bại sau 3 lần thử, cần kiểm tra tay")
             return false
         }
         val ok = waitFeedLoad()
         if (!ok) {
-            notifyDiscord("⚠️ **AT Pro** — [$tag] Relaunch xong nhưng chưa xác nhận về được feed")
+            notifyDiscord("[$tag] Đã mở lại TikTok nhưng chưa về được feed")
         }
         return ok
     }
@@ -3269,13 +3268,13 @@ class AutomationEngine(
         // v1.3.0: thông báo Discord cho các trường hợp KHÔNG đi qua notifyFarmCompleted
         // riêng ở trên (TikTok chính đã tự gửi message chi tiết hơn kèm thống kê).
         when (reason) {
-            "user_stopped" -> notifyDiscord("⏹️ **AT Pro** — Người dùng đã dừng phiên nuôi acc")
-            "facebook_completed" -> notifyDiscord("✅ **AT Pro** — Hoàn thành phiên nuôi Facebook")
-            "x_completed"         -> notifyDiscord("✅ **AT Pro** — Hoàn thành phiên nuôi X")
-            "instagram_completed" -> notifyDiscord("✅ **AT Pro** — Hoàn thành phiên nuôi Instagram")
-            "threads_completed"   -> notifyDiscord("✅ **AT Pro** — Hoàn thành phiên nuôi Threads")
-            "snapchat_completed"  -> notifyDiscord("✅ **AT Pro** — Hoàn thành phiên nuôi Snapchat")
-            "task_completed"      -> notifyDiscord("✅ **AT Pro** — Hoàn thành phiên Task mode")
+            "user_stopped" -> notifyDiscord("Bạn đã dừng phiên nuôi acc")
+            "facebook_completed" -> notifyDiscord("Nuôi Facebook xong")
+            "x_completed"         -> notifyDiscord("Nuôi X xong")
+            "instagram_completed" -> notifyDiscord("Nuôi Instagram xong")
+            "threads_completed"   -> notifyDiscord("Nuôi Threads xong")
+            "snapchat_completed"  -> notifyDiscord("Nuôi Snapchat xong")
+            "task_completed"      -> notifyDiscord("Nhiệm vụ xong")
             // "completed" (TikTok chính) đã có message riêng ở trên, không gửi trùng.
         }
     }

@@ -15,6 +15,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.CloudDone
+import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.CloudQueue
+import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.MonetizationOn
@@ -24,6 +29,8 @@ import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.ThumbUp
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +51,9 @@ import com.atpro.ui.theme.AtThemeState
 import com.atpro.ui.theme.AtTopBar
 import com.atpro.ui.theme.staggerIn
 import com.atpro.sync.BackupOwnershipState
+import com.atpro.sync.SyncStatusSnapshot
+import com.atpro.sync.SyncStatusText
+import kotlinx.coroutines.delay
 
 /**
  * v1.8.0 — Tab "Cài đặt": một danh mục phẳng, MỘT cấp, thay cho việc chui vào Cài đặt → tab nhóm → chip mục.
@@ -62,9 +72,20 @@ fun SettingsHubScreen(
     authEmail: String?,
     backupOwnershipState: BackupOwnershipState,
     onBindBackupOwner: () -> Unit,
+    syncStatus: SyncStatusSnapshot,
+    onSyncNow: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     val context = LocalContext.current
+    // Đồng hồ cho dòng "Lần cuối … trước": cập nhật mỗi 20 giây, và ngay khi trạng thái đổi.
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(syncStatus) { now = System.currentTimeMillis() }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(20_000L)
+            now = System.currentTimeMillis()
+        }
+    }
     var showSignOutConfirmation by remember { mutableStateOf(false) }
     var showBackupOwnerConfirmation by remember { mutableStateOf(false) }
     val mode = AtThemeState.mode
@@ -108,53 +129,72 @@ fun SettingsHubScreen(
             }
             Spacer(Modifier.height(20.dp))
 
-            // ── Sao lưu đám mây: chỉ xác nhận chủ sở hữu, chưa bật đồng bộ ──
+            // ── Sao lưu dữ liệu (Supabase) ──
             AtSectionLabel("Sao lưu dữ liệu", Modifier.padding(start = 4.dp, bottom = 8.dp))
             AtCard(Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
                 when (val ownership = backupOwnershipState) {
                     BackupOwnershipState.Checking -> AtListRow(
-                        "Đang kiểm tra liên kết",
-                        subtitle = "Đang đọc trạng thái dữ liệu cục bộ",
-                        icon = Icons.Rounded.AccountCircle,
+                        "Đang kiểm tra",
+                        subtitle = "Đọc dữ liệu trên máy",
+                        icon = Icons.Rounded.Sync,
                         chevron = false,
                     )
                     BackupOwnershipState.SignedOut -> AtListRow(
                         "Chưa đăng nhập",
-                        subtitle = "Đăng nhập AT PRO để kiểm tra chủ sở hữu dữ liệu",
-                        icon = Icons.Rounded.AccountCircle,
+                        subtitle = "Đăng nhập để sao lưu dữ liệu",
+                        icon = Icons.Rounded.CloudOff,
                         chevron = false,
                     )
                     is BackupOwnershipState.NeedsConfirmation -> AtListRow(
                         "Liên kết dữ liệu với tài khoản này",
-                        subtitle = "Cần xác nhận lần đầu · Revision ${ownership.lastRemoteRevision}",
-                        icon = Icons.Rounded.AccountCircle,
+                        subtitle = "Làm một lần · bản ${ownership.lastRemoteRevision}",
+                        icon = Icons.Rounded.CloudQueue,
                         tint = AtColors.Sky,
                         onClick = { showBackupOwnerConfirmation = true },
                     )
-                    is BackupOwnershipState.Linked -> AtListRow(
-                        "Đã liên kết với tài khoản hiện tại",
-                        subtitle = "Revision ${ownership.lastRemoteRevision} · Đồng bộ cloud chưa được bật",
-                        icon = Icons.Rounded.AccountCircle,
-                        tint = AtColors.Sky,
-                        chevron = false,
-                    )
+                    is BackupOwnershipState.Linked -> {
+                        val running = syncStatus.isRunning(now)
+                        val attention = !running && !syncStatus.retrying && syncStatus.outcome.needsAttention
+                        AtListRow(
+                            SyncStatusText.headline(syncStatus, now),
+                            subtitle = SyncStatusText.detail(syncStatus, now),
+                            icon = when {
+                                attention -> Icons.Rounded.ErrorOutline
+                                running -> Icons.Rounded.Sync
+                                syncStatus.outcome.isSuccess -> Icons.Rounded.CloudDone
+                                else -> Icons.Rounded.CloudQueue
+                            },
+                            tint = if (attention) AtColors.Danger else AtColors.Sky,
+                            chevron = false,
+                        )
+                        AtDivider()
+                        AtListRow(
+                            if (running) "Đang đồng bộ" else "Đồng bộ ngay",
+                            subtitle = "Gửi thay đổi và nhận dữ liệu từ thiết bị khác · bản ${ownership.lastRemoteRevision}",
+                            icon = Icons.Rounded.Sync,
+                            tint = AtColors.Sky,
+                            onClick = if (running) null else onSyncNow,
+                            chevron = false,
+                        )
+                    }
                     BackupOwnershipState.DifferentAccount -> AtListRow(
-                        "Dữ liệu đã thuộc tài khoản khác",
-                        subtitle = "Đồng bộ bị khóa. Không tự động chuyển hoặc gắn lại dữ liệu.",
+                        "Dữ liệu thuộc tài khoản khác",
+                        subtitle = "Đồng bộ bị khóa, app không tự chuyển quyền sở hữu",
                         icon = Icons.Rounded.AdminPanelSettings,
                         tint = AtColors.Danger,
                         chevron = false,
                     )
                     BackupOwnershipState.InvalidAuthIdentity,
                     BackupOwnershipState.MetadataUnavailable -> AtListRow(
-                        "Không thể xác minh chủ sở hữu",
-                        subtitle = "Dữ liệu cục bộ vẫn được giữ nguyên; chưa cho phép sao lưu.",
+                        "Không xác minh được chủ dữ liệu",
+                        subtitle = "Dữ liệu trên máy giữ nguyên, chưa sao lưu",
                         icon = Icons.Rounded.AdminPanelSettings,
                         tint = AtColors.Danger,
                         chevron = false,
                     )
                 }
             }
+            Spacer(Modifier.height(20.dp))
 
             // ── Giao diện (chỉnh ngay) ──
             AtSectionLabel("Giao diện", Modifier.padding(start = 4.dp, bottom = 8.dp))
@@ -206,9 +246,9 @@ fun SettingsHubScreen(
     if (showBackupOwnerConfirmation) {
         AtDialog(
             onDismiss = { showBackupOwnerConfirmation = false },
-            title = "Liên kết dữ liệu với tài khoản này?",
-            message = "Sau khi xác nhận, dữ liệu trên thiết bị sẽ được gắn với tài khoản AT PRO đang đăng nhập. Nếu đăng nhập bằng tài khoản khác, ứng dụng sẽ chặn đồng bộ tự động và không tự chuyển quyền sở hữu. Thao tác này chưa tải lên, tải xuống hoặc xóa dữ liệu.",
-            confirmText = "Xác nhận liên kết",
+            title = "Liên kết dữ liệu?",
+            message = "Dữ liệu trên máy sẽ gắn với tài khoản đang đăng nhập. Tài khoản khác không đồng bộ được dữ liệu này.",
+            confirmText = "Liên kết",
             onConfirm = {
                 showBackupOwnerConfirmation = false
                 onBindBackupOwner()
@@ -220,7 +260,7 @@ fun SettingsHubScreen(
         AtDialog(
             onDismiss = { showSignOutConfirmation = false },
             title = "Đăng xuất khỏi AT PRO?",
-            message = "Phiên đăng nhập được lưu trên thiết bị này sẽ bị xóa. Dữ liệu cục bộ của app không bị xóa.",
+            message = "Phiên đăng nhập trên máy này sẽ bị xóa. Dữ liệu trên máy được giữ nguyên.",
             confirmText = "Đăng xuất",
             onConfirm = {
                 showSignOutConfirmation = false

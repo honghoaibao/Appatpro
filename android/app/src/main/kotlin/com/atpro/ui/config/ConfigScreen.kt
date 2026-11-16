@@ -820,7 +820,7 @@ private fun NotificationsSection(state: ConfigUiState, onSet: (ConfigUiState.() 
                         val ok = com.atpro.notification.AtProNotificationManager.sendTest(context)
                         android.widget.Toast.makeText(
                             context,
-                            if (ok) "Đã gửi — xem ở thanh thông báo" else "Hệ thống đang chặn thông báo của AT PRO (kiểm tra quyền/kênh)",
+                            if (ok) "Đã gửi thông báo thử" else "Hệ thống đang chặn thông báo của AT PRO",
                             android.widget.Toast.LENGTH_SHORT,
                         ).show()
                     },
@@ -836,7 +836,7 @@ private fun NotificationsSection(state: ConfigUiState, onSet: (ConfigUiState.() 
                 Spacer(Modifier.height(6.dp))
                 CfgSwitch(
                     label = "Cảnh báo quan trọng",
-                    subtitle = "Checkpoint, tài khoản bị khoá, Follow4Follow hết phiên, đạt giới hạn ngày, lỗi",
+                    subtitle = "Checkpoint, khoá tài khoản, hết phiên Follow4Follow, hết lượt ngày, lỗi",
                     value = state.notifAlerts,
                     onChanged = { onSet { copy(notifAlerts = it) } },
                 )
@@ -848,7 +848,7 @@ private fun NotificationsSection(state: ConfigUiState, onSet: (ConfigUiState.() 
                 )
                 CfgSwitch(
                     label = "Từng tài khoản nuôi xong",
-                    subtitle = "Một thông báo nhỏ, không phát âm, cho mỗi tài khoản",
+                    subtitle = "Mỗi tài khoản một thông báo nhỏ, không phát âm",
                     value = state.notifAccounts,
                     onChanged = { onSet { copy(notifAccounts = it) } },
                 )
@@ -857,6 +857,12 @@ private fun NotificationsSection(state: ConfigUiState, onSet: (ConfigUiState.() 
                     subtitle = "Bắt đầu, từng tài khoản (job, xu) và tổng kết có số dư",
                     value = state.notifTasks,
                     onChanged = { onSet { copy(notifTasks = it) } },
+                )
+                CfgSwitch(
+                    label = "Đồng bộ dữ liệu",
+                    subtitle = "Khi cần đăng nhập lại, xung đột hoặc lỗi đồng bộ",
+                    value = state.notifSync,
+                    onChanged = { onSet { copy(notifSync = it) } },
                 )
             }
 
@@ -1272,7 +1278,7 @@ private fun TaskEarnSection(
             CardLabel("Thời gian", Icons.Rounded.Timer, accent)
             Spacer(Modifier.height(8.dp))
             SettingSliderInt("Nuôi trước job", state.taskFarmBeforeJobSecs, 10, 300, 10, unit = " giây",
-                hint = "Xem feed trước khi nhận job đầu tiên của mỗi tài khoản") {
+                hint = "Xem feed trước job đầu tiên của mỗi acc") {
                 onSet { copy(taskFarmBeforeJobSecs = it) }
             }
             SettingSliderInt("Chờ sau khi mở link", state.taskJobDelaySecs, 2, 15, 1, unit = " giây") {
@@ -1287,7 +1293,7 @@ private fun TaskEarnSection(
                 onSet { copy(taskJobsPerAccount = it) }
             }
             SettingSliderInt("Lỗi liên tiếp tối đa", state.taskMaxConsecFailures, 1, 10, 1,
-                hint = "Quá số lần này tài khoản sẽ được bỏ qua") {
+                hint = "Quá số lần này thì bỏ qua acc") {
                 onSet { copy(taskMaxConsecFailures = it) }
             }
         }
@@ -1366,8 +1372,8 @@ private fun TaskAccountsSection(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                if (manual) "Chỉ làm nhiệm vụ với các tài khoản bạn tick bên dưới."
-                else "Làm nhiệm vụ với mọi tài khoản đã liên kết Follow4Follow và có trên máy.",
+                if (manual) "Chỉ làm các acc đã tick bên dưới."
+                else "Mọi acc đã liên kết Follow4Follow và có trên máy.",
                 color = AtColors.TextSec, fontSize = 12.sp,
             )
         }
@@ -1379,11 +1385,11 @@ private fun TaskAccountsSection(
                 ui.loading && ui.rows.isEmpty() ->
                     Text("Đang tải danh sách…", color = AtColors.TextMuted, fontSize = 12.sp)
                 ui.needLogin ->
-                    Text("Chưa đăng nhập Follow4Follow. Vào tab Dịch vụ để đăng nhập, rồi quay lại tải danh sách.", color = Amber, fontSize = 12.sp)
+                    Text("Chưa đăng nhập Follow4Follow (ở tab Dịch vụ).", color = Amber, fontSize = 12.sp)
                 ui.error != null ->
                     Text("Không tải được danh sách: ${ui.error}", color = Red, fontSize = 12.sp)
                 ui.loaded && ui.rows.isEmpty() ->
-                    Text("Tài khoản Follow4Follow chưa có acc TikTok nào. Hãy thêm acc trên follow4follow.net.", color = AtColors.TextMuted, fontSize = 12.sp)
+                    Text("Follow4Follow chưa có acc TikTok. Thêm acc trên follow4follow.net.", color = AtColors.TextMuted, fontSize = 12.sp)
                 else -> {
                     val willDo = ui.rows.count { it.onDevice && (!manual || TaskAccountSelector.key(it.username) in selectedKeys) }
                     Text(
@@ -1429,7 +1435,7 @@ private fun TaskAccountsSection(
             if (ui.loaded && ui.deviceCount == 0 && !ui.needLogin) {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Chưa có tài khoản nào được quét trên máy. Chạy Nuôi TikTok một lần (hoặc quét tài khoản ở tab Tài khoản) để AT PRO biết các acc trên máy.",
+                    "Chưa quét acc nào trên máy. Chạy Nuôi TikTok một lần hoặc quét ở tab Tài khoản.",
                     color = AtColors.TextMuted, fontSize = 11.sp,
                 )
             }
@@ -1508,7 +1514,7 @@ private fun TaskFarmSection(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
-            "Áp dụng cho lúc nuôi trước và sau mỗi job. Chế độ Nuôi TikTok có cài đặt riêng.",
+            "Áp dụng khi nuôi trước và sau mỗi job. Nuôi TikTok có cài đặt riêng.",
             color = AtColors.TextSec, fontSize = 12.sp,
             modifier = Modifier.padding(horizontal = 4.dp).staggerIn(0),
         )
@@ -1546,7 +1552,7 @@ private fun TaskFarmSection(
             MinLikesSlider(
                 label    = "Chỉ tim video có từ",
                 value    = state.taskFarmMinLikes,
-                hint     = "Video ít tim hơn mức này sẽ không được tim. Không áp dụng cho job Tim.",
+                hint     = "Video ít tim hơn mức này bị bỏ qua. Không áp dụng cho job Tim.",
                 onChange = { v -> onSet { copy(taskFarmMinLikes = v) } },
             )
         }

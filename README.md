@@ -1,8 +1,8 @@
 # AT PRO — Tự động hóa mạng xã hội trên Android
 
-Công cụ tự động hóa chạy trực tiếp trên thiết bị Android (không cần PC), dữ liệu lưu hoàn toàn local. Dịch vụ chính là **TikTok** (nuôi acc; làm nhiệm vụ kiếm tiền Like/Follow qua **Follow4Follow** — `TaskProvider`); có thêm luồng nuôi acc cho Facebook, Instagram, X/Twitter, Threads, Snapchat.
+Công cụ tự động hóa chạy trực tiếp trên thiết bị Android (không cần PC), dữ liệu lưu local (Room), có thể sao lưu và đồng bộ giữa các thiết bị qua tài khoản AT PRO (Supabase). Dịch vụ chính là **TikTok** (nuôi acc; làm nhiệm vụ kiếm tiền Like/Follow qua **Follow4Follow** — `TaskProvider`); có thêm luồng nuôi acc cho Facebook, Instagram, X/Twitter, Threads, Snapchat.
 
-- **Phiên bản hiện tại:** v1.12.5 (`versionCode 45`)
+- **Phiên bản hiện tại:** v1.12.6 (`versionCode 46`)
 - **Package:** `com.atpro` · **minSdk 24 / targetSdk & compileSdk 34**
 - **Ngôn ngữ giao diện, log, comment:** tiếng Việt
 
@@ -56,11 +56,12 @@ Công cụ tự động hóa chạy trực tiếp trên thiết bị Android (kh
 - **Ví Follow4Follow (v1.7.0):** màn hình riêng mở từ tab Dịch vụ — số dư/cấp/tỷ giá/job còn lại hôm nay, **bảng xếp hạng** (podium top 3 + hạng của bạn), **rút tiền** qua 5 kênh (ngân hàng, ZaloPay, PayPal, Crypto, thẻ cào; luôn có hộp thoại xác nhận, chống gửi trùng), lịch sử job (Follow/Like), lịch sử rút tiền, giới thiệu (mã/link/hoa hồng + nhận hoa hồng), thông báo.
 - **Dịch vụ khác:** Facebook (kể cả xem Reels), Instagram, X, Threads, Snapchat — mức demo/nuôi cơ bản.
 - **Lịch tự động:** màn hình phủ mở từ Tổng quan hoặc Cài đặt (`ScheduledFarmManager`), khôi phục sau khi khởi động lại máy (`BootReceiver`).
-- **Overlay:** cửa sổ nổi hiển thị trạng thái phiên chạy với **3 trạng thái** — Popup (tài khoản, tiến trình, Lượt thích · Đã thêm · Cảnh báo, trạng thái đang làm, Nhật ký hoạt động, Tạm dừng/Dừng) · Mini Popup · Floating Chip; kéo được (`OverlayFarmMonitor`, v1.12.5).
+- **Overlay:** cửa sổ nổi hiển thị trạng thái phiên chạy với **3 trạng thái** — Popup (tài khoản, tiến trình, Lượt thích · Đã thêm · Cảnh báo, trạng thái đang làm, Nhật ký hoạt động, Tạm dừng/Dừng) · Mini Popup · Floating Chip; kéo được (`OverlayFarmMonitor`, v1.12.5). **v1.12.6: popup nhỏ lại** — rộng 264dp, cao ≈ 256dp (trước 340dp × ≈ 430dp; mở rộng nhật ký ≈ 550dp ≈ 2/3 màn hình), nhật ký mặc định 2 dòng, mở rộng tối đa 40% chiều cao màn hình, chữ cố định theo dp nên cỡ chữ hệ thống không làm phình popup.
 - **Dừng an toàn:** tool **tự tắt** (xong phiên, hết việc, lỗi, không làm tiếp được, tắt Trợ năng) thì về màn hình chính điện thoại trước khi tắt; **người dùng tự bấm Dừng** thì ở lại màn hình hiện tại, không về màn hình chính (v1.12.5).
 - **Nuôi Facebook / Instagram:** chọn cách nuôi **Bằng app** (chạy thật) hoặc **Bằng cookie · demo** (chỉ là giao diện: dán cookie → đọc tên khoá + ID tài khoản, không lưu, không chạy thật) (v1.12.5).
 - **Thống kê (tab Nuôi acc):** tương tác + so kỳ trước, thích/follow/bình luận, video, thời gian chạy, biểu đồ đủ mọi ngày theo giờ địa phương, cộng dồn, cơ cấu, theo giờ, xếp hạng tài khoản; chỉ tính phiên đã đóng (v1.12.5).
-- **Thông báo:** Android notification + Discord webhook; kiểm tra bản mới từ GitHub Releases (`UpdateChecker`).
+- **Đăng nhập + sao lưu (Supabase):** đăng nhập email, liên kết dữ liệu trên máy với tài khoản một lần, đồng bộ nền qua WorkManager (hàng đợi Outbox → gộp → gửi có kiểm tra phiên bản). **v1.12.6:** Cài đặt → Sao lưu dữ liệu hiện trạng thái (đã đồng bộ lúc nào, số thay đổi chờ, sự cố cần xử lý) và nút **Đồng bộ ngay** (kéo dữ liệu từ thiết bị khác về, không chạy song song với lần chạy nền, cách nhau tối thiểu 30 giây).
+- **Thông báo:** 5 nhóm có công tắc riêng — cảnh báo, kết quả phiên, từng tài khoản, nhiệm vụ, **đồng bộ (v1.12.6)**; giờ yên tĩnh; Discord webhook; kiểm tra bản mới từ GitHub Releases (`UpdateChecker`).
 
 ## Setup
 
@@ -128,11 +129,11 @@ Workflow: `.github/workflows/build.yml` (tên: *AT PRO — Build APK*).
 
 ```bash
 # Chạy tay
-gh workflow run "AT PRO — Build APK" -f version=1.12.5 -f build=45
+gh workflow run "AT PRO — Build APK" -f version=1.12.6 -f build=46
 
 # Push tag → build + tạo GitHub Release
-git tag v1.12.5
-git push origin v1.12.0
+git tag v1.12.6
+git push origin v1.12.6
 ```
 
 ## Tests
@@ -177,9 +178,9 @@ Phần Follow4Follow (ký request, đăng nhập, luồng job) test hoàn toàn 
 |---------|----------|
 | `CLAUDE.md` | Quy tắc làm việc với repo |
 | `context/` | `project_overview`, `architecture`, `current_focus`, `constraints`, `glossary`, `Follow4FollowAPI_Documentation` + `follow4follow/` (tham chiếu API đầy đủ + `f4f.py` đã field-test) |
-| `decisions/` | ADR-0001 … ADR-0026 |
+| `decisions/` | ADR-0001 … ADR-0027 |
 | `principles/` | Quy tắc Android, kiến trúc, coding, git, hiệu năng, bảo mật |
-| `revision/` | Ghi chú theo phiên bản (giữ 10 bản gần nhất): `v1.3.3.md` … `v1.12.5.md` |
+| `revision/` | Ghi chú theo phiên bản (giữ 10 bản gần nhất): `v1.3.3.md` … `v1.12.6.md` |
 | `tasks/` | `backlog`, `completed_tasks`, `technical_debt` |
 | `skills/` | Skill dùng trong quá trình phát triển |
 
@@ -189,7 +190,8 @@ Chi tiết từng bản nằm trong `.claude/revision/vX.Y.Z.md`.
 
 | Bản | Điểm chính |
 |-----|-----------|
-| **v1.12.5** (45) | **Quét popup / quảng cáo / live ở mọi bước** (`ContentScanner` theo whitelist nút đóng — không bao giờ bấm OK; quét tại các mốc: vào Cài đặt, mở danh sách tài khoản, feed vừa tải, trang job; đóng popup đè lên feed); **sửa vuốt thừa** sau khi thấy nút Chuyển đổi tài khoản (vuốt ngắn + chậm + dò liên tục, bấm ngay bằng ACTION_CLICK); **tool tự tắt thì về màn hình chính** (người dùng tự bấm Dừng thì không); **sửa tim tối thiểu** (đọc số tim đúng video đang hiện); **Facebook/Instagram: chọn nuôi bằng app hoặc cookie (demo)**; **thống kê Nuôi acc làm lại** (giờ địa phương, chỉ phiên đã đóng, so kỳ trước); **popup nổi mới** (Popup · Mini Popup · Floating Chip) |
+| **v1.12.6** (46) | **Supabase hoàn chỉnh:** trạng thái đồng bộ (`SyncStatusStore`, `SyncStatus.kt`) + nút **Đồng bộ ngay** trong Cài đặt; **thông báo nhóm Đồng bộ** (kênh `atpro_sync`, công tắc `notif_sync`, chỉ báo sự cố cần xử lý, chống lặp 6 giờ, tự gỡ khi thành công); đăng xuất huỷ lần đồng bộ đang chờ; **popup nhỏ lại** (≈ 256dp thay vì ≈ 430dp, nhật ký 2 dòng, giới hạn 40% màn hình, chữ theo dp); **bỏ chữ thừa/giọng AI** ở giao diện, thông báo, lỗi đăng nhập và tin nhắn Discord. |
+| v1.12.5 (45) | **Quét popup / quảng cáo / live ở mọi bước** (`ContentScanner` theo whitelist nút đóng — không bao giờ bấm OK; quét tại các mốc: vào Cài đặt, mở danh sách tài khoản, feed vừa tải, trang job; đóng popup đè lên feed); **sửa vuốt thừa** sau khi thấy nút Chuyển đổi tài khoản (vuốt ngắn + chậm + dò liên tục, bấm ngay bằng ACTION_CLICK); **tool tự tắt thì về màn hình chính** (người dùng tự bấm Dừng thì không); **sửa tim tối thiểu** (đọc số tim đúng video đang hiện); **Facebook/Instagram: chọn nuôi bằng app hoặc cookie (demo)**; **thống kê Nuôi acc làm lại** (giờ địa phương, chỉ phiên đã đóng, so kỳ trước); **popup nổi mới** (Popup · Mini Popup · Floating Chip) |
 | v1.12.0 (44) | **Nhận nhiệm vụ theo `f4f.py` v2.8** (danh sách acc `quick-switch`, luôn kèm `uid`, thang đổi acc S1–S5, 429 chờ-thử-lại, job hết hạn, trace); **chọn tài khoản nhận nhiệm vụ riêng** (Tự động / Chọn tay, `TaskAccountSelector`); **thông báo nâng cấp** (4 nhóm, giờ yên tĩnh, tổng kết nhiệm vụ + xu, tiến độ trên thông báo đang chạy, mở đúng tab, nút gửi thử); 401 giữa phiên dừng cả lượt (ADR-0014) |
 | v1.11.0 (43) | **Sửa bấm nhầm "Đăng xuất" khi chuyển acc** ("Đăng xuất" chứa chữ x bị coi là nút đóng; nhận diện popup + chọn dòng theo acc đang dùng; `openSwitchList()` có chặn + huỷ hộp đăng xuất); **thanh kéo mới** `AtSlider`; nuôi lâu tối đa 50 job, thời lượng ≥ 30s; **tab Nuôi acc riêng** cho kiếm tiền; **ngưỡng số tim tối thiểu**; logic hashtag mới (không phân biệt dấu, ranh giới từ); **nhật ký dễ đọc** (`LogPolish`, chip "Chi tiết"); hiệu ứng popup/thẻ/nhật ký (ADR-0013) |
 | v1.10.0 (42) | **Back về feed** sau báo cáo job (phân loại trang theo thanh điều hướng); **bảng xếp hạng F4F hiện xu** (`parseCoinText`); F4F làm lại (bỏ Giới thiệu, ô Xu chờ · Làm hôm nay · Tổng xu); **Thống kê kiếm tiền + biểu đồ** (`EarningsStore`, Canvas); Quyền/Thông báo tách riêng, thẻ quyền bố cục dọc + chặn cỡ chữ hệ thống; Cài đặt/Tài khoản/Lịch tinh gọn; **popup nhỏ + thanh đếm ngược**; tối ưu pin (memo cây node, gom ghi log); bỏ chữ thừa (ADR-0012) |

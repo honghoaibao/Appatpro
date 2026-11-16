@@ -106,4 +106,24 @@ class NotificationPolicyTest {
         assertEquals("5 job (tim 2 · follow 3) · +12 xu", NotificationText.taskAccountDone("@abc", 5, 2, 3, 12.0).body)
         assertEquals("Không có job nào được làm", NotificationText.taskAccountDone("abc", 0, 0, 0, 0.0).body)
     }
+
+    // ── v1.12.6: nhóm Đồng bộ ─────────────────────────────────
+    @Test fun `tat nhom dong bo khong anh huong nhom khac`() {
+        val p = on.copy(sync = false)
+        assertEquals(NotifDecision.DROP, NotificationPolicy.decide(p, NotifCategory.SYNC, 12))
+        assertEquals(NotifDecision.POST, NotificationPolicy.decide(p, NotifCategory.ALERT, 12))
+        assertEquals(NotifDecision.POST, NotificationPolicy.decide(p, NotifCategory.TASK, 12))
+    }
+
+    @Test fun `nhom dong bo im lang trong gio yen tinh`() {
+        val p = on.copy(quietEnabled = true, quietStartHour = 22, quietEndHour = 7)
+        assertEquals(NotifDecision.POST_SILENT, NotificationPolicy.decide(p, NotifCategory.SYNC, 1))
+        assertEquals(NotifDecision.POST, NotificationPolicy.decide(p, NotifCategory.SYNC, 12))
+    }
+
+    @Test fun `phien Follow4Follow het han noi dung ngan`() {
+        val t = NotificationText.f4fSessionExpired()
+        assertEquals("Follow4Follow cần đăng nhập lại", t.title)
+        assertFalse(t.body.contains("→"))
+    }
 }
