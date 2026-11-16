@@ -507,7 +507,7 @@ This section supersedes the Phase 6.1 follow-up item that said Auth repository/s
 
 New file: `android/app/src/test/kotlin/com/atpro/auth/data/SupabaseAuthRepositoryTest.kt`.
 
-It contains 13 tests covering email-confirmation signup response, token sign-in followed by current-user lookup, refresh-token rotation, malformed/absent expiry fallback, definitive invalid refresh-token handling, unrelated 400/401 errors preserving the session, transient server errors, persistence failure after refresh, local-only restore, local-scope sign-out, local-clear failure, and concurrent refresh serialization.
+It is run with Robolectric 4.11.1 and contains 13 tests covering email-confirmation signup response, token sign-in followed by current-user lookup, refresh-token rotation, malformed/absent expiry fallback, definitive invalid refresh-token handling, unrelated 400/401 errors preserving the session, transient server errors, persistence failure after refresh, local-only restore, local-scope sign-out, local-clear failure, and concurrent refresh serialization.
 
 ### Security contract and hosted settings
 
