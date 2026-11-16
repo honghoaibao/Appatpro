@@ -488,3 +488,37 @@ This section supersedes earlier statements in this document that described the w
 2. Review account binding, remote revision restore, pending Outbox recovery and two-installation merge behavior against the latest source.
 3. Review Auth project settings, especially leaked-password protection, with the project owner; do not silently change hosted confirmation behavior.
 4. Run the single Android build/JUnit verification gate only after the user explicitly authorizes it. Do not dispatch GitHub Actions during iterative source work.
+
+
+## Phase 6.2 — Auth and session hardening (2026-11-16)
+
+This section supersedes the Phase 6.1 follow-up item that said Auth repository/session tests were still to be added. The tests are now authored in source but remain unexecuted.
+
+### Source changes
+
+- `SupabaseAuthRepository` clears the local refresh session only for recognized refresh-session rejection codes/messages (for example `refresh_token_not_found`, `refresh_token_already_used`, `session_not_found`, `session_expired`) within Auth client-error status ranges. An unrelated 400/401 response such as an invalid API key no longer clears a user's refresh session.
+- The refresh response's rotated access/refresh pair is persisted non-cancellably. If local persistence fails after the server has issued a replacement token, the possibly consumed old token is discarded from in-memory/local storage best-effort rather than retried as if it were current.
+- Token expiry parsing accepts only positive `expires_at` / `expires_in` values, uses the one-hour default if the relative expiry is absent or malformed, and saturates rather than overflowing when calculating an absolute expiry. Missing/invalid token_type falls back to `bearer`.
+- Supabase HTTP requests set `Cache-Control: no-store` and `Pragma: no-cache`; the existing bounded response size, HTTPS-only project URL and disabled redirects remain unchanged.
+- An invalidated Android Keystore AES-GCM key is removed together with the unreadable session payload, allowing a later successful sign-in to create a fresh key. The old session cannot be recovered when its key is permanently invalidated.
+- `DashboardActivity` now observes the process-wide Auth session StateFlow. If a background refresh definitively invalidates and clears the local session, the visible dashboard returns to Auth instead of remaining on a stale signed-in screen. Redirect is guarded against duplicate navigation during explicit sign-out.
+
+### Tests added
+
+New file: `android/app/src/test/kotlin/com/atpro/auth/data/SupabaseAuthRepositoryTest.kt`.
+
+It contains 13 tests covering email-confirmation signup response, token sign-in followed by current-user lookup, refresh-token rotation, malformed/absent expiry fallback, definitive invalid refresh-token handling, unrelated 400/401 errors preserving the session, transient server errors, persistence failure after refresh, local-only restore, local-scope sign-out, local-clear failure, and concurrent refresh serialization.
+
+### Security contract and hosted settings
+
+- Email confirmation behavior remains response-driven; no hosted confirmation setting was changed.
+- Sign-out remains `scope=local`, so only the current device's session is revoked on the server. A local logout still completes when server revocation is unavailable.
+- No passwords or tokens were added to logs or cloud snapshots.
+- No Supabase key, project setting, schema, policy, RPC, row or production data was changed in this phase.
+
+### Verification boundary
+
+- Changed source/test files were fetched again from the completion branch after updates.
+- The 13 new JVM tests were authored but not executed. Android/Kotlin compilation and device-level Keystore/navigation behavior remain unverified.
+- No GitHub Actions workflow was dispatched, no PR was opened, and `main` remains unchanged.
+- Keep the single Android build/JUnit gate deferred until the user separately authorizes it.
