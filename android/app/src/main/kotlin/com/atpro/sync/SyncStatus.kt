@@ -32,6 +32,15 @@ object SyncStatusCodes {
     const val LOCAL_SYNC_FAILED = "local_sync_failed"
 }
 
+/** Pure policy for the user-triggered sync cooldown. A clock rollback fails closed. */
+object ManualSyncPolicy {
+    fun canRequest(lastRequestAtMs: Long, nowMs: Long, minIntervalMs: Long): Boolean {
+        if (lastRequestAtMs <= 0L || minIntervalMs <= 0L) return true
+        if (nowMs < lastRequestAtMs) return false
+        return nowMs - lastRequestAtMs >= minIntervalMs
+    }
+}
+
 /** Kết quả cuối cùng của một lần đồng bộ (không gồm "đang thử lại" — đó là cờ riêng của [SyncStatusSnapshot]). */
 enum class SyncOutcome {
     /** Chưa chạy lần nào trên máy này. */
