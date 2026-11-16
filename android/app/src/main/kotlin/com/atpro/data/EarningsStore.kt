@@ -47,6 +47,7 @@ object EarningsStore {
     private const val DIRTY_FORMAT = "v1"
 
     @Volatile private var dir: File? = null
+    @Volatile private var syncTrigger: (() -> Unit)? = null
     private val lock = Any()
     private var appendsSinceTrim = 0
 
@@ -54,6 +55,19 @@ object EarningsStore {
         synchronized(lock) {
             val target = context.applicationContext.filesDir
             dir = target
+        }
+    }
+
+    /** Install a lightweight callback for successful file-backed mutations. */
+    fun setSyncTrigger(trigger: (() -> Unit)?) {
+        syncTrigger = trigger
+    }
+
+    private fun notifySyncTrigger() {
+        try {
+            syncTrigger?.invoke()
+        } catch (_: Exception) {
+            // The durable dirty generation is recovered by the next startup preflight.
         }
     }
 
@@ -66,6 +80,7 @@ object EarningsStore {
         val directory = dir ?: return
         if (!reward.isFinite() || reward < 0.0) return
 
+        var recorded = false
         try {
             synchronized(lock) {
                 initializeDirtyMarkerLocked(directory)
@@ -84,6 +99,7 @@ object EarningsStore {
                     output.flush()
                     output.fd.sync()
                 }
+                recorded = true
 
                 if (++appendsSinceTrim >= 200) {
                     appendsSinceTrim = 0
@@ -93,6 +109,7 @@ object EarningsStore {
         } catch (_: Exception) {
             // Earnings are auxiliary; storage failures must not crash the service.
         }
+        if (recorded) notifySyncTrigger()
     }
 
     /** Consistent file contents + dirty generation under a single process lock. */
