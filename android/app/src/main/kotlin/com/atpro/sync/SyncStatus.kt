@@ -160,6 +160,7 @@ object SyncStatusText {
             val reason = when {
                 s.retrying -> "Mạng hoặc máy chủ chưa sẵn sàng"
                 else -> when (s.outcome) {
+                    SyncOutcome.EMPTY_READY -> "Thiết bị chưa có dữ liệu cần sao lưu"
                     SyncOutcome.NOT_LINKED -> "Liên kết dữ liệu với tài khoản này để bắt đầu"
                     SyncOutcome.OWNER_CHANGED -> "Dữ liệu trên máy thuộc tài khoản khác"
                     SyncOutcome.AUTH_EXPIRED -> "Đăng xuất rồi đăng nhập lại"
