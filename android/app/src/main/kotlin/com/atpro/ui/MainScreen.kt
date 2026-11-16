@@ -108,13 +108,19 @@ fun MainScreen(
     val ownershipScope = rememberCoroutineScope()
 
     LaunchedEffect(authSession?.user?.id) {
-        backupOwnershipManager.refresh(authSession?.user?.id)
-        try {
-            SyncWorkScheduler.scheduleIfPending(context)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            // Pending local changes remain durable; next launch or backed write retries scheduling.
+        val ownerId = authSession?.user?.id
+        backupOwnershipManager.refresh(ownerId)
+        if (!ownerId.isNullOrBlank() &&
+            backupOwnershipManager.isBoundToCurrentUser(ownerId)
+        ) {
+            try {
+                // Login/session restore is also a cloud preflight, even with an empty Outbox.
+                SyncWorkScheduler.scheduleBootstrap(context)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Work remains durable once enqueued; the next app entry retries bootstrap.
+            }
         }
     }
     var selectedTab by remember { mutableStateOf(Tab.DASHBOARD) }
@@ -224,7 +230,8 @@ fun MainScreen(
                                     result == com.atpro.sync.BackupOwnerBindingResult.AlreadyBound
                                 ) {
                                     try {
-                                        SyncWorkScheduler.scheduleIfPending(context)
+                                        // Explicit owner confirmation authorizes the first cloud preflight.
+                                        SyncWorkScheduler.scheduleBootstrap(context)
                                     } catch (cancelled: CancellationException) {
                                         throw cancelled
                                     } catch (_: Exception) {
