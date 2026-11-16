@@ -446,3 +446,45 @@ Phase 5.6 completes the local side of a successful remote CAS, without activatin
 - Cài đặt → Sao lưu dữ liệu đọc `SyncStatusStore.state`: tiêu đề, "Lần cuối …", số thay đổi chờ gửi, nút **Đồng bộ ngay**.
 - `SyncWorkScheduler.requestManual()`: cùng tên công việc, từ chối khi đang RUNNING, `REPLACE` khi đang chờ debounce; `manual=true` bỏ qua bước thoát sớm "không có gì chờ gửi" để máy mới vẫn kéo được dữ liệu. ≥ 30 giây giữa hai lần.
 - Thông báo nhóm Đồng bộ: xem ADR-0027. Đăng xuất: `cancel()` + `clear()`.
+
+
+## Current source and production audit — 2026-11-16
+
+This section supersedes earlier statements in this document that described the worker as disabled or the production backup table as empty. Those statements were accurate for the earlier Phase 5.5/5.6 checkpoints, but are stale for the current `main` source and connected AT App project.
+
+### Source baseline
+
+- Audited repository: `honghoaibao/Appatpro`, default branch `main`.
+- Audited source head before this completion branch: `69b3f49b630a6ee9073c3ca64cd65f376ccb501c` (2026-11-16; source archive extracted into repository root).
+- Application source identifies version `v1.12.6`, versionCode `46`.
+- Auth, Room-first snapshot v3, Outbox, deterministic merge, staged restore, CAS, acknowledgement, WorkManager worker, status UI and manual sync are present in source.
+- The current `SyncWorker` is production-wired in source; do not describe it as preflight-only. It performs bounded read/merge/CAS, optional single refresh after HTTP 401, staged local restore, and exact acknowledgement.
+- Android build and JUnit have not been run against this 2026-11-16 source snapshot. Source presence is not proof of runtime correctness.
+
+### Connected Supabase project — read-only audit
+
+- Project: `AT App`, project ref `sctzyxhwcatngwtjhwlf`, status `ACTIVE_HEALTHY`, PostgreSQL 17.
+- Five migrations are recorded in the connected project.
+- All six inspected public tables have RLS enabled.
+- The normalized `accounts`, `configs`, `devices`, `farm_logs` and `sessions` tables have authenticated owner-scoped policies. The app's current snapshot sync intentionally writes only to `user_backups`.
+- `user_backups` grants authenticated SELECT only; direct client INSERT/UPDATE/DELETE are not granted. Its only authenticated policy is owner-scoped SELECT. The authenticated write path is `save_user_backup`.
+- `save_user_backup` is SECURITY DEFINER with an empty search_path, derives owner identity from `auth.uid()`, validates the payload envelope and performs revision CAS. EXECUTE is denied to PUBLIC/anon and granted to authenticated. The Security Advisor warning for an authenticated caller of a SECURITY DEFINER function is an intentional RPC surface that still requires continued review; do not remove the RPC grant or weaken the function without replacing the write design.
+- `daily_stats` is configured with `security_invoker=true`.
+- The remote `user_backups` table contains one row at revision 3 / schema v3 (13,852 payload bytes at audit time). Payload contents were not read. Earlier documentation claiming zero rows is stale.
+- Security Advisor also reports leaked-password protection disabled. This is an Auth project setting, not an Android code defect; it remains unchanged and should be enabled/reviewed in Supabase Auth settings by the project owner.
+- Performance Advisor's unused-index notices are informational against mostly empty tables; no index was removed.
+
+### Completion-branch change
+
+- Branch: `feature/supabase-completion-2026-11-16`.
+- Fixed manual-sync throttling: the cooldown is now measured from the accepted manual request, persisted independently of worker completion, serialized with a Mutex, and aware of an already queued manual job. Automatic debounce work can still be replaced by a manual request when allowed.
+- Added pure policy tests for the first request, the 30-second boundary, and clock rollback.
+- No Supabase schema, row, Auth setting, key, or production data was modified in this audit/change.
+- No GitHub Actions workflow was dispatched. No PR was opened and `main` was not changed.
+
+### Remaining verification and follow-up
+
+1. Add focused Auth repository/session lifecycle tests and end-to-end sync coordinator/worker tests where practical.
+2. Review account binding, remote revision restore, pending Outbox recovery and two-installation merge behavior against the latest source.
+3. Review Auth project settings, especially leaked-password protection, with the project owner; do not silently change hosted confirmation behavior.
+4. Run the single Android build/JUnit verification gate only after the user explicitly authorizes it. Do not dispatch GitHub Actions during iterative source work.
