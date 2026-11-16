@@ -12,7 +12,7 @@ class SyncWorkSchedulingPolicyTest {
             SyncWorkSchedulingPolicy.forLocalMutation(
                 hasPendingData = false,
                 hasRunningWork = false,
-                hasQueuedLocalFollowUp = false,
+                hasQueuedFollowUp = false,
             ),
         )
     }
@@ -24,7 +24,7 @@ class SyncWorkSchedulingPolicyTest {
             SyncWorkSchedulingPolicy.forLocalMutation(
                 hasPendingData = true,
                 hasRunningWork = false,
-                hasQueuedLocalFollowUp = false,
+                hasQueuedFollowUp = false,
             ),
         )
     }
@@ -36,7 +36,7 @@ class SyncWorkSchedulingPolicyTest {
             SyncWorkSchedulingPolicy.forLocalMutation(
                 hasPendingData = true,
                 hasRunningWork = true,
-                hasQueuedLocalFollowUp = false,
+                hasQueuedFollowUp = false,
             ),
         )
         assertEquals(
@@ -44,7 +44,7 @@ class SyncWorkSchedulingPolicyTest {
             SyncWorkSchedulingPolicy.forLocalMutation(
                 hasPendingData = true,
                 hasRunningWork = true,
-                hasQueuedLocalFollowUp = true,
+                hasQueuedFollowUp = true,
             ),
         )
     }
