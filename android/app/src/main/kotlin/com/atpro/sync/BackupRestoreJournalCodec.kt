@@ -119,6 +119,7 @@ internal data class DecodedBackupRestoreJournal(
     val remoteCheckpoint: BackupRestoreCheckpoint? = null,
 )
 
+@Serializable
 internal data class BackupRestoreCheckpoint(
     val expectedLocalRevision: Long,
     val remoteRevision: Long,
