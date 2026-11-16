@@ -1,5 +1,35 @@
 # Current Focus
 
+## Current execution state — 2026-11-16 (Phase 5 Automatic-first Sync)
+
+- Active branch: `feature/supabase-completion-2026-11-16`.
+- Baseline remains v1.12.6 / versionCode 46.
+- Phase 5 Sub-phase A (Audit) and B (Architecture Design) are complete.
+- Phase 5 C1 (Sync Bootstrap Foundation) is implemented in source: empty-local classification, restore-only handling for a valid remote backup, no blank cloud upload when both sides are empty, fail-closed remote errors, journaled remote-checkpoint updates, and EMPTY_READY status. Source-contract inspection passed 8/8 at C1 completion. Android compile/JUnit/APK/runtime remain unverified.
+- Phase 5 C2 (Automatic Trigger Lifecycle) is implemented in source: bootstrap after verified owner-bound login/session restore and after explicit owner confirmation; retained post-transaction Room/Outbox preflight hooks; EarningsStore callback after successful file writes; one unique WorkManager chain with CONNECTED constraint, local debounce, exponential backoff, and one coalesced follow-up while a worker is running; restore-only also rechecks pending Earnings state after journal/checkpoint completion and queues a follow-up when needed. Six pure scheduler-policy tests were added. Source-contract inspection passed 13/13.
+- C2 verification remains outstanding: Android compile, JUnit/Robolectric, APK build, and physical-device reconnect/process-death tests. No workflow was explicitly dispatched or rerun. See `.claude/revision/phase5-c2-automatic-trigger-lifecycle-2026-11-16.md`.
+- C1 detail: `.claude/revision/phase5-c1-bootstrap-foundation-2026-11-16.md`.
+- Phase 5 C3 (Session Isolation & Conflict) is implemented in source: shared process-wide Auth/Sync session-generation guard; double invalidation around logout; owner + installation + generation capture per worker; guarded remote CAS, restore, Room/Outbox/Earnings acknowledgement, and retry metadata; stale workers suppress prior-session status/notifications. Added guard, Auth, CAS and acknowledgement tests. See `.claude/revision/phase5-c3-session-isolation-conflict-2026-11-16.md`.
+- C3 verification remains outstanding: Android compile, JUnit/Robolectric, APK build, and physical-device logout/relogin race tests. No manual GitHub Actions dispatch/rerun. No Supabase production change; `main` unchanged.
+- Phase 5 C4 (State UI Integration & Regression) is implemented in source: owner-state UI gate prevents previous-account state flash during Auth identity transitions; worker RUNNING state is set only after owner/session guard capture; manual enqueue no longer shows RUNNING while queued/offline; stale worker spinner cleanup is generation-aware. Added `BackupOwnershipUiPolicyTest` and expanded `SyncStatusTest`. See `.claude/revision/phase5-c4-state-ui-integration-2026-11-16.md`.
+- C4 verification remains outstanding: Android compile, JUnit/Robolectric, APK build, and physical-device logout/login + queued-offline UI tests. No manual Actions dispatch/rerun. No Supabase production change; `main` unchanged.
+- Full app-data clear/uninstall removes local metadata and tombstones; prior explicit deletion cannot be inferred from erased local evidence. Cloud recovery after explicit owner confirmation remains the source of truth.
+
+
+## Current execution state — 2026-11-16 (Phase 5 Automatic-first Sync)
+
+- Active branch: `feature/supabase-completion-2026-11-16`.
+- Baseline remains v1.12.6 / versionCode 46.
+- Phase 5 Sub-phase A (Audit) and B (Architecture Design) are complete.
+- Phase 5 Sub-phase C1 (Sync Bootstrap Foundation) is implemented on this branch. It adds empty-local classification, restore-only handling for a valid remote backup, a no-blank-upload result when both sides are empty, fail-closed remote-read/validation behavior, journaled remote-checkpoint updates, and explicit EMPTY_READY status.
+- C1 tests added for local-state classification, bootstrap CAS decisions, remote invalid/read failure, journal checkpoint metadata, and empty-state UI copy.
+- Source-level contract inspection after edits: 11/11 checks passed.
+- **Not verified:** Android compile, JUnit/Robolectric, APK build, and physical-device RT-07 through RT-14. GitHub Actions was not run. See `.claude/revision/phase5-c1-bootstrap-foundation-2026-11-16.md`.
+- C1 consumes `INPUT_FORCE_REMOTE_CHECK` in SyncWorker, but scheduler trigger wiring remains for C2.
+- Next: await approval before C2 — Automatic Trigger Lifecycle. Do not run GitHub Actions, change Supabase production resources, or merge `main` without separate authorization.
+- Full app-data clear/uninstall removes local metadata and tombstones; the app cannot infer prior explicit deletion from erased local evidence. Cloud recovery after fresh owner confirmation remains the source of truth.
+
+
 ## Current execution state — 2026-11-16
 
 - Active branch: `feature/supabase-completion-2026-11-16`.

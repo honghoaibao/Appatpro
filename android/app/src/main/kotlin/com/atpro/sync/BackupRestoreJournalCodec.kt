@@ -21,7 +21,11 @@ internal object BackupRestoreJournalCodec {
         isLenient = false
     }
 
-    fun encode(snapshot: BackupSnapshot, ownerUserId: String): String {
+    fun encode(
+        snapshot: BackupSnapshot,
+        ownerUserId: String,
+        remoteCheckpoint: BackupRestoreCheckpoint? = null,
+    ): String {
         BackupSnapshotValidator.validate(snapshot)
         require(snapshot.formatVersion == BackupSnapshot.CURRENT_FORMAT_VERSION) {
             "Only snapshot v3 can be staged for local restore"
@@ -30,6 +34,7 @@ internal object BackupRestoreJournalCodec {
         if (!BackupMetadataRules.isCanonicalUuid(ownerUserId)) {
             throw BackupRestoreException("Restore journal owner ID is invalid")
         }
+        validateRemoteCheckpoint(remoteCheckpoint)
         val encoded = BackupCodec.encode(snapshot)
         val record = BackupRestoreJournalRecord(
             journalVersion = JOURNAL_VERSION,
@@ -37,6 +42,7 @@ internal object BackupRestoreJournalCodec {
             schemaVersion = encoded.schemaVersion,
             payload = encoded.payload,
             checksum = encoded.checksum,
+            remoteCheckpoint = remoteCheckpoint,
         )
         val text = json.encodeToString(record)
         if (text.toByteArray(Charsets.UTF_8).size > MAX_JOURNAL_BYTES) {
@@ -59,6 +65,7 @@ internal object BackupRestoreJournalCodec {
         return DecodedBackupRestoreJournal(
             snapshot = snapshot,
             ownerUserId = record.ownerUserId,
+            remoteCheckpoint = record.remoteCheckpoint.also(::validateRemoteCheckpoint),
         )
     }
 
@@ -68,6 +75,20 @@ internal object BackupRestoreJournalCodec {
             snapshot.datasets.tombstones.size > BackupSnapshotValidator.MAX_TOMBSTONES
         ) {
             throw BackupRestoreException("Snapshot exceeds a restore dataset safety bound")
+        }
+    }
+
+    private fun validateRemoteCheckpoint(checkpoint: BackupRestoreCheckpoint?) {
+        if (checkpoint == null) return
+        if (checkpoint.expectedLocalRevision < 0L ||
+            checkpoint.remoteRevision < checkpoint.expectedLocalRevision ||
+            !BackupMetadataRules.isValidChecksum(checkpoint.remoteChecksum) ||
+            checkpoint.remoteSchemaVersion !in setOf(
+                BackupSnapshot.LEGACY_FORMAT_VERSION,
+                BackupSnapshot.CURRENT_FORMAT_VERSION,
+            )
+        ) {
+            throw BackupRestoreException("Restore journal remote checkpoint is invalid")
         }
     }
 
@@ -88,6 +109,7 @@ internal object BackupRestoreJournalCodec {
         ) {
             throw BackupRestoreException("Unsupported or invalid local restore journal metadata")
         }
+        validateRemoteCheckpoint(record.remoteCheckpoint)
         return record
     }
 }
@@ -95,6 +117,15 @@ internal object BackupRestoreJournalCodec {
 internal data class DecodedBackupRestoreJournal(
     val snapshot: BackupSnapshot,
     val ownerUserId: String,
+    val remoteCheckpoint: BackupRestoreCheckpoint? = null,
+)
+
+@Serializable
+data class BackupRestoreCheckpoint(
+    val expectedLocalRevision: Long,
+    val remoteRevision: Long,
+    val remoteChecksum: String,
+    val remoteSchemaVersion: Int,
 )
 
 @Serializable
@@ -104,4 +135,5 @@ internal data class BackupRestoreJournalRecord(
     val schemaVersion: Int,
     val payload: String,
     val checksum: String,
+    val remoteCheckpoint: BackupRestoreCheckpoint? = null,
 )

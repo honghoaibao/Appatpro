@@ -54,4 +54,33 @@ interface SyncMetadataDao {
         formatVersion: Int,
         confirmedAt: Long,
     ): Int
+
+    /**
+     * Record a remote revision after a journaled cloud restore has been fully applied.
+     * Unlike a CAS commit this may jump across revisions created by other devices.
+     * The expected local revision prevents a stale restore from moving the checkpoint.
+     */
+    @Query("""
+        UPDATE sync_metadata
+        SET lastRemoteRevision = :remoteRevision,
+            lastSuccessfulSyncAt = :confirmedAt,
+            lastRevisionConfirmedAt = :confirmedAt,
+            lastChecksum = :checksum,
+            formatVersion = :formatVersion,
+            syncStatus = 'IDLE',
+            updatedAt = :confirmedAt
+        WHERE id = 1
+          AND ownerUserId = :ownerUserId
+          AND ownerBoundAt IS NOT NULL
+          AND lastRemoteRevision = :expectedLocalRevision
+    """)
+    suspend fun recordRestoredRevision(
+        ownerUserId: String,
+        expectedLocalRevision: Long,
+        remoteRevision: Long,
+        checksum: String,
+        formatVersion: Int,
+        confirmedAt: Long,
+    ): Int
+
 }

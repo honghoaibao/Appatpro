@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.atpro.auth.domain.AuthRepository
 import com.atpro.sync.BackupOwnershipManager
+import com.atpro.sync.BackupOwnershipUiPolicy
 import com.atpro.sync.ManualSyncRequest
 import com.atpro.sync.SyncStatusStore
 import com.atpro.sync.SyncWorkScheduler
@@ -106,17 +107,32 @@ fun MainScreen(
     val backupOwnershipState by backupOwnershipManager.state.collectAsStateWithLifecycle()
     val syncStatus by SyncStatusStore.state.collectAsStateWithLifecycle()
     val ownershipScope = rememberCoroutineScope()
+    var ownershipResolvedForUser by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(authSession?.user?.id) {
-        backupOwnershipManager.refresh(authSession?.user?.id)
-        try {
-            SyncWorkScheduler.scheduleIfPending(context)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            // Pending local changes remain durable; next launch or backed write retries scheduling.
+        val ownerId = authSession?.user?.id
+        // Never render the previous account's ownership state while a new owner is checked.
+        ownershipResolvedForUser = null
+        backupOwnershipManager.refresh(ownerId)
+        ownershipResolvedForUser = ownerId
+        if (!ownerId.isNullOrBlank() &&
+            backupOwnershipManager.isBoundToCurrentUser(ownerId)
+        ) {
+            try {
+                // Login/session restore is also a cloud preflight, even with an empty Outbox.
+                SyncWorkScheduler.scheduleBootstrap(context)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Work remains durable once enqueued; the next app entry retries bootstrap.
+            }
         }
     }
+    val visibleBackupOwnershipState = BackupOwnershipUiPolicy.resolve(
+        authUserId = authSession?.user?.id,
+        resolvedAuthUserId = ownershipResolvedForUser,
+        actualState = backupOwnershipState,
+    )
     var selectedTab by remember { mutableStateOf(Tab.DASHBOARD) }
     // v1.8.0: Thống kê / Lịch tự động mở dạng màn hình phủ (null = đóng); giữ overlay cuối để hiệu ứng đóng không bị trống.
     var overlay     by remember { mutableStateOf<Overlay?>(null) }
@@ -213,7 +229,7 @@ fun MainScreen(
                         onOpenStats    = { openOverlay(Overlay.STATS) },
                         onOpenSchedule = { openOverlay(Overlay.SCHEDULE) },
                         authEmail = authSession?.user?.email,
-                        backupOwnershipState = backupOwnershipState,
+                        backupOwnershipState = visibleBackupOwnershipState,
                         onBindBackupOwner = {
                             ownershipScope.launch {
                                 val result = backupOwnershipManager.bindToCurrentUser(
@@ -224,7 +240,8 @@ fun MainScreen(
                                     result == com.atpro.sync.BackupOwnerBindingResult.AlreadyBound
                                 ) {
                                     try {
-                                        SyncWorkScheduler.scheduleIfPending(context)
+                                        // Explicit owner confirmation authorizes the first cloud preflight.
+                                        SyncWorkScheduler.scheduleBootstrap(context)
                                     } catch (cancelled: CancellationException) {
                                         throw cancelled
                                     } catch (_: Exception) {

@@ -112,6 +112,30 @@ class BackupAcknowledgementCoordinatorTest {
     }
 
     @Test
+    fun invalidatedSessionCannotRestoreOrAcknowledgeLocalState() = runBlocking {
+        val guard = SyncSessionGuard()
+        guard.activate(owner)
+        val context = guard.capture(owner, install)!!
+        guard.invalidate()
+        val restore = FakeRestore()
+        val room = FakeRoom()
+        val earnings = FakeEarnings()
+        val coordinator = BackupAcknowledgementCoordinator(
+            restore,
+            room,
+            earnings,
+            executionGuard = guard,
+        )
+
+        val result = coordinator.acknowledge(session(), committed(), context)
+
+        assertTrue(result is BackupAcknowledgementResult.SessionInvalidated)
+        assertEquals(0, restore.called)
+        assertEquals(0, room.called)
+        assertEquals(null, earnings.acknowledgedGeneration)
+    }
+
+    @Test
     fun acknowledgesOnlyCapturedOutboxIdsAndCapturedEarningsGeneration() = runBlocking {
         val event = BackupOutboxAckCandidate(eventId, 1L, "accounts", "sample", "UPSERT")
         val build = build(events = listOf(event), generation = 7L)

@@ -38,6 +38,12 @@ sealed interface BackupCasResult {
         val checksum: String,
     ) : BackupCasResult
     data class UpToDate(val revision: Long) : BackupCasResult
+    data class RestoreRequired(
+        val snapshot: BackupSnapshot,
+        val checkpoint: BackupRestoreCheckpoint,
+    ) : BackupCasResult
+    data object EmptyLocalNoRemoteBackup : BackupCasResult
+    data object SessionInvalidated : BackupCasResult
     data class Conflicted(val conflicts: List<BackupMergeConflict>) : BackupCasResult
     data class RetryLater(val attempts: Int) : BackupCasResult
     data class Failed(val failure: BackupRemoteFailure) : BackupCasResult
@@ -54,13 +60,23 @@ class BackupCasCoordinator(
     private val snapshotProvider: BackupSnapshotProvider,
     private val ownerBindingValidator: BackupOwnerBindingValidator,
     private val codec: BackupSnapshotCodecPort = AndroidBackupSnapshotCodec,
+    private val executionGuard: SyncSessionGuard? = null,
 ) {
-    suspend fun run(session: AuthSession): BackupCasResult {
+    suspend fun run(
+        session: AuthSession,
+        executionContext: SyncExecutionContext? = null,
+    ): BackupCasResult {
         // Keep the owner identity and JWT together as one AuthRepository-issued value.
         val ownerId = BackupMetadataRules.normalizeAuthUserId(session.user.id)
             ?: return BackupCasResult.Rejected("A valid authenticated owner is required")
         val token = session.accessToken.trim().takeIf { it.isNotEmpty() }
             ?: return BackupCasResult.Rejected("An authenticated access token is required")
+        if (executionGuard != null) {
+            val context = executionContext ?: return BackupCasResult.SessionInvalidated
+            if (context.ownerUserId != ownerId || context.installationId.isBlank() ||
+                !executionGuard.isCurrent(context)
+            ) return BackupCasResult.SessionInvalidated
+        }
         val isLocallyBound = try {
             ownerBindingValidator.isBoundToOwner(ownerId)
         } catch (cancelled: CancellationException) {
@@ -94,6 +110,11 @@ class BackupCasCoordinator(
                 )
             }
 
+            if (executionContext != null &&
+                localBuild.snapshot.sourceInstallId != executionContext.installationId
+            ) return BackupCasResult.SessionInvalidated
+            if (!isExecutionCurrent(executionContext)) return BackupCasResult.SessionInvalidated
+
             when (BackupAcknowledgementPolicy.plan(localBuild, localBuild.snapshot)) {
                 is BackupAcknowledgementPlanResult.Rejected ->
                     return BackupCasResult.Failed(
@@ -103,11 +124,13 @@ class BackupCasCoordinator(
             }
 
             val local = localBuild.snapshot
+            if (!isExecutionCurrent(executionContext)) return BackupCasResult.SessionInvalidated
             val remote = when (val read = remoteStore.read(ownerId, token)) {
                 BackupRemoteReadResult.Missing -> null
                 is BackupRemoteReadResult.Failed -> return BackupCasResult.Failed(read.failure)
                 is BackupRemoteReadResult.Found -> read.record
             }
+            if (!isExecutionCurrent(executionContext)) return BackupCasResult.SessionInvalidated
             if (remote != null && (
                     remote.revision < 0L ||
                         remote.schemaVersion !in setOf(
@@ -131,6 +154,47 @@ class BackupCasCoordinator(
             if (expectedRevision < localBuild.localExpectedRevision) {
                 return BackupCasResult.Failed(
                     BackupRemoteFailure("remote_revision_behind_local_checkpoint", retryable = false)
+                )
+            }
+
+            // Never create a cloud row from a blank installation. An empty local state with
+            // a non-zero checkpoint is already rejected above when the remote row is missing.
+            if (remote == null && BackupLocalStatePolicy.isTrulyEmpty(localBuild)) {
+                return BackupCasResult.EmptyLocalNoRemoteBackup
+            }
+
+            // A genuinely empty local installation must restore a validated remote snapshot
+            // before any upload decision, even when its stored checkpoint/checksum looks current.
+            if (remote != null && BackupLocalStatePolicy.isTrulyEmpty(localBuild)) {
+                val remoteSnapshot = try {
+                    codec.decode(remote.payload, remote.checksum, remote.schemaVersion).also {
+                        BackupSnapshotValidator.validate(it)
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    return BackupCasResult.Failed(
+                        BackupRemoteFailure("remote_snapshot_invalid", retryable = false)
+                    )
+                }
+                val merged = when (val merge = try {
+                    BackupMergeEngine.merge(local, remoteSnapshot)
+                } catch (_: Exception) {
+                    return BackupCasResult.Failed(
+                        BackupRemoteFailure("snapshot_merge_invalid", retryable = false)
+                    )
+                }) {
+                    is BackupMergeResult.Conflicted -> return BackupCasResult.Conflicted(merge.conflicts)
+                    is BackupMergeResult.Merged -> merge.snapshot
+                }
+                return BackupCasResult.RestoreRequired(
+                    snapshot = merged,
+                    checkpoint = BackupRestoreCheckpoint(
+                        expectedLocalRevision = localBuild.localExpectedRevision,
+                        remoteRevision = remote.revision,
+                        remoteChecksum = remote.checksum,
+                        remoteSchemaVersion = remote.schemaVersion,
+                    ),
                 )
             }
 
@@ -197,7 +261,18 @@ class BackupCasCoordinator(
                 )
             }
 
-            when (val commit = remoteStore.commit(expectedRevision, encoded, token)) {
+            val commitResult = if (executionGuard != null && executionContext != null) {
+                when (val guarded = executionGuard.withLease(executionContext) {
+                    remoteStore.commit(expectedRevision, encoded, token)
+                }) {
+                    SyncGuardExecution.Invalidated -> return BackupCasResult.SessionInvalidated
+                    is SyncGuardExecution.Completed -> guarded.value
+                }
+            } else {
+                remoteStore.commit(expectedRevision, encoded, token)
+            }
+
+            when (val commit = commitResult) {
                 is BackupRemoteCommitResult.Committed -> {
                     if (commit.revision != expectedRevision + 1L) {
                         return BackupCasResult.Failed(
@@ -219,6 +294,13 @@ class BackupCasCoordinator(
         }
         return BackupCasResult.RetryLater(MAX_CAS_ATTEMPTS)
     }
+
+    private suspend fun isExecutionCurrent(context: SyncExecutionContext?): Boolean =
+        when {
+            executionGuard == null -> true
+            context == null -> false
+            else -> executionGuard.isCurrent(context)
+        }
 
     companion object {
         const val MAX_CAS_ATTEMPTS = 3

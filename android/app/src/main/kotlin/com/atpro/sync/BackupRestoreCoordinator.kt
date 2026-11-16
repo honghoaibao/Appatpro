@@ -47,6 +47,7 @@ class BackupRestoreCoordinator(context: Context) {
     suspend fun restore(
         mergedSnapshot: BackupSnapshot,
         authenticatedOwnerUserId: String?,
+        remoteCheckpoint: BackupRestoreCheckpoint? = null,
     ) = restoreMutex.withLock {
         withContext(Dispatchers.IO) {
             // Finish an earlier interrupted restore before staging another candidate.
@@ -63,6 +64,11 @@ class BackupRestoreCoordinator(context: Context) {
                 if (!BackupMetadataRules.isStructurallyValid(metadata) || metadata.ownerUserId != ownerId) {
                     throw BackupRestoreException("Authenticated owner is not bound to this local backup")
                 }
+                if (remoteCheckpoint != null &&
+                    metadata.lastRemoteRevision != remoteCheckpoint.expectedLocalRevision
+                ) {
+                    throw BackupRestoreException("Local remote checkpoint changed before restore staging")
+                }
                 if (mergedSnapshot.sourceInstallId != metadata.installationId) {
                     throw BackupRestoreException("Merged snapshot belongs to a different local installation")
                 }
@@ -77,7 +83,7 @@ class BackupRestoreCoordinator(context: Context) {
                         )
                     )
                 )
-                val journalText = BackupRestoreJournalCodec.encode(localSnapshot, ownerId)
+                val journalText = BackupRestoreJournalCodec.encode(localSnapshot, ownerId, remoteCheckpoint)
                 writeJournal(journalText)
                 applyJournalText(journalText)
             } catch (cancelled: CancellationException) {
@@ -132,7 +138,49 @@ class BackupRestoreCoordinator(context: Context) {
         // Cancel only. Never enqueue imported schedules. FarmWorker also treats disabled
         // or removed definitions as successful no-ops if it races this cancellation.
         ScheduledFarmManager.cancelRestoredSchedules(appContext, scheduleIds)
+        prepared.remoteCheckpoint?.let { checkpoint ->
+            recordRestoredCheckpoint(prepared.ownerUserId, snapshot.sourceInstallId, checkpoint)
+        }
         journal.delete()
+    }
+
+    /** Checkpoint is advanced only after Room, EarningsStore and schedule restore have completed. */
+    private suspend fun recordRestoredCheckpoint(
+        ownerUserId: String,
+        installationId: String,
+        checkpoint: BackupRestoreCheckpoint,
+    ) {
+        database.withTransaction {
+            val metadataDao = database.syncMetadataDao()
+            val metadata = metadataDao.get()
+                ?: throw BackupRestoreException("Local sync metadata row is missing after restore")
+            if (!BackupMetadataRules.isStructurallyValid(metadata) ||
+                metadata.ownerUserId != ownerUserId ||
+                metadata.installationId != installationId
+            ) {
+                throw BackupRestoreException("Restore checkpoint owner or installation changed")
+            }
+
+            val alreadyRecorded = metadata.lastRemoteRevision == checkpoint.remoteRevision &&
+                metadata.lastChecksum == checkpoint.remoteChecksum &&
+                metadata.formatVersion == checkpoint.remoteSchemaVersion
+            if (alreadyRecorded) return@withTransaction
+            if (metadata.lastRemoteRevision != checkpoint.expectedLocalRevision) {
+                throw BackupRestoreException("Local checkpoint changed while remote restore was being applied")
+            }
+
+            val updated = metadataDao.recordRestoredRevision(
+                ownerUserId = ownerUserId,
+                expectedLocalRevision = checkpoint.expectedLocalRevision,
+                remoteRevision = checkpoint.remoteRevision,
+                checksum = checkpoint.remoteChecksum,
+                formatVersion = checkpoint.remoteSchemaVersion,
+                confirmedAt = System.currentTimeMillis(),
+            )
+            if (updated != 1) {
+                throw BackupRestoreException("Could not commit the restored remote checkpoint")
+            }
+        }
     }
 
     private suspend fun applyRoomTransaction(

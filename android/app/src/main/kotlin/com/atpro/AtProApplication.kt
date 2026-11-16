@@ -13,6 +13,7 @@ import com.atpro.ui.theme.AtThemeState
 import com.atpro.db.AtProDatabase
 import com.atpro.sync.BackupOwnershipManager
 import com.atpro.sync.BackupRestoreCoordinator
+import com.atpro.sync.SyncSessionGuard
 import com.atpro.sync.SyncStatusStore
 import com.atpro.sync.SyncWorkScheduler
 import kotlinx.coroutines.*
@@ -26,9 +27,15 @@ class AtProApplication : MultiDexApplication() {
         BackupOwnershipManager(AtProDatabase.getInstance(applicationContext))
     }
 
+    /** Shared Auth/WorkManager fence; all workers and logout observe the same generation. */
+    val syncSessionGuard: SyncSessionGuard by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        SyncSessionGuard()
+    }
+
     val authRepository: AuthRepository by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         SupabaseAuthRepository(
             sessionStore = AndroidKeystoreAuthSessionStore(applicationContext),
+            syncSessionGuard = syncSessionGuard,
         )
     }
 
@@ -43,6 +50,17 @@ class AtProApplication : MultiDexApplication() {
         _ctx = applicationContext
         // Configure the file store before any automation service can record a reward.
         EarningsStore.init(this)
+        EarningsStore.setSyncTrigger {
+            appScope.launch {
+                try {
+                    SyncWorkScheduler.scheduleIfPending(this@AtProApplication)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Log.w("AtProApp", "Could not schedule sync after earnings write", error)
+                }
+            }
+        }
 
         // A staged restore journal is replayed before WorkManager preflight or UI/services
         // can observe a half-applied Room + Earnings state. Normal startup does no blocking IO.

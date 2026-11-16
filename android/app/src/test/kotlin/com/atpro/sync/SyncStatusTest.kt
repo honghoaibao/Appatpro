@@ -14,9 +14,11 @@ class SyncStatusTest {
     @Test fun `ma worker anh xa dung`() {
         assertEquals(SyncOutcome.COMMITTED, SyncOutcome.fromStatusCode(SyncStatusCodes.SYNC_COMMITTED))
         assertEquals(SyncOutcome.UP_TO_DATE, SyncOutcome.fromStatusCode(SyncStatusCodes.NO_PENDING_DATA))
+        assertEquals(SyncOutcome.EMPTY_READY, SyncOutcome.fromStatusCode(SyncStatusCodes.EMPTY_LOCAL_NO_REMOTE_BACKUP))
         assertEquals(SyncOutcome.SIGNED_OUT, SyncOutcome.fromStatusCode(SyncStatusCodes.SIGNED_OUT))
         assertEquals(SyncOutcome.NOT_LINKED, SyncOutcome.fromStatusCode(SyncStatusCodes.OWNER_NOT_BOUND))
         assertEquals(SyncOutcome.OWNER_CHANGED, SyncOutcome.fromStatusCode(SyncStatusCodes.AUTH_OWNER_CHANGED))
+        assertEquals(SyncOutcome.SIGNED_OUT, SyncOutcome.fromStatusCode(SyncStatusCodes.AUTH_SESSION_INVALIDATED))
         assertEquals(SyncOutcome.AUTH_EXPIRED, SyncOutcome.fromStatusCode(SyncStatusCodes.AUTH_REFRESH_FAILED))
         assertEquals(SyncOutcome.MERGE_CONFLICT, SyncOutcome.fromStatusCode(SyncStatusCodes.MERGE_CONFLICT))
         listOf(
@@ -36,6 +38,14 @@ class SyncStatusTest {
     @Test fun `ma la hoac thieu thi coi la loi`() {
         assertEquals(SyncOutcome.FAILED, SyncOutcome.fromStatusCode(null))
         assertEquals(SyncOutcome.FAILED, SyncOutcome.fromStatusCode("khong_biet"))
+    }
+
+    @Test fun `session invalidated duoc the hien nhu signed out va khong phat canh bao loi`() {
+        val outcome = SyncOutcome.fromStatusCode(SyncStatusCodes.AUTH_SESSION_INVALIDATED)
+        assertEquals(SyncOutcome.SIGNED_OUT, outcome)
+        assertEquals("Chưa đăng nhập", SyncStatusText.headline(SyncStatusSnapshot(outcome = outcome), 10_000L))
+        assertFalse(outcome.needsAttention)
+        assertFalse(SyncNotifyPolicy.shouldNotify(SyncOutcome.COMMITTED, outcome, manual = false))
     }
 
     @Test fun `thanh cong va can xu ly khong giao nhau`() {
@@ -88,6 +98,13 @@ class SyncStatusTest {
         assertEquals("Phiên đăng nhập hết hạn", SyncStatusText.headline(SyncStatusSnapshot(outcome = SyncOutcome.AUTH_EXPIRED), now))
         assertEquals("Chờ thử lại", SyncStatusText.headline(SyncStatusSnapshot(outcome = SyncOutcome.COMMITTED, retrying = true), now))
         assertEquals("Đang đồng bộ", SyncStatusText.headline(SyncStatusSnapshot(outcome = SyncOutcome.AUTH_EXPIRED, runningSince = now - min), now))
+    }
+
+    @Test fun `trang thai local trong va cloud chua co backup khong bi bao la da dong bo`() {
+        val state = SyncStatusSnapshot(outcome = SyncOutcome.EMPTY_READY)
+        assertEquals("Chưa có dữ liệu", SyncStatusText.headline(state, 1_000L))
+        assertEquals("Thiết bị chưa có dữ liệu cần sao lưu", SyncStatusText.detail(state, 1_000L))
+        assertFalse(SyncNotifyPolicy.shouldNotify(SyncOutcome.NEVER, SyncOutcome.EMPTY_READY, manual = false))
     }
 
     @Test fun `mo ta ghep lan cuoi va so thay doi cho`() {
