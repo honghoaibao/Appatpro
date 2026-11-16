@@ -12,6 +12,8 @@ import androidx.work.workDataOf
 import com.atpro.data.EarningsStore
 import com.atpro.db.AtProDatabase
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 
@@ -28,6 +30,9 @@ object SyncWorkScheduler {
 
     /** Hai lần bấm "Đồng bộ ngay" cách nhau tối thiểu — mỗi vòng thành công tăng revision trên máy chủ. */
     const val MANUAL_MIN_INTERVAL_MS = 30_000L
+
+    /** Prevent two rapid taps/coroutines from passing the persisted cooldown check together. */
+    private val manualRequestMutex = Mutex()
 
     suspend fun scheduleIfPending(context: Context): Boolean {
         val appContext = context.applicationContext
@@ -63,31 +68,43 @@ object SyncWorkScheduler {
      * vòng đồng bộ chạy song song: đang chạy thì từ chối, đang chờ debounce thì thay bằng lần chạy ngay.
      */
     suspend fun requestManual(context: Context): ManualSyncRequest = withContext(Dispatchers.IO) {
-        val appContext = context.applicationContext
-        SyncStatusStore.init(appContext)
-        val workManager = WorkManager.getInstance(appContext)
+        manualRequestMutex.withLock {
+            val appContext = context.applicationContext
+            SyncStatusStore.init(appContext)
+            val workManager = WorkManager.getInstance(appContext)
+            val workInfos = workManager.getWorkInfosForUniqueWork(UNIQUE_WORK_NAME).get()
 
-        val running = workManager.getWorkInfosForUniqueWork(UNIQUE_WORK_NAME).get()
-            .any { it.state == WorkInfo.State.RUNNING }
-        if (running) return@withContext ManualSyncRequest.ALREADY_RUNNING
+            val manualAlreadyActive = workInfos.any { info ->
+                info.state == WorkInfo.State.RUNNING ||
+                    ((info.state == WorkInfo.State.ENQUEUED || info.state == WorkInfo.State.BLOCKED) &&
+                        info.inputData.getBoolean(SyncStatusCodes.INPUT_MANUAL, false))
+            }
+            if (manualAlreadyActive) return@withLock ManualSyncRequest.ALREADY_RUNNING
 
-        val now = System.currentTimeMillis()
-        if (now - SyncStatusStore.state.value.lastAttemptAt < MANUAL_MIN_INTERVAL_MS) {
-            return@withContext ManualSyncRequest.TOO_SOON
+            val now = System.currentTimeMillis()
+            if (!ManualSyncPolicy.canRequest(
+                    lastRequestAtMs = SyncStatusStore.lastManualRequestAt(),
+                    nowMs = now,
+                    minIntervalMs = MANUAL_MIN_INTERVAL_MS,
+                )
+            ) {
+                return@withLock ManualSyncRequest.TOO_SOON
+            }
+
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
+            val request = OneTimeWorkRequestBuilder<SyncWorker>()
+                .setConstraints(constraints)
+                .setInputData(workDataOf(SyncStatusCodes.INPUT_MANUAL to true))
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30L, TimeUnit.SECONDS)
+                .addTag(UNIQUE_WORK_NAME)
+                .build()
+            workManager.enqueueUniqueWork(UNIQUE_WORK_NAME, ExistingWorkPolicy.REPLACE, request)
+            SyncStatusStore.markManualRequest(now)
+            SyncStatusStore.markRunning(now)
+            ManualSyncRequest.STARTED
         }
-
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-        val request = OneTimeWorkRequestBuilder<SyncWorker>()
-            .setConstraints(constraints)
-            .setInputData(workDataOf(SyncStatusCodes.INPUT_MANUAL to true))
-            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30L, TimeUnit.SECONDS)
-            .addTag(UNIQUE_WORK_NAME)
-            .build()
-        workManager.enqueueUniqueWork(UNIQUE_WORK_NAME, ExistingWorkPolicy.REPLACE, request)
-        SyncStatusStore.markRunning(now)
-        ManualSyncRequest.STARTED
     }
 
     /** Đăng xuất: bỏ lần chạy đang chờ của tài khoản cũ. */
