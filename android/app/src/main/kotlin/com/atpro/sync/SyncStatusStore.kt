@@ -94,7 +94,14 @@ object SyncStatusStore {
     @Synchronized
     fun clear() {
         _state.value = SyncStatusSnapshot()
-        prefs?.edit()?.clear()?.apply()
+        // Keep the device-level manual request cooldown across account sign-out.
+        prefs?.edit()
+            ?.remove(K_OUTCOME)
+            ?.remove(K_LAST_ATTEMPT)
+            ?.remove(K_LAST_SUCCESS)
+            ?.remove(K_PENDING)
+            ?.remove(K_RETRYING)
+            ?.apply()
     }
 
     private fun persist(s: SyncStatusSnapshot) {
