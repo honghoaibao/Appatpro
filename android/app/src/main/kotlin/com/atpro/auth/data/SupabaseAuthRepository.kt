@@ -278,18 +278,22 @@ class SupabaseAuthRepository(
      * a token that the server may already have invalidated.
      */
     private suspend fun persistRefreshedSession(session: AuthSession) {
+        var persisted = false
         try {
             withContext(NonCancellable + ioDispatcher) {
                 sessionStore.write(session)
+                mutableSession.value = session
+                persisted = true
             }
         } catch (cancelled: CancellationException) {
-            clearAfterFailedRefresh()
+            // withContext can report cancellation while switching back after its
+            // NonCancellable block has already stored the rotated pair.
+            if (!persisted) clearAfterFailedRefresh()
             throw cancelled
         } catch (error: Exception) {
             clearAfterFailedRefresh()
             throw error
         }
-        mutableSession.value = session
     }
 
     private suspend fun clearAfterFailedRefresh() {
@@ -483,7 +487,6 @@ class SupabaseAuthRepository(
         const val SIGN_OUT_LOCAL_PATH = "/auth/v1/logout?scope=local"
 
         const val DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS = 3_600L
-        const val UNAUTHORIZED_STATUS = 401
         val INVALID_REFRESH_ERROR_CODES = setOf(
             "refresh_token_not_found",
             "refresh_token_already_used",
