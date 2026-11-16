@@ -12,6 +12,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 
 /**
@@ -46,8 +47,14 @@ class AndroidKeystoreAuthSessionStore(context: Context) : AuthSessionStore {
                 preferences.edit().remove(KEY_SESSION).commit()
             }
             session
+        } catch (_: KeyPermanentlyInvalidatedException) {
+            // A permanently invalidated Keystore key cannot decrypt the old session.
+            // Remove both entries so the next successful sign-in can create a fresh key.
+            preferences.edit().remove(KEY_SESSION).commit()
+            deleteKey()
+            null
         } catch (_: Exception) {
-            // A corrupted or invalidated local session must not block app startup.
+            // A corrupted local session must not block app startup.
             preferences.edit().remove(KEY_SESSION).commit()
             null
         }
@@ -59,9 +66,15 @@ class AndroidKeystoreAuthSessionStore(context: Context) : AuthSessionStore {
             require(session.refreshToken.isNotBlank()) { "Refresh token must not be blank" }
             require(session.user.id.isNotBlank()) { "User id must not be blank" }
 
-            val cipher = Cipher.getInstance(TRANSFORMATION)
-            cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
-            val ciphertext = cipher.doFinal(encodeSession(session))
+            val plaintext = encodeSession(session)
+            val cipher = try {
+                newEncryptionCipher()
+            } catch (_: KeyPermanentlyInvalidatedException) {
+                // A fresh authenticated session may be stored under a newly generated key.
+                deleteKey()
+                newEncryptionCipher()
+            }
+            val ciphertext = cipher.doFinal(plaintext)
             val iv = cipher.iv ?: throw IOException("Android Keystore did not return an AES-GCM IV")
             val packed = Base64.encodeToString(iv + ciphertext, Base64.NO_WRAP)
 
@@ -76,6 +89,18 @@ class AndroidKeystoreAuthSessionStore(context: Context) : AuthSessionStore {
             if (!preferences.edit().remove(KEY_SESSION).commit()) {
                 throw IOException("Unable to clear the local auth session")
             }
+        }
+    }
+
+    private fun newEncryptionCipher(): Cipher =
+        Cipher.getInstance(TRANSFORMATION).apply {
+            init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+        }
+
+    private fun deleteKey() {
+        runCatching {
+            KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+                .deleteEntry(KEY_ALIAS)
         }
     }
 

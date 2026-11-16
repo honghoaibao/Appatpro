@@ -130,16 +130,22 @@ class BackupMergeEngineTest {
     }
 
     @Test
-    fun accountCreationTimeDisagreementIsExplicitConflict() {
-        val local = snapshot(installA, accounts = listOf(account(createdAt = 1L)))
-        val remote = snapshot(
+    fun accountCreationTimeDisagreementKeepsEarliestTimestampRegardlessOfMergeOrder() {
+        val olderCopy = snapshot(installA, accounts = listOf(account(createdAt = 100L)))
+        val newerCopy = snapshot(
             installB,
-            accounts = listOf(account(createdAt = 2L)),
+            accounts = listOf(account(createdAt = 200L)),
             contributions = listOf(contribution(installB)),
         )
+
+        val olderLocal = BackupMergeEngine.merge(olderCopy, newerCopy) as BackupMergeResult.Merged
+        val olderRemote = BackupMergeEngine.merge(newerCopy, olderCopy) as BackupMergeResult.Merged
+
+        assertEquals(100L, olderLocal.snapshot.datasets.accounts.single().createdAt)
+        assertEquals(100L, olderRemote.snapshot.datasets.accounts.single().createdAt)
         assertEquals(
-            BackupMergeConflictKind.ACCOUNT_CREATION_TIME,
-            statusConflict(BackupMergeEngine.merge(local, remote)).kind,
+            olderLocal.snapshot.datasets.accounts.single(),
+            olderRemote.snapshot.datasets.accounts.single(),
         )
     }
 

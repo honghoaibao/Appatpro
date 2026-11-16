@@ -60,6 +60,9 @@ class UrlConnectionSupabaseTransport : SupabaseHttpTransport {
             connection.readTimeout = config.readTimeoutMs
             connection.useCaches = false
             connection.instanceFollowRedirects = false
+            // Auth responses contain bearer/refresh credentials; never permit intermediary caching.
+            connection.setRequestProperty("Cache-Control", "no-store")
+            connection.setRequestProperty("Pragma", "no-cache")
             connection.setRequestProperty("apikey", config.publishableKey)
             connection.setRequestProperty("Accept", "application/json")
             connection.setRequestProperty("X-Client-Info", "atpro-android")

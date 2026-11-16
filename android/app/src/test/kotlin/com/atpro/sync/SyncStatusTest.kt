@@ -47,6 +47,17 @@ class SyncStatusTest {
         assertFalse(SyncOutcome.NEVER.needsAttention)
     }
 
+    // ── Giới hạn yêu cầu đồng bộ thủ công ─────────────────────
+    @Test fun `yeu cau dau tien duoc phep va cooldown duoc tinh tu luc yeu cau`() {
+        assertTrue(ManualSyncPolicy.canRequest(0L, 100_000L, 30_000L))
+        assertFalse(ManualSyncPolicy.canRequest(100_000L, 129_999L, 30_000L))
+        assertTrue(ManualSyncPolicy.canRequest(100_000L, 130_000L, 30_000L))
+    }
+
+    @Test fun `dong ho quay lui khong vuot qua cooldown`() {
+        assertFalse(ManualSyncPolicy.canRequest(100_000L, 99_999L, 30_000L))
+    }
+
     // ── Cờ đang chạy ──────────────────────────────────────────
     @Test fun `co dang chay het han khi tien trinh chet`() {
         val s = SyncStatusSnapshot(runningSince = 1_000L)
@@ -115,6 +126,18 @@ class SyncStatusTest {
                 assertTrue("$outcome nội dung", t.body.isNotBlank() && t.body.length <= 100)
             }
         }
+    }
+
+    @Test fun `mo ta xung dot hien ten muc can xu ly`() {
+        val now = 100 * min
+        val state = SyncStatusSnapshot(
+            outcome = SyncOutcome.MERGE_CONFLICT,
+            conflictDetails = "Tài khoản [sample_user]: trạng thái tài khoản khác nhau",
+        )
+        assertEquals(
+            "Hai thiết bị cùng sửa một mục · Tài khoản [sample_user]: trạng thái tài khoản khác nhau",
+            SyncStatusText.detail(state, now),
+        )
     }
 
     // ── Chính sách thông báo ──────────────────────────────────

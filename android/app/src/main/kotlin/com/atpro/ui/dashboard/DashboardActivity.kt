@@ -20,6 +20,7 @@ import com.atpro.ui.schedule.ScheduleViewModel
 import com.atpro.ui.stats.StatsViewModel
 import com.atpro.ui.theme.AtTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -47,6 +48,7 @@ class DashboardActivity : AppCompatActivity() {
     }
 
     private var dashboardReady = false
+    private var authNavigationStarted = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -69,8 +71,7 @@ class DashboardActivity : AppCompatActivity() {
             if (isFinishing || isDestroyed) return@launch
 
             if (session == null) {
-                startActivity(Intent(this@DashboardActivity, AuthActivity::class.java))
-                finish()
+                redirectToAuth()
                 return@launch
             }
 
@@ -82,6 +83,14 @@ class DashboardActivity : AppCompatActivity() {
         if (dashboardReady) return
         dashboardReady = true
         handleNotificationIntent(intent)
+
+        // A background refresh can invalidate the encrypted local session while this
+        // Activity is visible. Observe the process-wide state, not only launch-time state.
+        lifecycleScope.launch {
+            app.authRepository.session.collect { current ->
+                if (current == null) redirectToAuth()
+            }
+        }
 
         setContent {
             AtTheme {
@@ -117,13 +126,23 @@ class DashboardActivity : AppCompatActivity() {
                         lifecycleScope.launch {
                             app.authRepository.session.first { it == null }
                             if (isFinishing || isDestroyed) return@launch
-                            startActivity(Intent(this@DashboardActivity, AuthActivity::class.java))
-                            finish()
+                            redirectToAuth()
                         }
                     },
                 )
             }
         }
+    }
+
+    private fun redirectToAuth() {
+        if (authNavigationStarted || isFinishing || isDestroyed) return
+        authNavigationStarted = true
+        startActivity(
+            Intent(this, AuthActivity::class.java).addFlags(
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP,
+            ),
+        )
+        finish()
     }
 
     override fun onNewIntent(intent: Intent) {

@@ -11,9 +11,12 @@ import com.atpro.notification.NotifText
 object SyncStatusCodes {
     const val OUTPUT_STATUS = "sync_status"
     const val OUTPUT_PENDING_COUNT = "pending_count"
+    const val OUTPUT_CONFLICT_DETAILS = "conflict_details"
 
     /** Đầu vào của lần chạy do người dùng bấm "Đồng bộ ngay": chạy cả khi không có thay đổi chờ gửi. */
     const val INPUT_MANUAL = "manual"
+    /** Automatic initial/periodic check, including an empty local Outbox. */
+    const val INPUT_FORCE_REMOTE_CHECK = "force_remote_check"
 
     const val APPLICATION_UNAVAILABLE = "application_unavailable"
     const val SIGNED_OUT = "signed_out"
@@ -30,6 +33,15 @@ object SyncStatusCodes {
     const val MERGE_CONFLICT = "merge_conflict"
     const val CAS_REJECTED = "cas_rejected"
     const val LOCAL_SYNC_FAILED = "local_sync_failed"
+}
+
+/** Pure policy for the user-triggered sync cooldown. A clock rollback fails closed. */
+object ManualSyncPolicy {
+    fun canRequest(lastRequestAtMs: Long, nowMs: Long, minIntervalMs: Long): Boolean {
+        if (lastRequestAtMs <= 0L || minIntervalMs <= 0L) return true
+        if (nowMs < lastRequestAtMs) return false
+        return nowMs - lastRequestAtMs >= minIntervalMs
+    }
 }
 
 /** Kết quả cuối cùng của một lần đồng bộ (không gồm "đang thử lại" — đó là cờ riêng của [SyncStatusSnapshot]). */
@@ -94,6 +106,7 @@ data class SyncStatusSnapshot(
     val pending: Int = 0,
     val retrying: Boolean = false,
     val runningSince: Long = 0L,
+    val conflictDetails: String? = null,
 ) {
     /** Tiến trình chết giữa chừng thì cờ chạy không được kẹt mãi. */
     fun isRunning(nowMs: Long): Boolean =
@@ -152,6 +165,9 @@ object SyncStatusText {
                 }
             }
             if (reason != null) parts += reason
+            if (s.outcome == SyncOutcome.MERGE_CONFLICT) {
+                s.conflictDetails?.takeIf { it.isNotBlank() }?.let(parts::add)
+            }
             if (s.lastSuccessAt > 0L) parts += "Lần cuối ${relative(nowMs, s.lastSuccessAt)}"
             else if (s.outcome == SyncOutcome.NEVER && reason == null) parts += "Chưa có lần nào"
         }

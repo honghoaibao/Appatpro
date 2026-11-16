@@ -32,6 +32,7 @@ data class BackupSnapshotBuildResult(
     val ownerUserId: String?,
     val localExpectedRevision: Long,
     val outboxEvents: List<BackupOutboxAckCandidate>,
+    val localExpectedChecksum: String? = null,
 )
 
 class BackupSnapshotException(message: String, cause: Throwable? = null) : Exception(message, cause)
@@ -48,6 +49,7 @@ class BackupSnapshotBuilder(context: Context) {
         val installationId: String,
         val ownerUserId: String?,
         val lastRemoteRevision: Long,
+        val lastChecksum: String?,
         val outboxEvents: List<BackupOutboxAckCandidate>,
         val pendingSessionPayloads: List<PendingSessionPayload>,
         val accounts: List<AccountEntity>,
@@ -175,6 +177,7 @@ class BackupSnapshotBuilder(context: Context) {
                     installationId = metadata.installationId,
                     ownerUserId = metadata.ownerUserId,
                     lastRemoteRevision = metadata.lastRemoteRevision,
+                    lastChecksum = metadata.lastChecksum,
                     outboxEvents = outboxEvents,
                     pendingSessionPayloads = pendingSessionPayloads,
                     accounts = accounts,
@@ -313,6 +316,7 @@ class BackupSnapshotBuilder(context: Context) {
             ownerUserId = roomRows.ownerUserId,
             localExpectedRevision = roomRows.lastRemoteRevision,
             outboxEvents = roomRows.outboxEvents,
+            localExpectedChecksum = roomRows.lastChecksum,
         )
     }
 

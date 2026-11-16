@@ -196,9 +196,7 @@ class SupabaseAuthRepository(
 
         if (!response.isSuccessful) {
             val failure = response.toAuthFailure()
-            if (response.statusCode == INVALID_SESSION_STATUS ||
-                response.statusCode == UNAUTHORIZED_STATUS
-            ) {
+            if (response.isInvalidRefreshSession()) {
                 clearLocalSession()
             }
             return@safely failure
@@ -211,7 +209,7 @@ class SupabaseAuthRepository(
             is AuthResult.Failure -> return@safely parsed
         }
 
-        persistSession(refreshed)
+        persistRefreshedSession(refreshed)
         AuthResult.Success(refreshed)
     }
 
@@ -274,6 +272,42 @@ class SupabaseAuthRepository(
         }
     }
 
+    /**
+     * A successful refresh consumes the previous refresh token. Persist the rotated pair
+     * non-cancellably; if storage fails, discard the stale local pair instead of retrying
+     * a token that the server may already have invalidated.
+     */
+    private suspend fun persistRefreshedSession(session: AuthSession) {
+        var persisted = false
+        try {
+            withContext(NonCancellable + ioDispatcher) {
+                sessionStore.write(session)
+                mutableSession.value = session
+                persisted = true
+            }
+        } catch (cancelled: CancellationException) {
+            // withContext can report cancellation while switching back after its
+            // NonCancellable block has already stored the rotated pair.
+            if (!persisted) clearAfterFailedRefresh()
+            throw cancelled
+        } catch (error: Exception) {
+            clearAfterFailedRefresh()
+            throw error
+        }
+    }
+
+    private suspend fun clearAfterFailedRefresh() {
+        try {
+            withContext(NonCancellable + ioDispatcher) {
+                sessionStore.clear()
+            }
+        } catch (_: Exception) {
+            // The in-memory token is still discarded; persistent storage failure is surfaced
+            // by the refresh result and must not leave this process using a consumed token.
+        }
+        mutableSession.value = null
+    }
+
     private suspend fun persistSession(session: AuthSession) {
         withContext(ioDispatcher) {
             sessionStore.write(session)
@@ -310,6 +344,31 @@ class SupabaseAuthRepository(
             message = "Đăng nhập không thành công. Thử lại.",
             retryable = false,
         )
+    }
+
+    /** Only definitive refresh-session rejection clears the durable local session. */
+    private fun SupabaseHttpResponse.isInvalidRefreshSession(): Boolean {
+        if (statusCode !in 400..422) return false
+
+        return try {
+            val json = JSONObject(body)
+            val code = sequenceOf("code", "error_code")
+                .mapNotNull { key -> json.optString(key).takeIf { it.isNotBlank() && it != "null" } }
+                .firstOrNull()
+                ?.lowercase()
+            val message = sequenceOf("msg", "message", "error_description", "error")
+                .mapNotNull { key -> json.optString(key).takeIf { it.isNotBlank() && it != "null" } }
+                .firstOrNull()
+                ?.lowercase()
+                .orEmpty()
+
+            (code != null && code in INVALID_REFRESH_ERROR_CODES) ||
+                message.contains("invalid refresh token") ||
+                message.contains("refresh token not found") ||
+                message.contains("refresh token already used")
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun SupabaseHttpResponse.toAuthFailure(): AuthResult.Failure {
@@ -386,20 +445,24 @@ class SupabaseAuthRepository(
         val authenticatedUser = user
             ?: return AuthResult.Failure("Không xác minh được tài khoản.")
 
-        val explicitExpiry = optLong("expires_at", 0L)
-        val expiresIn = optLong("expires_in", DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS)
-            .coerceAtLeast(1L)
-        val expiresAt = if (explicitExpiry > 0L) {
-            explicitExpiry
+        val explicitExpiry = optLong("expires_at", 0L).takeIf { it > 0L }
+        val expiresIn = optLong("expires_in", 0L)
+            .takeIf { it > 0L }
+            ?: DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS
+        val now = nowEpochSeconds().coerceAtLeast(0L)
+        val expiresAt = explicitExpiry ?: if (now > Long.MAX_VALUE - expiresIn) {
+            Long.MAX_VALUE
         } else {
-            nowEpochSeconds() + expiresIn
+            now + expiresIn
         }
 
         return AuthResult.Success(
             AuthSession(
                 accessToken = accessToken,
                 refreshToken = refreshToken,
-                tokenType = optString("token_type", "bearer").ifBlank { "bearer" },
+                tokenType = optString("token_type")
+                    .takeIf { it.isNotBlank() && it != "null" }
+                    ?: "bearer",
                 expiresAtEpochSeconds = expiresAt,
                 user = authenticatedUser,
             ),
@@ -424,8 +487,12 @@ class SupabaseAuthRepository(
         const val SIGN_OUT_LOCAL_PATH = "/auth/v1/logout?scope=local"
 
         const val DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS = 3_600L
-        const val INVALID_SESSION_STATUS = 400
-        const val UNAUTHORIZED_STATUS = 401
+        val INVALID_REFRESH_ERROR_CODES = setOf(
+            "refresh_token_not_found",
+            "refresh_token_already_used",
+            "session_not_found",
+            "session_expired",
+        )
         const val MAX_ERROR_MESSAGE_LENGTH = 240
     }
 }

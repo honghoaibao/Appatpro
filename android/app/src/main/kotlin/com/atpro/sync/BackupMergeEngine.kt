@@ -6,7 +6,6 @@ package com.atpro.sync
  */
 enum class BackupMergeConflictKind {
     ACCOUNT_STATUS,
-    ACCOUNT_CREATION_TIME,
     SESSION_CONTENT,
     CONFIG_VALUE,
     SCHEDULE_DEFINITION,
@@ -271,14 +270,12 @@ object BackupMergeEngine {
                         )
                         null
                     }
-                    first.createdAt != second.createdAt -> {
-                        conflicts += conflict(
-                            BackupTombstoneDataset.ACCOUNTS, key,
-                            BackupMergeConflictKind.ACCOUNT_CREATION_TIME,
-                        )
-                        null
-                    }
                     else -> first.copy(
+                        // A fresh installation can re-add an account that already exists in
+                        // the cloud. Keep the earliest timestamp recorded by either valid
+                        // installation instead of treating that local re-entry as a conflict.
+                        // Explicit deletes remain protected by the tombstone merge policy.
+                        createdAt = minOf(first.createdAt, second.createdAt),
                         statusUpdatedAt = maxOf(first.statusUpdatedAt, second.statusUpdatedAt),
                     )
                 }
