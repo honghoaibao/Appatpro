@@ -68,7 +68,7 @@ object SyncWorkScheduler {
                 SyncWorkSchedulingPolicy.forLocalMutation(
                     hasPendingData = true,
                     hasRunningWork = isRunning,
-                    hasQueuedLocalFollowUp = hasQueuedFollowUp,
+                    hasQueuedFollowUp = hasQueuedFollowUp,
                 )
             ) {
                 SyncEnqueueAction.SKIP -> true
