@@ -179,6 +179,9 @@ class SyncWorker(
                             completed(SyncStatusCodes.ACKNOWLEDGEMENT_REJECTED, outboxDao.getPendingCount())
                     }
                 }
+                // Máy này không có thay đổi chờ gửi và đã khớp đúng revision/checksum trên server: không tạo revision mới,
+                // không có gì để xác nhận (Outbox/earnings rỗng). Cùng ngữ nghĩa với NO_PENDING_DATA → outcome UP_TO_DATE.
+                is BackupCasResult.UpToDate -> completed(SyncStatusCodes.NO_PENDING_DATA)
                 is BackupCasResult.RetryLater -> Result.retry()
                 is BackupCasResult.Failed -> {
                     if (result.failure.retryable) Result.retry()
