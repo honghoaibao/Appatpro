@@ -33,4 +33,11 @@
   conflict và `BackupCasResult.Conflicted` huỷ cả lần merge → khoá hay đổi có thể kẹt toàn bộ sao lưu.
   Muốn sync cần merge theo hợp tập + kiểm chứng trên máy (RT-03→06).
 - FarmConfig đã được sync đủ khoá (chỉ loại notif_* và `discord_webhook_url` — webhook là bí mật).
-- Đồng bộ tự động hiện chỉ push theo sự kiện; chưa có kéo định kỳ (SyncWorker không có đường "chỉ kéo").
+- Đồng bộ tự động hiện chỉ chạy theo sự kiện (có thay đổi chờ gửi) + "Đồng bộ ngay" thủ công (vòng đọc–gộp–gửi, kéo dữ liệu
+  máy khác về). Chưa có kéo định kỳ; `SyncStatusCodes.INPUT_FORCE_REMOTE_CHECK` đã khai báo nhưng chưa được dùng ở đâu.
+  (Ghi chú sửa: bản đầu của mục này nói "không có đường chỉ kéo" — chưa chính xác, đã đính chính.)
+
+## 6. Sửa lỗi build (có sẵn trên `main`, không phải do v1.12.7)
+- `SyncWorker.kt:151`: `when` trên `BackupCasResult` thiếu nhánh `UpToDate` (nhánh này được thêm ở `BackupCasCoordinator`
+  nhưng worker chưa xử lý; build `main` ngày 16/11 cũng fail vì lý do này).
+- Xử lý: `UpToDate` → `completed(NO_PENDING_DATA)` (outcome UP_TO_DATE: không có thay đổi chờ gửi, đã khớp server, không tạo revision).
