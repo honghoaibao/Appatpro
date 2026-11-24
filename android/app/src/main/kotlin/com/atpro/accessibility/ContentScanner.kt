@@ -26,6 +26,13 @@ data class ScanKeywords(
     val softDismiss: List<String>,
     /** Nút đóng "cứng" — cũng là nhãn của nút X đóng bảng chọn (vd bảng chuyển đổi tài khoản). */
     val hardDismiss: List<String>,
+    /**
+     * Nút TỪ CHỐI của hộp thoại xin quyền (vd "Không cho phép"). Chỉ được bấm khi màn hình có chữ ngữ cảnh xin quyền
+     * ([permissionContext]) — "Từ chối" ở màn hình khác (lời mời kết bạn…) không được bấm. Từ chối = bỏ qua, KHÔNG cấp quyền.
+     */
+    val denyButtons: List<String>,
+    /** Chữ (chứa) cho biết màn hình đang là hộp thoại xin quyền / truy cập dữ liệu. */
+    val permissionContext: List<String>,
     val sponsored: List<String>,
     val weakMusicMarkers: List<String>,
     val installButtons: List<String>,
@@ -43,6 +50,14 @@ data class ScanKeywords(
             ),
             hardDismiss = listOf(
                 "đóng", "close", "hủy", "huỷ", "hủy bỏ", "huỷ bỏ", "cancel", "dismiss",
+            ),
+            denyButtons = listOf(
+                "không cho phép", "từ chối", "don't allow", "don’t allow", "do not allow", "deny",
+            ),
+            // Hẹp có chủ đích: chỉ cụm đặc trưng của hộp thoại xin quyền (TikTok + hệ thống Android), tránh từ chung
+            // như "permission"/"danh bạ" — để nút "Từ chối" ở màn hình khác không bị bấm nhầm.
+            permissionContext = listOf(
+                "cho phép tiktok", "quyền truy cập", "allow tiktok", "access your", "access to your",
             ),
             sponsored        = listOf("được tài trợ", "sponsored", "promoted"),
             weakMusicMarkers = listOf("nhạc quảng cáo"),
@@ -133,7 +148,13 @@ object ContentScanner {
         var liveScore = 0
         var installSignal = false
         var best = ""
-        val dismiss = if (softDismissOnly) cfg.softDismiss else cfg.dismissButtons
+        // Hộp thoại xin quyền: cho phép thêm nút TỪ CHỐI (không bao giờ nút cấp quyền). Chỉ tính khi cần dò popup.
+        val dismiss = when {
+            detectPopup && isPermissionPrompt(probes, cfg) ->
+                (if (softDismissOnly) cfg.softDismiss else cfg.dismissButtons) + cfg.denyButtons
+            softDismissOnly -> cfg.softDismiss
+            else -> cfg.dismissButtons
+        }
 
         for (p in probes) {
             if (!p.visible) continue
@@ -190,6 +211,22 @@ object ContentScanner {
     /** Chỉ hỏi "nội dung feed hiện tại là LIVE không?" — bỏ R0. */
     fun isLiveContent(root: AccessibilityNodeInfo?): Boolean =
         scan(root, detectPopup = false).category == ScanCategory.LIVE
+
+    /**
+     * Màn hình đang là hộp thoại xin quyền / truy cập dữ liệu? (chữ ngữ cảnh nằm trong BẤT KỲ node hiện nào — thân
+     * hộp thoại là một câu dài nên khớp theo "chứa", không giới hạn độ dài).
+     */
+    fun isPermissionPrompt(probes: List<ScanProbe>, cfg: ScanKeywords = ScanKeywords.DEFAULT): Boolean =
+        probes.any { p -> p.visible && cfg.permissionContext.any { p.text.contains(it) } }
+
+    /**
+     * Danh sách nút được phép bấm cho cây hiện tại: whitelist đóng + (chỉ khi là hộp thoại xin quyền) nút từ chối.
+     * [softOnly] = đang ở bảng chuyển đổi tài khoản → bỏ nút đóng "cứng" (X Đóng) nhưng vẫn cho từ chối quyền.
+     */
+    fun dismissLabelsFor(probes: List<ScanProbe>, softOnly: Boolean, cfg: ScanKeywords = ScanKeywords.DEFAULT): List<String> {
+        val base = if (softOnly) cfg.softDismiss else cfg.dismissButtons
+        return if (isPermissionPrompt(probes, cfg)) base + cfg.denyButtons else base
+    }
 
     /**
      * Màn hình đang hiện bảng chuyển đổi tài khoản (tool mở có chủ đích)? Bảng này có nút X "Đóng" mà

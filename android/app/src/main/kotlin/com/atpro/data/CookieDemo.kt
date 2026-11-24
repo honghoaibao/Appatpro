@@ -44,6 +44,18 @@ object CookieDemo {
 
     /** null = không đọc được cặp `tên=giá trị` nào (không phải cookie). */
     fun parse(raw: String, platform: CookiePlatform): CookieCheck? {
+        val pairs = parsePairs(raw) ?: return null
+        val present = platform.requiredKeys.filter { !pairs[it].isNullOrBlank() }
+        val missing = platform.requiredKeys.filter { it !in present }
+        return CookieCheck(platform, accountId(pairs, platform), present, missing)
+    }
+
+    /**
+     * v1.12.7: tách riêng bước đọc để [CookieVaultCodec] dùng lại. Trả về cặp `tên(chữ thường) → giá trị`
+     * theo thứ tự xuất hiện, hoặc null nếu không đọc được cặp nào. GIÁ TRỊ là bí mật đăng nhập — người gọi không được
+     * log và chỉ được giữ trong bộ nhớ hoặc kho mã hoá.
+     */
+    fun parsePairs(raw: String): Map<String, String>? {
         val text = raw.trim().take(MAX_INPUT)
         if (text.isEmpty()) return null
 
@@ -70,15 +82,11 @@ object CookieDemo {
                 }
             }
         }
-        if (pairs.isEmpty()) return null
-
-        val present = platform.requiredKeys.filter { !pairs[it].isNullOrBlank() }
-        val missing = platform.requiredKeys.filter { it !in present }
-        return CookieCheck(platform, accountId(pairs, platform), present, missing)
+        return pairs.ifEmpty { null }
     }
 
     /** ID tài khoản: khoá ID nếu có; Instagram còn suy ra được từ tiền tố của `sessionid` ("123%3Aabc…"). */
-    private fun accountId(pairs: Map<String, String>, platform: CookiePlatform): String? {
+    internal fun accountId(pairs: Map<String, String>, platform: CookiePlatform): String? {
         pairs[platform.idKey]?.takeIf { it.isNotBlank() }?.let { return it.filter { c -> c.isLetterOrDigit() || c == '.' || c == '_' }.ifEmpty { null } }
         if (platform == CookiePlatform.INSTAGRAM) {
             val session = pairs["sessionid"].orEmpty()

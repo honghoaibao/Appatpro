@@ -157,20 +157,20 @@ class F4fServiceTest {
     @Test
     fun bankWithdrawBodyAndPath() = runTest {
         val t = FakeF4fTransport { FakeReply(200, envelope(message = "Đã gửi yêu cầu rút tiền thành công")) }
-        val r = service(t).withdraw(F4fWithdrawRequest.Bank(" Vietcombank ", "NGUYEN VAN A", "0123456789", 500)).ok()
+        val r = service(t).withdraw(F4fWithdrawRequest.Bank(" Vietcombank ", "NGUYEN VAN A", "0123456789", 50_000)).ok()
         assertEquals("Đã gửi yêu cầu rút tiền thành công", r)
         val req = t.seen.single()
         assertEquals("/user/withdraw/bank", req.path)
         assertEquals(setOf("bank_name", "account_name", "account_number", "amount"), req.body!!.keys)
         assertEquals("Vietcombank", req.body!!["bank_name"].asStr())          // đã trim
-        assertEquals(500L, req.body!!["amount"].asLong())
+        assertEquals(50_000L, req.body!!["amount"].asLong())
         assertFalse((req.body!!["amount"] as kotlinx.serialization.json.JsonPrimitive).isString)   // số nguyên
     }
 
     @Test
     fun zaloPayUsesBankShape() = runTest {
         val t = FakeF4fTransport { FakeReply(200, envelope()) }
-        service(t).withdraw(F4fWithdrawRequest.ZaloPay("A", "0901234567", 300))
+        service(t).withdraw(F4fWithdrawRequest.ZaloPay("A", "0901234567", 50_000))
         val req = t.seen.single()
         assertEquals("/user/withdraw/zalopay", req.path)
         assertEquals(setOf("bank_name", "account_name", "account_number", "amount"), req.body!!.keys)
@@ -180,7 +180,7 @@ class F4fServiceTest {
     @Test
     fun payPalUsesEmailField() = runTest {
         val t = FakeF4fTransport { FakeReply(200, envelope()) }
-        service(t).withdraw(F4fWithdrawRequest.PayPal("a@b.com", 200))
+        service(t).withdraw(F4fWithdrawRequest.PayPal("a@b.com", 50_000))
         val req = t.seen.single()
         assertEquals("/user/withdraw/paypal", req.path)
         assertEquals(setOf("email", "amount"), req.body!!.keys)
@@ -189,7 +189,7 @@ class F4fServiceTest {
     @Test
     fun cryptoUsesWalletAddressField() = runTest {
         val t = FakeF4fTransport { FakeReply(200, envelope()) }
-        service(t).withdraw(F4fWithdrawRequest.Crypto("bep20", "0x1234567890abcdef1234", 400))
+        service(t).withdraw(F4fWithdrawRequest.Crypto("bep20", "0x1234567890abcdef1234", 50_000))
         val req = t.seen.single()
         assertEquals("/user/withdraw/crypto", req.path)
         assertEquals(setOf("network", "wallet_address", "amount"), req.body!!.keys)
@@ -198,7 +198,7 @@ class F4fServiceTest {
     @Test
     fun cardUsesTelco() = runTest {
         val t = FakeF4fTransport { FakeReply(200, envelope()) }
-        service(t).withdraw(F4fWithdrawRequest.Card("Viettel", 100))
+        service(t).withdraw(F4fWithdrawRequest.Card("Viettel", 50_000))
         val req = t.seen.single()
         assertEquals("/user/withdraw/card", req.path)
         assertEquals(setOf("telco", "amount"), req.body!!.keys)
@@ -221,10 +221,47 @@ class F4fServiceTest {
         assertTrue(t.seen.isEmpty())
     }
 
+    // ── v1.12.7: hạn mức rút tối thiểu 50.000 coin (= 50.000đ) cho mọi kênh ──────────────────────────
+    private fun allChannels(amount: Long) = listOf(
+        F4fWithdrawRequest.Bank("VCB", "A", "123", amount),
+        F4fWithdrawRequest.ZaloPay("A", "0901234567", amount),
+        F4fWithdrawRequest.PayPal("a@b.com", amount),
+        F4fWithdrawRequest.Crypto("bep20", "0x1234567890abcdef1234", amount),
+        F4fWithdrawRequest.Card("Viettel", amount),
+    )
+
+    @Test
+    fun belowMinimumIsRejectedLocallyOnEveryChannel() = runTest {
+        val t = FakeF4fTransport { FakeReply(200, envelope()) }
+        val s = service(t)
+        allChannels(F4fWithdrawLimits.MIN_COIN - 1).forEach {
+            val r = s.withdraw(it) as TaskResult.Error
+            assertTrue(it.channel.name, r.message.contains("50.000"))
+        }
+        assertTrue(t.seen.isEmpty())                        // không chạm mạng
+    }
+
+    @Test
+    fun exactlyMinimumIsAcceptedOnEveryChannel() {
+        allChannels(F4fWithdrawLimits.MIN_COIN).forEach { assertNull(it.channel.name, it.validate()) }
+    }
+
+    @Test
+    fun zeroKeepsTheOriginalPrompt() {
+        assertEquals("Nhập số coin muốn rút", F4fWithdrawRequest.PayPal("a@b.com", 0).validate())
+    }
+
+    @Test
+    fun minimumConstantsAreConsistent() {
+        assertEquals(50_000L, F4fWithdrawLimits.MIN_COIN)
+        assertEquals("50.000", F4fWithdrawLimits.MIN_TEXT)
+        assertEquals(F4fWithdrawLimits.MIN_VND, F4fWithdrawLimits.MIN_COIN * F4fWithdrawLimits.VND_PER_COIN)
+    }
+
     @Test
     fun withdrawIsNeverRetriedAfterANetworkError() = runTest {
         val t = FakeF4fTransport { null }
-        val r = service(t).withdraw(F4fWithdrawRequest.PayPal("a@b.com", 200))
+        val r = service(t).withdraw(F4fWithdrawRequest.PayPal("a@b.com", 50_000))
         assertTrue(r is TaskResult.Error)
         assertEquals(1, t.seen.size)           // đúng 1 lần gửi → không thể rút trùng
     }
@@ -232,7 +269,7 @@ class F4fServiceTest {
     @Test
     fun withdrawServerRejectionShowsServerMessage() = runTest {
         val t = FakeF4fTransport { FakeReply(200, envelope(code = 400, message = "Số dư không đủ")) }
-        val r = service(t).withdraw(F4fWithdrawRequest.Card("Viettel", 100)) as TaskResult.Error
+        val r = service(t).withdraw(F4fWithdrawRequest.Card("Viettel", 50_000)) as TaskResult.Error
         assertEquals("Số dư không đủ", r.message)
     }
 
@@ -279,7 +316,7 @@ class F4fServiceTest {
         val t = FakeF4fTransport { FakeReply(200, envelope()) }
         val s = service(t, token = null)
         assertTrue((s.dashboard() as TaskResult.Error).isAuthError)
-        assertTrue((s.withdraw(F4fWithdrawRequest.Card("Viettel", 100)) as TaskResult.Error).isAuthError)
+        assertTrue((s.withdraw(F4fWithdrawRequest.Card("Viettel", 50_000)) as TaskResult.Error).isAuthError)
         assertTrue(t.seen.isEmpty())
     }
 

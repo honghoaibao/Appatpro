@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import com.atpro.tasks.f4f.F4fWithdrawChannel
+import com.atpro.tasks.f4f.F4fWithdrawLimits
 import com.atpro.tasks.f4f.F4fWithdrawItem
 import com.atpro.tasks.f4f.F4fWithdrawRequest
 import com.atpro.ui.theme.AtBadge
@@ -135,6 +136,14 @@ internal fun WithdrawPanel(state: F4fHubUiState, vm: F4fHubViewModel, balance: S
                     keyboardType = KeyboardType.Number,
                     imeAction = ImeAction.Done,
                     error = error,
+                )
+                // v1.12.7: nhắc hạn mức + quy đổi (1 coin = 1đ) — hiện số tiền tương đương khi đã nhập.
+                val entered = amountText.digitsToLong() ?: 0L
+                Text(
+                    if (entered > 0L) "≈ ${(entered * F4fWithdrawLimits.VND_PER_COIN).fmt()}đ · tối thiểu ${F4fWithdrawLimits.MIN_TEXT} coin"
+                    else "Tối thiểu ${F4fWithdrawLimits.MIN_TEXT} coin (1 coin = 1đ)",
+                    color = if (entered in 1 until F4fWithdrawLimits.MIN_COIN) AtColors.Danger else AtColors.TextMuted,
+                    fontSize = 12.sp,
                 )
             }
             Spacer(Modifier.height(16.dp))

@@ -6,7 +6,6 @@ import android.view.accessibility.AccessibilityNodeInfo
 import com.atpro.accessibility.ContentScanner
 import com.atpro.accessibility.NodeTraverser
 import com.atpro.accessibility.ScanCategory
-import com.atpro.accessibility.ScanKeywords
 import com.atpro.network.LanWebSocketServer
 import kotlinx.coroutines.*
 
@@ -128,8 +127,8 @@ class PopupHandler(private val service: IFarmHost) {
             PopupLoopGuard.Verdict.PROCEED -> Unit
         }
 
-        val cfg     = ScanKeywords.DEFAULT
-        val clicked = ContentScanner.clickDismissButton(root, if (softOnly) cfg.softDismiss else cfg.dismissButtons)
+        // v1.12.7: hộp thoại xin quyền (vd "Cho phép TikTok truy cập email/bạn bè Facebook?") → bấm "Không cho phép".
+        val clicked = ContentScanner.clickDismissButton(root, ContentScanner.dismissLabelsFor(probes, softOnly))
             ?: return null
         log("POPUP: Đóng popup — bấm '$clicked'")
         delay(700)

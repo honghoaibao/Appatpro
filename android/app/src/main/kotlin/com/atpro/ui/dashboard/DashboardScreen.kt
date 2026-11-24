@@ -294,11 +294,22 @@ private fun IdleView(
         com.atpro.automation.ServiceMode.SNAPCHAT_NURTURE  -> "Bắt đầu nuôi Snapchat"  to { vm.startSnapchatNurture() }
     }
 
-    Column(
+    // v1.12.7: bàn phím che ô nhập danh sách tài khoản — trang Idle trước đây là Column cố định (không cuộn), khi
+    // bàn phím bật cửa sổ co lại nên ô nhập bị đẩy ra ngoài. Nay: cuộn được + imePadding(). `heightIn(min = viewport)`
+    // giữ nguyên bố cục cũ khi vừa màn hình (Spacer.weight chia theo chiều cao tối thiểu khi chiều cao tối đa vô hạn).
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 24.dp)
             .statusBarsPadding()
+            .imePadding(),
+    ) {
+    val viewportHeight = maxHeight
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .heightIn(min = viewportHeight)
+            .padding(horizontal = 24.dp)
     ) {
         Spacer(Modifier.height(20.dp))
 
@@ -324,7 +335,7 @@ private fun IdleView(
             )
         }
 
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(if (cookiePlatformOf(state.serviceMode) != null) 16.dp else 28.dp))
 
         // ── Thẻ nổi bật: dịch vụ đang chọn · số tài khoản (số đếm lên mượt) ──
         val serviceLabel = when (state.serviceMode) {
@@ -337,9 +348,12 @@ private fun IdleView(
             com.atpro.automation.ServiceMode.SNAPCHAT_NURTURE  -> "Nuôi Snapchat"
         }
         val f4f by F4fAuth.manager(context).state.collectAsStateWithLifecycle()
+        // v1.12.7: Facebook/Instagram → thẻ nổi bật gọn hơn (số nhỏ lại, bớt khoảng trắng) để dành chỗ cho cách nuôi + cookie.
+        val compactHero = cookiePlatformOf(state.serviceMode) != null
         AtHeroCard(
             modifier       = Modifier.fillMaxWidth().staggerIn(1),
-            contentPadding = PaddingValues(horizontal = 22.dp, vertical = 22.dp),
+            contentPadding = if (compactHero) PaddingValues(horizontal = 18.dp, vertical = 14.dp)
+                             else PaddingValues(horizontal = 22.dp, vertical = 22.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -353,13 +367,16 @@ private fun IdleView(
                         .padding(horizontal = 11.dp, vertical = 4.dp),
                 )
             }
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(if (compactHero) 8.dp else 20.dp))
             AnimatedNumber(
                 value = state.displayCount,
-                style = AtType.Display.copy(fontSize = 68.sp, lineHeight = 68.sp),
+                style = AtType.Display.copy(
+                    fontSize   = if (compactHero) 40.sp else 68.sp,
+                    lineHeight = if (compactHero) 40.sp else 68.sp,
+                ),
                 color = Color.White,
             )
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(if (compactHero) 2.dp else 6.dp))
             Text(
                 text  = when {
                     state.serviceMode == com.atpro.automation.ServiceMode.TASK && state.listMode -> "tài khoản đã chọn nhận nhiệm vụ"
@@ -390,7 +407,7 @@ private fun IdleView(
         Spacer(Modifier.weight(1f))
 
         // ── Điều khiển + nút chính ──
-        // v1.12.5: Facebook / Instagram có hai cách nuôi — Bằng app (chạy thật) và Bằng cookie (demo, chỉ là giao diện).
+        // v1.12.5: Facebook / Instagram có hai cách nuôi — Bằng app (chạy thật) và Bằng cookie (lưu mã hoá, chưa chạy thật).
         val cookiePlatform = cookiePlatformOf(state.serviceMode)
         var methodIndex by remember(state.serviceMode) { mutableStateOf(0) }
         val cookieMode = cookiePlatform != null && methodIndex == 1
@@ -401,11 +418,9 @@ private fun IdleView(
                 Spacer(Modifier.height(14.dp))
             }
             if (cookiePlatform != null && cookieMode) {
-                // Danh sách có thể dài → cuộn trong khung giới hạn chiều cao, không đẩy nút ra khỏi màn hình
-                Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
-                    CookieDemoPanel(cookiePlatform)
-                }
-                Spacer(Modifier.height(14.dp))
+                // v1.12.7: cả trang Idle đã cuộn được (xem đầu IdleView) → không cần khung cuộn lồng nhau nữa.
+                CookiePanel(cookiePlatform)
+                Spacer(Modifier.height(12.dp))
             }
             // v1.12.0: chế độ nhiệm vụ có cách chọn tài khoản riêng (Cài đặt → Nhiệm vụ → Tài khoản): hiện tóm tắt thay cho ô gõ tay.
             AnimatedVisibility(visible = state.serviceMode == com.atpro.automation.ServiceMode.TASK) {
@@ -479,6 +494,7 @@ private fun IdleView(
 
         Spacer(Modifier.height(24.dp))
     }
+    }   // BoxWithConstraints
 }
 
 // ─────────────────────────────────────────────────────────────

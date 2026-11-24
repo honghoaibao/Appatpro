@@ -45,6 +45,60 @@ class ContentScannerTest {
         }
     }
 
+    // ── v1.12.7: hộp thoại xin quyền — bấm "Không cho phép", không bao giờ OK ──
+
+    private val fbPermissionBody = probe(
+        "Cho phép TikTok có quyền truy cập vào email và danh sách bạn bè trên Facebook của bạn? " +
+            "Thông tin này sẽ được sử dụng để cải thiện trải nghiệm TikTok cho bạn")
+
+    @Test fun `popup xin quyen Facebook - Khong cho phep la nut dong`() {
+        val v = classify(fbPermissionBody, probe("OK", clickable = true), probe("Không cho phép", clickable = true))
+        assertEquals(ScanCategory.POPUP, v.category)
+        assertEquals("không cho phép", v.matchedText)
+    }
+
+    @Test fun `popup xin quyen - nhan nut chi co OK thi khong coi la popup`() {
+        assertEquals(ScanCategory.CLEAN, classify(fbPermissionBody, probe("OK", clickable = true)).category)
+    }
+
+    @Test fun `Khong cho phep khong co ngu canh xin quyen thi khong bam`() {
+        assertEquals(ScanCategory.CLEAN, classify(probe("Không cho phép", clickable = true)).category)
+        assertEquals(ScanCategory.CLEAN, classify(probe("Từ chối", clickable = true), probe("Lời mời kết bạn")).category)
+    }
+
+    @Test fun `ngu canh xin quyen nam sau nut van nhan ra`() {
+        val v = classify(probe("Không cho phép", clickable = true), fbPermissionBody)
+        assertEquals(ScanCategory.POPUP, v.category)
+    }
+
+    @Test fun `tu chung nhu danh ba hay permission khong du lam ngu canh`() {
+        assertEquals(ScanCategory.CLEAN, classify(probe("Danh bạ"), probe("Từ chối", clickable = true)).category)
+        assertEquals(ScanCategory.CLEAN, classify(probe("Permission settings"), probe("Deny", clickable = true)).category)
+    }
+
+    @Test fun `ngu canh an khong tinh`() {
+        val hidden = ScanProbe(ContentScanner.normalize("Cho phép TikTok truy cập vào danh bạ"), false, false)
+        assertEquals(ScanCategory.CLEAN, classify(hidden, probe("Không cho phép", clickable = true)).category)
+    }
+
+    @Test fun `quyen he thong Android tieng Anh - Don't allow`() {
+        val v = classify(probe("Allow TikTok to access your contacts?"),
+            probe("Allow", clickable = true), probe("Don't allow", clickable = true))
+        assertEquals(ScanCategory.POPUP, v.category)
+    }
+
+    @Test fun `dismissLabelsFor chi them nut tu choi khi la hop thoai xin quyen`() {
+        val cfg = ScanKeywords.DEFAULT
+        assertFalse("không cho phép" in ContentScanner.dismissLabelsFor(listOf(probe("Feed")), softOnly = false))
+        val perm = ContentScanner.dismissLabelsFor(listOf(fbPermissionBody), softOnly = false)
+        assertTrue("không cho phép" in perm)
+        listOf("ok", "đồng ý", "cho phép", "allow").forEach { assertFalse(it, it in perm) }
+        // Bảng chuyển đổi tài khoản: vẫn bỏ nút X Đóng nhưng cho từ chối quyền
+        val soft = ContentScanner.dismissLabelsFor(listOf(fbPermissionBody), softOnly = true)
+        assertFalse("đóng" in soft); assertTrue("không cho phép" in soft)
+        assertTrue(cfg.denyButtons.none { it in cfg.softDismiss + cfg.hardDismiss })
+    }
+
     // ── Bảng chuyển đổi tài khoản: giữ nút X "Đóng", vẫn đóng popup nằm đè lên ──
 
     @Test fun `bang chuyen doi tai khoan duoc nhan ra`() {

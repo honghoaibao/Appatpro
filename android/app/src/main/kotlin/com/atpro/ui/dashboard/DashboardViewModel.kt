@@ -44,10 +44,28 @@ class DashboardViewModel(
     private val _uiState = MutableStateFlow(DashboardUiState())
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
 
+    private var persistCustomAccountsJob: kotlinx.coroutines.Job? = null
+
     init {
         observeAccounts()
         observeF4fSession()
+        restoreCustomAccounts()
         pollEngineState()
+    }
+
+    /**
+     * v1.12.7: danh sách tài khoản nhập tay ("Danh sách chọn") trước đây chỉ nằm trong RAM → mở lại app phải nhập lại.
+     * Nay lưu vào Room (khoá [KEY_CUSTOM_ACCOUNTS]) và nạp lại khi mở màn hình. Khoá này CỐ Ý không nằm trong
+     * `BackupConfigPolicy` (không đồng bộ lên Supabase) — xem revision v1.12.7: đồng bộ khoá hay đổi này có thể gây
+     * xung đột CONFIG_VALUE làm kẹt cả lần sao lưu.
+     */
+    private fun restoreCustomAccounts() {
+        viewModelScope.launch {
+            val saved = runCatching { LocalRepository.getInstance(appContext).getConfig(KEY_CUSTOM_ACCOUNTS, "") }
+                .getOrDefault("")
+            // Chỉ điền khi người dùng chưa kịp gõ gì (tránh ghi đè chữ đang nhập).
+            if (saved.isNotEmpty()) _uiState.update { if (it.customAccounts.isEmpty()) it.copy(customAccounts = saved) else it }
+        }
     }
 
     /** v1.6.0: đăng nhập/đăng xuất Follow4Follow → cập nhật điều kiện bấm "Bắt đầu làm nhiệm vụ". */
@@ -149,7 +167,21 @@ class DashboardViewModel(
     }
 
     fun setCustomAccounts(text: String) {
-        _uiState.update { it.copy(customAccounts = text) }
+        val bounded = text.take(MAX_CUSTOM_ACCOUNTS_CHARS)
+        _uiState.update { it.copy(customAccounts = bounded) }
+        // Gộp các lần gõ liên tiếp: chỉ ghi Room sau khi ngừng gõ ~0,4s.
+        persistCustomAccountsJob?.cancel()
+        persistCustomAccountsJob = viewModelScope.launch {
+            delay(PERSIST_DEBOUNCE_MS)
+            runCatching { LocalRepository.getInstance(appContext).setConfig(KEY_CUSTOM_ACCOUNTS, bounded) }
+                .onFailure { Log.w("DashboardVM", "Không lưu được danh sách tài khoản: ${it.message}") }
+        }
+    }
+
+    private companion object {
+        const val KEY_CUSTOM_ACCOUNTS = "custom_accounts"
+        const val MAX_CUSTOM_ACCOUNTS_CHARS = 20_000
+        const val PERSIST_DEBOUNCE_MS = 400L
     }
 
     // ── Actions ───────────────────────────────────────────────────────────────

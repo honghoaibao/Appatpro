@@ -69,11 +69,12 @@ fun F4fLoginDialog(
     var error    by remember { mutableStateOf<String?>(null) }
 
     fun submit() {
-        if (busy) return
+        // v1.12.7: nút Done của bàn phím cũng gọi hàm này — không gửi khi còn trống (trước đây vẫn gửi chuỗi rỗng).
+        if (busy || username.isBlank() || password.isEmpty()) return
         busy = true
         error = null
         scope.launch {
-            when (val r = auth.login(username, password)) {
+            when (val r = auth.login(username.trim(), password)) {
                 is TaskResult.Success -> {
                     password = ""            // bỏ mật khẩu khỏi bộ nhớ ngay khi xong
                     busy = false
@@ -91,7 +92,7 @@ fun F4fLoginDialog(
     AtDialog(
         onDismiss      = onDismiss,
         title          = "Đăng nhập Follow4Follow",
-        message        = "Tài khoản follow4follow.net",
+        message        = "Tài khoản follow4follow.net. Mật khẩu chỉ dùng để đăng nhập, không được lưu trên máy.",
         confirmText    = if (busy) "Đang xử lý" else "Đăng nhập",
         onConfirm      = ::submit,
         confirmEnabled = !busy && username.isNotBlank() && password.isNotEmpty(),

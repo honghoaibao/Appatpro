@@ -3148,6 +3148,14 @@ class AutomationEngine(
 
         var id = NodeTraverser.getCurrentAccountId(host.getRootNode())
         if (id == null) {
+            // v1.12.7: popup xin quyền (vd "Cho phép TikTok truy cập email/bạn bè Facebook?") đè lên Hồ sơ —
+            // quét an toàn (whitelist, gồm "Không cho phép") trước, đọc lại @username.
+            if (popup.sweep("Hồ sơ", maxRounds = 2) > 0) {
+                delay(500)
+                id = NodeTraverser.getCurrentAccountId(host.getRootNode())
+            }
+        }
+        if (id == null) {
             // v1.3.0: popup có thể xuất hiện NGAY sau khi vào Hồ sơ (vd thông báo,
             // gợi ý) che mất @username — thử dọn rồi đọc lại 1 lần.
             val cleared = popup.handleIfPresent()

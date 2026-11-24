@@ -92,6 +92,19 @@ enum class F4fWithdrawChannel(val label: String, val path: String) {
  * Yêu cầu rút tiền đã gom đủ dữ liệu. [validate] kiểm tra cục bộ trước khi gửi; [body] đúng shape server;
  * [summary] là các dòng "nhãn → giá trị" để hiện trong hộp thoại xác nhận (rút tiền KHÔNG hoàn tác được).
  */
+/**
+ * v1.12.7 — hạn mức rút tối thiểu áp dụng cho MỌI kênh (ngân hàng, ZaloPay, PayPal, Crypto, thẻ cào).
+ * Quy đổi do chủ app xác nhận: 1 coin = 1 VND → tối thiểu 50.000 coin = 50.000đ. Chưa xác minh với server
+ * (`GET /user/withdraw/info` chưa có schema hạn mức) — server vẫn là nơi quyết định cuối cùng.
+ */
+object F4fWithdrawLimits {
+    const val VND_PER_COIN = 1L
+    const val MIN_VND = 50_000L
+    const val MIN_COIN = MIN_VND / VND_PER_COIN
+    /** Dạng hiển thị theo kiểu Việt Nam (dấu chấm ngăn cách nghìn); viết tay để model không phụ thuộc Android/Locale. */
+    const val MIN_TEXT = "50.000"
+}
+
 sealed class F4fWithdrawRequest {
     abstract val channel: F4fWithdrawChannel
     abstract val amount: Long
@@ -101,6 +114,7 @@ sealed class F4fWithdrawRequest {
     /** Lỗi nhập liệu đầu tiên, hoặc null nếu hợp lệ. */
     fun validate(): String? {
         if (amount <= 0L) return "Nhập số coin muốn rút"
+        if (amount < F4fWithdrawLimits.MIN_COIN) return "Rút tối thiểu ${F4fWithdrawLimits.MIN_TEXT} coin (${F4fWithdrawLimits.MIN_TEXT}đ)"
         return validateFields()
     }
 
