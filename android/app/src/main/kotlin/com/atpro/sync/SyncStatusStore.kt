@@ -41,7 +41,7 @@ object SyncStatusStore {
             pending = p.getInt(K_PENDING, 0).coerceAtLeast(0),
             retrying = p.getBoolean(K_RETRYING, false),
             runningSince = 0L,
-            conflictDetails = if (outcome == SyncOutcome.MERGE_CONFLICT) {
+            conflictDetails = if (outcome.hasDetails || p.getBoolean(K_RETRYING, false)) {
                 p.getString(K_CONFLICT_DETAILS, null)?.take(BackupMergeConflictSummary.MAX_SUMMARY_LENGTH)
             } else null,
         )
@@ -86,7 +86,14 @@ object SyncStatusStore {
     ) {
         val cur = _state.value
         val next = if (outcome == null) {
-            cur.copy(lastAttemptAt = nowMs, retrying = true, runningSince = 0L, pending = pending ?: cur.pending)
+            // Lỗi tạm: vẫn hiện nguyên nhân gần nhất (vd mã lỗi máy chủ) thay vì chỉ "chờ thử lại".
+            cur.copy(
+                lastAttemptAt = nowMs,
+                retrying = true,
+                runningSince = 0L,
+                pending = pending ?: cur.pending,
+                conflictDetails = conflictDetails?.take(BackupMergeConflictSummary.MAX_SUMMARY_LENGTH),
+            )
         } else {
             cur.copy(
                 outcome = outcome,
@@ -95,7 +102,7 @@ object SyncStatusStore {
                 pending = if (outcome.isSuccess) pending ?: 0 else pending ?: cur.pending,
                 retrying = false,
                 runningSince = 0L,
-                conflictDetails = if (outcome == SyncOutcome.MERGE_CONFLICT) {
+                conflictDetails = if (outcome.hasDetails) {
                     conflictDetails?.take(BackupMergeConflictSummary.MAX_SUMMARY_LENGTH)
                 } else null,
             )

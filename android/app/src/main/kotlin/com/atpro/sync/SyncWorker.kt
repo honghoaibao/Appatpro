@@ -11,6 +11,8 @@ import com.atpro.data.EarningsStore
 import com.atpro.db.AtProDatabase
 import com.atpro.notification.AtProNotificationManager
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Executes one bounded cloud backup batch.
@@ -24,15 +26,21 @@ class SyncWorker(
     workerParams: WorkerParameters,
 ) : CoroutineWorker(appContext, workerParams) {
 
+    /** Nguyên nhân lỗi tạm của lần chạy này (nếu có) — hiện ở màn Cài đặt khi `Result.retry()`. */
+    private var retryDetail: String? = null
 
     override suspend fun doWork(): Result {
         val manual = inputData.getBoolean(SyncStatusCodes.INPUT_MANUAL, false)
+        // Lần chạy định kỳ: luôn kéo dữ liệu từ máy chủ dù không có thay đổi chờ gửi.
+        val forceRemoteCheck = inputData.getBoolean(SyncStatusCodes.INPUT_FORCE_REMOTE_CHECK, false)
         SyncStatusStore.init(applicationContext)
         val previous = SyncStatusStore.state.value.outcome
         SyncStatusStore.markRunning()
         var result: Result? = null
         try {
-            val finished = runSync(manual)
+            // Lần chạy định kỳ và lần chạy theo thay đổi dùng hai tên công việc khác nhau: khoá tiến trình
+            // bảo đảm không bao giờ có hai vòng đọc–gộp–áp dụng chạy chồng lên nhau trên cùng một CSDL.
+            val finished = runLock.withLock { runSync(manual, forceRemoteCheck) }
             result = finished
             return finished
         } finally {
@@ -56,11 +64,11 @@ class SyncWorker(
             }
         } else {
             // Result.retry(): lỗi tạm, WorkManager tự thử lại — không báo thông báo.
-            SyncStatusStore.record(null, null)
+            SyncStatusStore.record(null, null, conflictDetails = retryDetail)
         }
     }
 
-    private suspend fun runSync(manual: Boolean): Result {
+    private suspend fun runSync(manual: Boolean, forceRemoteCheck: Boolean): Result {
         val app = applicationContext as? AtProApplication
             ?: return completed(SyncStatusCodes.APPLICATION_UNAVAILABLE)
 
@@ -80,7 +88,7 @@ class SyncWorker(
             val pendingCount = outboxDao.getPendingCount()
             val earningsDirty = EarningsStore.isDirty()
             // Người dùng bấm "Đồng bộ ngay": vẫn chạy một vòng đọc–gộp–gửi để kéo dữ liệu từ thiết bị khác về.
-            if (pendingCount == 0 && !earningsDirty && !manual) {
+            if (pendingCount == 0 && !earningsDirty && !manual && !forceRemoteCheck) {
                 return completed(SyncStatusCodes.NO_PENDING_DATA)
             }
 
@@ -176,7 +184,11 @@ class SyncWorker(
                         }
                         is BackupAcknowledgementResult.RetryRequired -> Result.retry()
                         is BackupAcknowledgementResult.Rejected ->
-                            completed(SyncStatusCodes.ACKNOWLEDGEMENT_REJECTED, outboxDao.getPendingCount())
+                            completed(
+                                SyncStatusCodes.ACKNOWLEDGEMENT_REJECTED,
+                                outboxDao.getPendingCount(),
+                                conflictDetails = SyncFailureSummary.reason(acknowledged.reason),
+                            )
                     }
                 }
                 // Máy này không có thay đổi chờ gửi và đã khớp đúng revision/checksum trên server: không tạo revision mới,
@@ -184,8 +196,13 @@ class SyncWorker(
                 is BackupCasResult.UpToDate -> completed(SyncStatusCodes.NO_PENDING_DATA)
                 is BackupCasResult.RetryLater -> Result.retry()
                 is BackupCasResult.Failed -> {
-                    if (result.failure.retryable) Result.retry()
-                    else completed(SyncStatusCodes.REMOTE_REJECTED, outboxDao.getPendingCount())
+                    val detail = SyncFailureSummary.remote(result.failure.code, result.failure.httpStatus)
+                    if (result.failure.retryable) {
+                        retryDetail = detail
+                        Result.retry()
+                    } else {
+                        completed(SyncStatusCodes.REMOTE_REJECTED, outboxDao.getPendingCount(), detail)
+                    }
                 }
                 is BackupCasResult.Conflicted ->
                     completed(
@@ -194,14 +211,27 @@ class SyncWorker(
                         conflictDetails = BackupMergeConflictSummary.format(result.conflicts),
                     )
                 is BackupCasResult.Rejected ->
-                    completed(SyncStatusCodes.CAS_REJECTED, outboxDao.getPendingCount())
+                    completed(
+                        SyncStatusCodes.CAS_REJECTED,
+                        outboxDao.getPendingCount(),
+                        conflictDetails = SyncFailureSummary.reason(result.reason),
+                    )
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
+        } catch (error: Exception) {
             // Local validation/storage errors fail closed. Nothing is acknowledged on this path.
-            completed(SyncStatusCodes.LOCAL_SYNC_FAILED)
+            // Chi tiết đã làm sạch (tên lớp + thông điệp ngắn) để biết VÌ SAO lỗi — trước đây bị nuốt hoàn toàn.
+            completed(
+                SyncStatusCodes.LOCAL_SYNC_FAILED,
+                conflictDetails = SyncFailureSummary.exception(error),
+            )
         }
+    }
+
+    private companion object {
+        /** Một vòng đồng bộ tại một thời điểm trong tiến trình (WorkManager chạy worker cùng tiến trình). */
+        val runLock = Mutex()
     }
 
     private fun completed(

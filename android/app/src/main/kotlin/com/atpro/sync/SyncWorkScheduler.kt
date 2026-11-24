@@ -3,9 +3,11 @@ package com.atpro.sync
 import android.content.Context
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
@@ -27,6 +29,10 @@ enum class ManualSyncRequest { STARTED, ALREADY_RUNNING, TOO_SOON }
 object SyncWorkScheduler {
     const val UNIQUE_WORK_NAME = "atpro_backup_sync"
     const val DEBOUNCE_SECONDS = 20L
+
+    /** Đồng bộ định kỳ: kéo dữ liệu từ thiết bị khác về và gửi phần còn sót, kể cả khi không có thay đổi mới. */
+    const val PERIODIC_WORK_NAME = "atpro_backup_sync_periodic"
+    const val PERIODIC_INTERVAL_MINUTES = 30L
 
     /** Tag used to identify a queued manual sync; WorkInfo exposes tags, not request inputData. */
     private const val MANUAL_WORK_TAG = "atpro_backup_sync_manual"
@@ -63,6 +69,27 @@ object SyncWorkScheduler {
             request,
         )
         return true
+    }
+
+    /**
+     * Đăng ký đồng bộ tự động định kỳ (idempotent — KEEP giữ lịch đang có, không đặt lại đồng hồ mỗi lần mở app).
+     * Chỉ chạy khi có mạng; cùng đường đọc–gộp–CAS với lần chạy thủ công, nên không tạo revision mới khi đã khớp.
+     */
+    fun ensurePeriodic(context: Context) {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+        val request = PeriodicWorkRequestBuilder<SyncWorker>(PERIODIC_INTERVAL_MINUTES, TimeUnit.MINUTES)
+            .setConstraints(constraints)
+            .setInputData(workDataOf(SyncStatusCodes.INPUT_FORCE_REMOTE_CHECK to true))
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 5L, TimeUnit.MINUTES)
+            .addTag(PERIODIC_WORK_NAME)
+            .build()
+        WorkManager.getInstance(context.applicationContext).enqueueUniquePeriodicWork(
+            PERIODIC_WORK_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            request,
+        )
     }
 
     /**
@@ -113,6 +140,8 @@ object SyncWorkScheduler {
 
     /** Đăng xuất: bỏ lần chạy đang chờ của tài khoản cũ. */
     fun cancel(context: Context) {
-        WorkManager.getInstance(context.applicationContext).cancelUniqueWork(UNIQUE_WORK_NAME)
+        val workManager = WorkManager.getInstance(context.applicationContext)
+        workManager.cancelUniqueWork(UNIQUE_WORK_NAME)
+        workManager.cancelUniqueWork(PERIODIC_WORK_NAME)
     }
 }

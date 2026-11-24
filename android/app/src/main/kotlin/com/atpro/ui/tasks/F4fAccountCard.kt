@@ -7,14 +7,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Visibility
-import androidx.compose.material.icons.rounded.VisibilityOff
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -27,8 +21,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -39,97 +31,16 @@ import com.atpro.ui.theme.AtButton
 import com.atpro.ui.theme.AtButtonStyle
 import com.atpro.ui.theme.AtCard
 import com.atpro.ui.theme.AtColors
-import com.atpro.ui.theme.AtDialog
-import com.atpro.ui.theme.AtTextField
 import com.atpro.ui.theme.AtStatus
 import kotlinx.coroutines.launch
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  v1.6.0 — Đăng nhập Follow4Follow
 //
-//  • F4fLoginDialog : hộp thoại nhập tên đăng nhập + mật khẩu (mật khẩu chỉ nằm trong bộ nhớ
-//                     của hộp thoại, gửi đi 1 lần rồi bỏ — KHÔNG lưu).
+//  • F4fLoginDialog : (v1.12.7) đã tách sang F4fLoginDialog.kt.
 //  • F4fAccountCard : thẻ trạng thái phiên (đăng nhập / số dư / làm mới / đăng xuất), dùng trong
 //                     Cài đặt → Nhiệm vụ. Trạng thái dùng chung với tab Dịch vụ và engine qua [F4fAuth].
 // ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-fun F4fLoginDialog(
-    onDismiss:  () -> Unit,
-    onLoggedIn: () -> Unit = {},
-) {
-    val context = LocalContext.current
-    val auth    = remember { F4fAuth.manager(context) }
-    val scope   = rememberCoroutineScope()
-
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var showPass by remember { mutableStateOf(false) }
-    var busy     by remember { mutableStateOf(false) }
-    var error    by remember { mutableStateOf<String?>(null) }
-
-    fun submit() {
-        // v1.12.7: nút Done của bàn phím cũng gọi hàm này — không gửi khi còn trống (trước đây vẫn gửi chuỗi rỗng).
-        if (busy || username.isBlank() || password.isEmpty()) return
-        busy = true
-        error = null
-        scope.launch {
-            when (val r = auth.login(username.trim(), password)) {
-                is TaskResult.Success -> {
-                    password = ""            // bỏ mật khẩu khỏi bộ nhớ ngay khi xong
-                    busy = false
-                    onLoggedIn()
-                    onDismiss()
-                }
-                is TaskResult.Error -> {
-                    busy = false
-                    error = r.message
-                }
-            }
-        }
-    }
-
-    AtDialog(
-        onDismiss      = onDismiss,
-        title          = "Đăng nhập Follow4Follow",
-        message        = "Tài khoản follow4follow.net. Mật khẩu chỉ dùng để đăng nhập, không được lưu trên máy.",
-        confirmText    = if (busy) "Đang xử lý" else "Đăng nhập",
-        onConfirm      = ::submit,
-        confirmEnabled = !busy && username.isNotBlank() && password.isNotEmpty(),
-        dismissible    = !busy,
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            AtTextField(
-                value         = username,
-                onValueChange = { username = it; error = null },
-                label         = "Tên đăng nhập",
-                enabled       = !busy,
-                imeAction     = ImeAction.Next,
-            )
-            AtTextField(
-                value         = password,
-                onValueChange = { password = it; error = null },
-                label         = "Mật khẩu",
-                enabled       = !busy,
-                obscure       = !showPass,
-                keyboardType  = KeyboardType.Password,
-                imeAction     = ImeAction.Done,
-                onDone        = ::submit,
-                error         = error,
-                trailing      = {
-                    IconButton(onClick = { showPass = !showPass }) {
-                        Icon(
-                            if (showPass) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                            contentDescription = if (showPass) "Ẩn mật khẩu" else "Hiện mật khẩu",
-                            tint     = AtColors.TextMuted,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                },
-            )
-        }
-    }
-}
 
 /** Thẻ trạng thái phiên Follow4Follow. Tự kiểm tra token + cập nhật số dư khi hiện lần đầu. */
 @Composable

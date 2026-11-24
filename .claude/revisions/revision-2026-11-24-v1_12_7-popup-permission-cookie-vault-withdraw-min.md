@@ -33,11 +33,32 @@
   conflict và `BackupCasResult.Conflicted` huỷ cả lần merge → khoá hay đổi có thể kẹt toàn bộ sao lưu.
   Muốn sync cần merge theo hợp tập + kiểm chứng trên máy (RT-03→06).
 - FarmConfig đã được sync đủ khoá (chỉ loại notif_* và `discord_webhook_url` — webhook là bí mật).
-- Đồng bộ tự động hiện chỉ chạy theo sự kiện (có thay đổi chờ gửi) + "Đồng bộ ngay" thủ công (vòng đọc–gộp–gửi, kéo dữ liệu
-  máy khác về). Chưa có kéo định kỳ; `SyncStatusCodes.INPUT_FORCE_REMOTE_CHECK` đã khai báo nhưng chưa được dùng ở đâu.
-  (Ghi chú sửa: bản đầu của mục này nói "không có đường chỉ kéo" — chưa chính xác, đã đính chính.)
+- (Lịch sử) Trước mục 7, đồng bộ chỉ chạy theo sự kiện + "Đồng bộ ngay"; `INPUT_FORCE_REMOTE_CHECK` khai báo nhưng chưa dùng.
+  Mục 7 bổ sung đồng bộ định kỳ. (Ghi chú sửa: bản đầu nói "không có đường chỉ kéo" — chưa chính xác, đã đính chính.)
 
 ## 6. Sửa lỗi build (có sẵn trên `main`, không phải do v1.12.7)
 - `SyncWorker.kt:151`: `when` trên `BackupCasResult` thiếu nhánh `UpToDate` (nhánh này được thêm ở `BackupCasCoordinator`
   nhưng worker chưa xử lý; build `main` ngày 16/11 cũng fail vì lý do này).
 - Xử lý: `UpToDate` → `completed(NO_PENDING_DATA)` (outcome UP_TO_DATE: không có thay đổi chờ gửi, đã khớp server, không tạo revision).
+
+## 7. Sync: nhìn thấy nguyên nhân lỗi + đồng bộ tự động định kỳ + màn đăng nhập
+**Vì sao**: người dùng báo không đồng bộ được thống kê/thu nhập/tài khoản nuôi và hay "xung đột dữ liệu cũ/mới". Nguyên nhân
+thật chưa xác định được vì chi tiết lỗi bị nuốt (chỉ xung đột gộp mới có chi tiết; `LOCAL_SYNC_FAILED` bỏ hẳn ngoại lệ).
+- `SyncFailureSummary` (mới, thuần): tóm tắt ≤320 ký tự cho lỗi máy chủ (`code` + HTTP), lý do bị từ chối, ngoại lệ cục bộ
+  (tên lớp + thông điệp); che JWT / `Bearer …` / chuỗi ≥64 ký tự.
+- `SyncOutcome.hasDetails` (MERGE_CONFLICT, REJECTED, FAILED): `SyncStatusStore` lưu/đọc chi tiết cho cả ba; lỗi tạm
+  (`Result.retry()`) cũng hiện nguyên nhân gần nhất; `SyncStatusText.detail` hiển thị.
+- `SyncWorker`: truyền chi tiết ở mọi nhánh lỗi; `INPUT_FORCE_REMOTE_CHECK` bỏ qua lối thoát "không có gì chờ gửi";
+  `Mutex` tiến trình bảo đảm lần chạy định kỳ và theo sự kiện không chạy chồng.
+- `SyncWorkScheduler.ensurePeriodic`: `PeriodicWorkRequest` 30 phút, cần mạng, `KEEP`; gọi khi đã đăng nhập (MainScreen);
+  `cancel()` (đăng xuất) huỷ cả hai lịch.
+- UI: `AtBranding.kt` (quầng sáng, huy hiệu, ô lợi ích); `AuthScreen` có hero + 3 lợi ích + thẻ đổ bóng;
+  `F4fLoginDialog` tách file riêng, làm lại (huy hiệu, ô nhập có biểu tượng, ghi chú bảo mật, cuộn được khi bàn phím mở).
+- Test: `SyncFailureSummaryTest` (mới), `SyncStatusTest` (+4).
+
+**Chưa làm (cần quyết định chính sách)**: tự giải quyết xung đột cũ/mới. Merge hiện huỷ cả lần khi có xung đột và 5 guard trong
+`BackupRestoreCoordinator` cũng từ chối giá trị tự giải — đổi phải sửa cả hai + nhiều test và đảo chính sách "không tin mốc giờ
+thiết bị". Cần: (a) văn bản trạng thái thật sau bản này, (b) chọn "mới nhất thắng" hay "đám mây thắng".
+
+**Rollback**: revert commit; không đổi schema Room/Supabase, không đổi định dạng snapshot.
+**Rủi ro**: chưa chạy được Gradle/test trong sandbox — cần CI; đồng bộ định kỳ tăng số lần gọi Supabase (≤ 2/giờ/máy khi không đổi).

@@ -68,6 +68,9 @@ enum class SyncOutcome {
 
     val isSuccess: Boolean get() = this == COMMITTED || this == UP_TO_DATE
 
+    /** Kết quả có kèm chi tiết nguyên nhân (xung đột / bị từ chối / lỗi) để hiện cho người dùng. */
+    val hasDetails: Boolean get() = this == MERGE_CONFLICT || this == REJECTED || this == FAILED
+
     /** Cần người dùng làm gì đó, thử lại tự động không giải quyết được. */
     val needsAttention: Boolean
         get() = when (this) {
@@ -165,7 +168,7 @@ object SyncStatusText {
                 }
             }
             if (reason != null) parts += reason
-            if (s.outcome == SyncOutcome.MERGE_CONFLICT) {
+            if (s.retrying || s.outcome.hasDetails) {
                 s.conflictDetails?.takeIf { it.isNotBlank() }?.let(parts::add)
             }
             if (s.lastSuccessAt > 0L) parts += "Lần cuối ${relative(nowMs, s.lastSuccessAt)}"

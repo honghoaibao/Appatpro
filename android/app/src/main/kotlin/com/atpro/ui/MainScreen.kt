@@ -109,6 +109,16 @@ fun MainScreen(
 
     LaunchedEffect(authSession?.user?.id) {
         backupOwnershipManager.refresh(authSession?.user?.id)
+        // Đã đăng nhập thì bật đồng bộ tự động định kỳ (đăng xuất sẽ huỷ trong SyncWorkScheduler.cancel).
+        if (authSession != null) {
+            try {
+                SyncWorkScheduler.ensurePeriodic(context)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Không đăng ký được lịch định kỳ: đồng bộ theo thay đổi và thủ công vẫn hoạt động.
+            }
+        }
         try {
             SyncWorkScheduler.scheduleIfPending(context)
         } catch (cancelled: CancellationException) {

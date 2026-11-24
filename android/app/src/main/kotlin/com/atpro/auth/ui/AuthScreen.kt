@@ -20,8 +20,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Email
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
@@ -37,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -48,9 +52,11 @@ import androidx.compose.ui.unit.sp
 import com.atpro.R
 import com.atpro.ui.theme.AtButton
 import com.atpro.ui.theme.AtColors
+import com.atpro.ui.theme.AtFeaturePill
 import com.atpro.ui.theme.AtSegmented
 import com.atpro.ui.theme.AtTextField
 import com.atpro.ui.theme.AtType
+import com.atpro.ui.theme.atGlow
 
 @Composable
 fun AuthScreen(viewModel: AuthViewModel) {
@@ -63,6 +69,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
         modifier = Modifier
             .fillMaxSize()
             .background(AtColors.Bg)
+            .atGlow()
             .statusBarsPadding()
             .navigationBarsPadding()
             .imePadding(),
@@ -81,9 +88,15 @@ fun AuthScreen(viewModel: AuthViewModel) {
                 contentDescription = "AT PRO",
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(68.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .border(1.dp, AtColors.Hairline, RoundedCornerShape(20.dp)),
+                    .size(76.dp)
+                    .shadow(
+                        elevation = 14.dp,
+                        shape = RoundedCornerShape(22.dp),
+                        ambientColor = AtColors.Shadow.copy(alpha = 0.20f),
+                        spotColor = AtColors.Blue.copy(alpha = 0.40f),
+                    )
+                    .clip(RoundedCornerShape(22.dp))
+                    .border(1.dp, AtColors.Hairline, RoundedCornerShape(22.dp)),
             )
 
             Spacer(Modifier.height(16.dp))
@@ -92,11 +105,35 @@ fun AuthScreen(viewModel: AuthViewModel) {
                 style = AtType.Title,
                 color = AtColors.TextPrim,
             )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Đồng bộ dữ liệu an toàn trên mọi thiết bị",
+                color = AtColors.TextSec,
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+            )
 
-            Spacer(Modifier.height(24.dp))
+            // Lợi ích của việc đăng nhập — nói rõ dữ liệu nào được đồng bộ.
+            Spacer(Modifier.height(20.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                AtFeaturePill(Icons.Rounded.Sync, "Tự động\nđồng bộ", Modifier.weight(1f))
+                AtFeaturePill(Icons.Rounded.BarChart, "Thống kê &\nthu nhập", Modifier.weight(1f))
+                AtFeaturePill(Icons.Rounded.PhoneAndroid, "Tài khoản\nnuôi", Modifier.weight(1f))
+            }
+
+            Spacer(Modifier.height(22.dp))
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .shadow(
+                        elevation = 12.dp,
+                        shape = shape,
+                        ambientColor = AtColors.Shadow.copy(alpha = 0.10f),
+                        spotColor = AtColors.Shadow.copy(alpha = 0.18f),
+                    )
                     .clip(shape)
                     .background(AtColors.Surface)
                     .border(1.dp, AtColors.Hairline, shape)

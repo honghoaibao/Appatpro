@@ -140,6 +140,43 @@ class SyncStatusTest {
         )
     }
 
+    @Test fun `mo ta hien nguyen nhan khi may chu tu choi hoac loi`() {
+        val now = 100 * min
+        val rejected = SyncStatusSnapshot(
+            outcome = SyncOutcome.REJECTED,
+            conflictDetails = "Mã lỗi: remote_snapshot_invalid (HTTP 400)",
+        )
+        assertEquals(
+            "Thử lại sau, dữ liệu trên máy vẫn giữ nguyên · Mã lỗi: remote_snapshot_invalid (HTTP 400)",
+            SyncStatusText.detail(rejected, now),
+        )
+        val failed = SyncStatusSnapshot(outcome = SyncOutcome.FAILED, conflictDetails = "IllegalStateException: x")
+        assertTrue(SyncStatusText.detail(failed, now).endsWith("IllegalStateException: x"))
+    }
+
+    @Test fun `dang cho thu lai van hien nguyen nhan gan nhat`() {
+        val now = 100 * min
+        val state = SyncStatusSnapshot(
+            outcome = SyncOutcome.COMMITTED,
+            retrying = true,
+            conflictDetails = "Mã lỗi: remote_unavailable (HTTP 503)",
+        )
+        assertEquals(
+            "Mạng hoặc máy chủ chưa sẵn sàng · Mã lỗi: remote_unavailable (HTTP 503)",
+            SyncStatusText.detail(state, now),
+        )
+    }
+
+    @Test fun `ket qua thanh cong khong hien chi tiet cu`() {
+        val state = SyncStatusSnapshot(outcome = SyncOutcome.COMMITTED, conflictDetails = "cu")
+        assertFalse(SyncStatusText.detail(state, 100 * min).contains("cu"))
+    }
+
+    @Test fun `chi ket qua co chi tiet moi giu nguyen nhan`() {
+        val withDetails = SyncOutcome.entries.filter { it.hasDetails }.toSet()
+        assertEquals(setOf(SyncOutcome.MERGE_CONFLICT, SyncOutcome.REJECTED, SyncOutcome.FAILED), withDetails)
+    }
+
     // ── Chính sách thông báo ──────────────────────────────────
     @Test fun `chay nen chi bao khi vao trang thai can xu ly`() {
         assertTrue(SyncNotifyPolicy.shouldNotify(SyncOutcome.COMMITTED, SyncOutcome.AUTH_EXPIRED, manual = false))
