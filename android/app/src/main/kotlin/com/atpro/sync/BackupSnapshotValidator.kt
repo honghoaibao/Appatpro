@@ -1,5 +1,7 @@
 package com.atpro.sync
 
+import com.atpro.data.EarningsRollupPolicy
+
 /**
  * Pure snapshot invariants. Kept separate from Android Base64/GZIP APIs so the safety
  * rules can be unit-tested on the local JVM without a device or emulator.
@@ -24,6 +26,27 @@ internal object BackupSnapshotValidator {
             accountStatContributions = snapshot.datasets.accountStatContributions,
             sourceInstallId = snapshot.sourceInstallId,
             tombstones = snapshot.datasets.tombstones,
+            earningRollups = snapshot.datasets.earningRollups,
+        )
+    }
+
+    fun validateV3(snapshot: BackupSnapshotV3) {
+        validateEnvelope(
+            formatVersion = snapshot.formatVersion,
+            expectedVersion = BackupSnapshot.V3_FORMAT_VERSION,
+            createdAt = snapshot.createdAt,
+            appVersion = snapshot.appVersion,
+            sourceInstallId = snapshot.sourceInstallId,
+        )
+        validateDatasets(
+            accounts = snapshot.datasets.accounts,
+            closedSessions = snapshot.datasets.closedSessions,
+            safeConfigs = snapshot.datasets.safeConfigs,
+            schedules = snapshot.datasets.schedules,
+            earnings = snapshot.datasets.earnings.map { it.toCurrent() },
+            accountStatContributions = snapshot.datasets.accountStatContributions,
+            sourceInstallId = snapshot.sourceInstallId,
+            tombstones = snapshot.datasets.tombstones,
         )
     }
 
@@ -40,7 +63,7 @@ internal object BackupSnapshotValidator {
             closedSessions = snapshot.datasets.closedSessions,
             safeConfigs = snapshot.datasets.safeConfigs,
             schedules = snapshot.datasets.schedules,
-            earnings = snapshot.datasets.earnings,
+            earnings = snapshot.datasets.earnings.map { it.toCurrent() },
             accountStatContributions = snapshot.datasets.accountStatContributions,
             sourceInstallId = snapshot.sourceInstallId,
             tombstones = emptyList(),
@@ -72,6 +95,7 @@ internal object BackupSnapshotValidator {
         accountStatContributions: List<BackupAccountStatContribution>,
         sourceInstallId: String,
         tombstones: List<BackupTombstone>,
+        earningRollups: List<BackupEarningRollup> = emptyList(),
     ) {
         val accountNames = accounts.map { it.username }
         if (accountNames.any { it.isBlank() || it != it.trim() } ||
@@ -156,10 +180,29 @@ internal object BackupSnapshotValidator {
                     it.kind.isBlank() ||
                     !it.reward.isFinite() ||
                     it.reward < 0.0 ||
-                    it.atMs < 0L
+                    it.atMs < 0L ||
+                    (it.origin != null && !BackupMetadataRules.isCanonicalUuid(it.origin))
             }
         ) {
             throw BackupCodecException("Backup contains invalid or duplicate earnings entries")
+        }
+
+        // v4: dòng tổng thu nhập. id phải KHỚP công thức cố định (máy, ngày, loại, tài khoản) → không thể giả mạo/trùng nghĩa.
+        val rollupIds = earningRollups.map { it.id }
+        if (earningRollups.size > EarningsRollupPolicy.MAX_ROLLUPS ||
+            rollupIds.distinct().size != rollupIds.size ||
+            earningRollups.any {
+                !BackupMetadataRules.isCanonicalUuid(it.id) ||
+                    !BackupMetadataRules.isCanonicalUuid(it.origin) ||
+                    it.id != EarningsRollupPolicy.rollupId(it.origin, it.epochDay, it.kind, it.account) ||
+                    it.epochDay < 0L ||
+                    it.kind.isBlank() ||
+                    !it.coins.isFinite() ||
+                    it.coins < 0.0 ||
+                    it.jobs <= 0L
+            }
+        ) {
+            throw BackupCodecException("Backup contains invalid or duplicate earning rollups")
         }
 
         validateTombstones(tombstones)

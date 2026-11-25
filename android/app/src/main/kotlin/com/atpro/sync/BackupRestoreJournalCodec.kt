@@ -24,7 +24,7 @@ internal object BackupRestoreJournalCodec {
     fun encode(snapshot: BackupSnapshot, ownerUserId: String): String {
         BackupSnapshotValidator.validate(snapshot)
         require(snapshot.formatVersion == BackupSnapshot.CURRENT_FORMAT_VERSION) {
-            "Only snapshot v3 can be staged for local restore"
+            "Only the current snapshot format can be staged for local restore"
         }
         validateBounds(snapshot)
         if (!BackupMetadataRules.isCanonicalUuid(ownerUserId)) {
@@ -65,6 +65,7 @@ internal object BackupRestoreJournalCodec {
     private fun validateBounds(snapshot: BackupSnapshot) {
         if (snapshot.datasets.closedSessions.size > MAX_CLOSED_SESSIONS ||
             snapshot.datasets.earnings.size > MAX_EARNINGS ||
+            snapshot.datasets.earningRollups.size > com.atpro.data.EarningsRollupPolicy.MAX_ROLLUPS ||
             snapshot.datasets.tombstones.size > BackupSnapshotValidator.MAX_TOMBSTONES
         ) {
             throw BackupRestoreException("Snapshot exceeds a restore dataset safety bound")
@@ -81,7 +82,7 @@ internal object BackupRestoreJournalCodec {
             throw BackupRestoreException("Prepared restore journal is malformed", error)
         }
         if (record.journalVersion != JOURNAL_VERSION ||
-            record.schemaVersion != BackupSnapshot.CURRENT_FORMAT_VERSION ||
+            record.schemaVersion !in BackupSnapshot.SUPPORTED_WIRE_VERSIONS ||
             !BackupMetadataRules.isCanonicalUuid(record.ownerUserId) ||
             record.payload.isBlank() ||
             !record.checksum.matches(Regex("^[0-9a-f]{64}$"))

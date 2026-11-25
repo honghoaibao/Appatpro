@@ -74,6 +74,8 @@ class SyncWorker(
 
         return try {
             EarningsStore.init(applicationContext)
+            // v1.13.0: nén thu nhập cũ thành dòng tổng trước khi chụp snapshot (idempotent, tự đánh dấu dirty nếu có đổi).
+            EarningsStore.compactIfNeeded()
 
             // Startup restoration is local-only. Refresh is attempted only after an HTTP 401.
             val initialSession = app.authRepository.restoreSession()

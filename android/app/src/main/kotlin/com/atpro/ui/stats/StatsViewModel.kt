@@ -88,7 +88,14 @@ class StatsViewModel(
     val earnings: StateFlow<EarningsSummary> = combine(_range, refreshTick) { r, _ -> r }
         .map { r ->
             withContext(Dispatchers.IO) {
-                summarizeEarnings(EarningsStore.readAll(), System.currentTimeMillis(), r.days)
+                // Một lần đọc duy nhất cho cả dòng thô và dòng tổng — tránh đếm đôi nếu việc nén chen vào giữa hai lần đọc.
+                val snapshot = runCatching { EarningsStore.readSnapshot() }.getOrNull()
+                summarizeEarnings(
+                    snapshot?.entries.orEmpty(),
+                    System.currentTimeMillis(),
+                    r.days,
+                    rollups = snapshot?.rollups.orEmpty(),
+                )
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EarningsSummary.EMPTY)

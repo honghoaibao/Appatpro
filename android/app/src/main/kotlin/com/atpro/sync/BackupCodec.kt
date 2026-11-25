@@ -27,8 +27,8 @@ class BackupCodecException(message: String, cause: Throwable? = null) : Exceptio
  * Deterministic JSON -> UTF-8 -> GZIP -> Base64 codec.
  * SHA-256 is calculated over canonical uncompressed JSON, not compressed bytes.
  *
- * New payloads are written as v3. Legacy v2 payloads are decoded using their original wire
- * model and converted into a v3 staging model with an empty tombstone set.
+ * New payloads are written as v4. Legacy v2 and v3 payloads are decoded using their original wire
+ * models and converted into the v4 staging model (empty tombstones / earning rollups as appropriate).
  */
 object BackupCodec {
     const val MAX_ENCODED_PAYLOAD_BYTES = 7 * 1024 * 1024
@@ -89,9 +89,7 @@ object BackupCodec {
         expectedChecksum: String,
         expectedSchemaVersion: Int,
     ): BackupSnapshot {
-        if (expectedSchemaVersion != BackupSnapshot.LEGACY_FORMAT_VERSION &&
-            expectedSchemaVersion != BackupSnapshot.CURRENT_FORMAT_VERSION
-        ) {
+        if (expectedSchemaVersion !in BackupSnapshot.SUPPORTED_WIRE_VERSIONS) {
             throw BackupCodecException("Unsupported expected snapshot schema version")
         }
         val encodedBytes = payload.toByteArray(Charsets.UTF_8).size
@@ -133,9 +131,7 @@ object BackupCodec {
         jsonText: String,
         expectedSchemaVersion: Int,
     ): BackupSnapshot {
-        if (expectedSchemaVersion != BackupSnapshot.LEGACY_FORMAT_VERSION &&
-            expectedSchemaVersion != BackupSnapshot.CURRENT_FORMAT_VERSION
-        ) {
+        if (expectedSchemaVersion !in BackupSnapshot.SUPPORTED_WIRE_VERSIONS) {
             throw BackupCodecException("Unsupported expected snapshot schema version")
         }
 
@@ -167,6 +163,16 @@ object BackupCodec {
                 BackupSnapshotValidator.validateV2(legacy)
                 ensureCanonical(jsonText, json.encodeToString(legacy))
                 legacy.toCurrentSnapshot()
+            }
+            BackupSnapshot.V3_FORMAT_VERSION -> {
+                val v3 = try {
+                    json.decodeFromString<BackupSnapshotV3>(jsonText)
+                } catch (error: Exception) {
+                    throw BackupCodecException("Legacy v3 backup JSON is malformed or unsupported", error)
+                }
+                BackupSnapshotValidator.validateV3(v3)
+                ensureCanonical(jsonText, json.encodeToString(v3))
+                v3.toCurrentSnapshot()
             }
             BackupSnapshot.CURRENT_FORMAT_VERSION -> {
                 val current = try {

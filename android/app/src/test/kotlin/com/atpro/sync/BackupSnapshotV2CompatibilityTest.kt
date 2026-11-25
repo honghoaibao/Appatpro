@@ -48,14 +48,14 @@ class BackupSnapshotV2CompatibilityTest {
 
     @Test
     fun rejectsFutureAndMismatchedSnapshotVersions() {
-        val futureJson = canonicalJson.encodeToString(validV2Snapshot().copy(formatVersion = 4))
+        val futureJson = canonicalJson.encodeToString(validV2Snapshot().copy(formatVersion = 5))
         assertRejected {
             BackupCodec.decodeCanonicalJson(futureJson, BackupSnapshot.LEGACY_FORMAT_VERSION)
         }
         assertRejected {
             BackupCodec.decodeCanonicalJson(
                 canonicalJson.encodeToString(validV2Snapshot()),
-                expectedSchemaVersion = 4,
+                expectedSchemaVersion = 5,
             )
         }
         assertRejected {

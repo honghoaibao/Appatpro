@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.AtomicFile
 import androidx.room.withTransaction
 import com.atpro.data.EarningEntry
+import com.atpro.data.EarningRollup
 import com.atpro.data.EarningsStore
 import com.atpro.db.AtProDatabase
 import com.atpro.db.entity.AccountEntity
@@ -125,8 +126,20 @@ class BackupRestoreCoordinator(context: Context) {
                     kind = it.kind,
                     reward = it.reward,
                     account = it.account,
+                    origin = it.origin,
                 )
-            }
+            },
+            snapshot.datasets.earningRollups.map {
+                EarningRollup(
+                    id = it.id,
+                    origin = it.origin,
+                    epochDay = it.epochDay,
+                    kind = it.kind,
+                    account = it.account,
+                    coins = it.coins,
+                    jobs = it.jobs,
+                )
+            },
         )
 
         // Cancel only. Never enqueue imported schedules. FarmWorker also treats disabled
@@ -142,6 +155,7 @@ class BackupRestoreCoordinator(context: Context) {
         database.withTransaction {
             if (snapshot.datasets.closedSessions.size > MAX_CLOSED_SESSIONS ||
                 snapshot.datasets.earnings.size > MAX_EARNINGS ||
+                snapshot.datasets.earningRollups.size > com.atpro.data.EarningsRollupPolicy.MAX_ROLLUPS ||
                 snapshot.datasets.tombstones.size > BackupSnapshotValidator.MAX_TOMBSTONES
             ) {
                 throw BackupRestoreException("Snapshot exceeds a restore dataset safety bound")

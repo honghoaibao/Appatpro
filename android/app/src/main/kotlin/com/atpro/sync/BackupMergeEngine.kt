@@ -1,5 +1,7 @@
 package com.atpro.sync
 
+import com.atpro.data.EarningsRollupPolicy
+
 /**
  * A conflict is a logical identity for which the two validated snapshots do not provide
  * enough trustworthy information to choose one value automatically.
@@ -106,11 +108,26 @@ object BackupMergeEngine {
             conflicts,
         )
 
+        val mergedRollups = mergeEarningRollups(
+            local.datasets.earningRollups,
+            remote.datasets.earningRollups,
+        )
+        if (mergedRollups.size > EarningsRollupPolicy.MAX_ROLLUPS) {
+            conflicts += BackupMergeConflict(
+                dataset = "earningRollups",
+                entityKey = mergedRollups.size.toString(),
+                kind = BackupMergeConflictKind.DATASET_LIMIT_EXCEEDED,
+            )
+        }
+        // Dòng thô đã có dòng tổng của cùng (máy, ngày) phủ thì bỏ — chống đếm đôi giữa các máy.
+        val rollupCoverage = mergedRollups.mapTo(hashSetOf<Pair<String, Long>>()) { it.origin to it.epochDay }
         val mergedEarnings = mergeEarnings(
             local.datasets.earnings,
             remote.datasets.earnings,
             conflicts,
-        )
+        ).filterNot {
+            it.origin != null && (it.origin to EarningsRollupPolicy.epochDay(it.atMs)) in rollupCoverage
+        }
 
         val retainedAccountKeys = mergedAccounts.mapTo(hashSetOf<String>()) { it.username }
         val contributionInputs = (
@@ -195,6 +212,7 @@ object BackupMergeEngine {
                     .sortedWith(compareBy({ it.atMs }, { it.id }))
                     .takeLast(MAX_EARNINGS),
                 accountStatContributions = orderedContributions,
+                earningRollups = mergedRollups,
                 tombstones = tombstones.sortedWith(
                     compareBy({ it.dataset }, { it.entityKey }, { it.tombstoneId })
                 ),
@@ -401,15 +419,37 @@ object BackupMergeEngine {
     ): List<BackupEarning> {
         val grouped = (local + remote).groupBy { it.id }
         return grouped.toSortedMap().mapNotNull { (id, group) ->
-            if (group.size > 2 || group.distinct().size > 1) {
+            // origin không tính vào "nội dung": bản có origin (v4) và bản cũ không có cùng id là một sự kiện.
+            if (group.size > 2 || group.map { it.copy(origin = null) }.distinct().size > 1) {
                 conflicts += conflict(
                     "earnings", id, BackupMergeConflictKind.EARNING_CONTENT
                 )
                 null
             } else {
-                group.first()
+                group.firstOrNull { it.origin != null } ?: group.first()
             }
         }
+    }
+
+    /**
+     * Hợp dòng tổng theo id. Cùng id = cùng (máy, ngày, loại, tài khoản) → lấy bản lớn hơn (nhiều việc hơn, rồi nhiều xu
+     * hơn): dòng tổng chỉ tăng nên kết quả không phụ thuộc thứ tự và gộp lặp lại là idempotent. Không bao giờ xung đột.
+     */
+    private fun mergeEarningRollups(
+        local: List<BackupEarningRollup>,
+        remote: List<BackupEarningRollup>,
+    ): List<BackupEarningRollup> {
+        val byId = HashMap<String, BackupEarningRollup>()
+        for (r in local + remote) {
+            val prev = byId[r.id]
+            byId[r.id] = when {
+                prev == null -> r
+                r.jobs != prev.jobs -> if (r.jobs > prev.jobs) r else prev
+                r.coins > prev.coins -> r
+                else -> prev
+            }
+        }
+        return byId.values.sortedWith(compareBy({ it.epochDay }, { it.origin }, { it.id }))
     }
 
     private fun normalizeAccountKey(username: String): String =

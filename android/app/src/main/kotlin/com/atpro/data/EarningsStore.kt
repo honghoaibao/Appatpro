@@ -17,6 +17,8 @@ data class EarningEntry(
     val reward: Double,
     val account: String,
     val id: String = UUID.randomUUID().toString(),
+    /** v1.13.0: mã máy tạo sự kiện (null = dòng cũ trước v1.13.0 — không bao giờ bị nén). */
+    val origin: String? = null,
 )
 
 data class EarningsDirtyState(
@@ -27,14 +29,19 @@ data class EarningsDirtyState(
 }
 
 data class EarningsStoreSnapshot(
+    /** Dòng thô còn hiệu lực (đã bỏ các dòng được dòng tổng phủ). */
     val entries: List<EarningEntry>,
     val dirtyState: EarningsDirtyState,
+    /** v1.13.0: dòng tổng của thu nhập cũ đã nén. */
+    val rollups: List<EarningRollup> = emptyList(),
 )
 
 /**
  * Earnings history remains file-backed to avoid inflating Room with per-job rows.
  *
- * Current format: v2|entryUUID|timestampMs|kind|reward|account
+ * Current format: v3|entryUUID|timestampMs|kind|reward|account|originInstallUUID (v1.13.0)
+ * Older rows `v2|entryUUID|timestampMs|kind|reward|account` (no origin) remain readable and are never compacted.
+ * v1.13.0: sự kiện cũ do chính máy này tạo được nén thành dòng tổng trong `earnings.rollup` ([EarningsRollupPolicy]).
  * Legacy rows are migrated atomically and receive a stored UUID. A small AtomicFile
  * generation marker gives the future sync worker a durable dirty signal without
  * requiring a Room transaction for this file-backed dataset.
@@ -42,6 +49,8 @@ data class EarningsStoreSnapshot(
 object EarningsStore {
     private const val FILE = "earnings.log"
     private const val DIRTY_FILE = "earnings.dirty"
+    private const val ROLLUP_FILE = "earnings.rollup"
+    private const val ORIGIN_FILE = "earnings.origin"
     private const val MAX_LINES = 30_000
     private const val KEEP = 25_000
     private const val DIRTY_FORMAT = "v1"
@@ -49,10 +58,12 @@ object EarningsStore {
     @Volatile private var dir: File? = null
     private val lock = Any()
     private var appendsSinceTrim = 0
+    private var cachedOrigin: String? = null
 
     fun init(context: Context) {
         synchronized(lock) {
             val target = context.applicationContext.filesDir
+            if (dir != target) cachedOrigin = null
             dir = target
         }
     }
@@ -78,6 +89,7 @@ object EarningsStore {
                     kind = sanitize(kind),
                     reward = reward,
                     account = sanitize(account),
+                    origin = originLocked(directory),
                 )
                 FileOutputStream(File(directory, FILE), true).use { output ->
                     output.write((toStorageLine(entry) + "\n").toByteArray(StandardCharsets.UTF_8))
@@ -87,6 +99,7 @@ object EarningsStore {
 
                 if (++appendsSinceTrim >= 200) {
                     appendsSinceTrim = 0
+                    runCatching { compactLocked(directory, System.currentTimeMillis()) }
                     trimLocked(File(directory, FILE))
                 }
             }
@@ -110,8 +123,51 @@ object EarningsStore {
             } else {
                 file.useLines { lines -> lines.mapNotNull(::parseLine).toList() }
             }
-            return EarningsStoreSnapshot(entries, readDirtyStateLocked(directory))
+            val rollups = readRollupsLocked(directory)
+            return EarningsStoreSnapshot(
+                entries = EarningsRollupPolicy.dropCovered(entries, rollups),
+                dirtyState = readDirtyStateLocked(directory),
+                rollups = rollups,
+            )
         }
+    }
+
+    fun readRollups(): List<EarningRollup> =
+        runCatching { readSnapshot().rollups }.getOrDefault(emptyList())
+
+    /**
+     * v1.13.0: nén sự kiện CŨ của chính máy này thành dòng tổng. Dòng tổng được ghi TRƯỚC, dòng thô bị bỏ SAU; nếu dừng
+     * giữa chừng thì dòng thô còn lại bị luật "phủ" loại khi đọc — tổng không bao giờ mất hay bị đếm đôi.
+     * Trả true nếu có thay đổi (đã đánh dấu dirty để lần đồng bộ sau gửi bản tổng lên). Gọi từ nền (SyncWorker).
+     */
+    fun compactIfNeeded(nowMs: Long = System.currentTimeMillis()): Boolean {
+        val directory = dir ?: return false
+        return runCatching {
+            synchronized(lock) {
+                initializeDirtyMarkerLocked(directory)
+                if (!ensureLegacyMigratedLocked(directory)) return@synchronized false
+                compactLocked(directory, nowMs)
+            }
+        }.getOrDefault(false)
+    }
+
+    private fun compactLocked(directory: File, nowMs: Long): Boolean {
+        val file = File(directory, FILE)
+        if (!file.exists()) return false
+        val rawLines = file.readLines(StandardCharsets.UTF_8).filter { it.isNotBlank() }
+        val parsed = rawLines.map(::parseLine)
+        if (parsed.any { it == null }) return false       // dòng lỗi: không đụng vào, giữ nguyên để kiểm tra
+        val entries = parsed.filterNotNull()
+        val rollups = readRollupsLocked(directory)
+        val result = EarningsRollupPolicy.compact(entries, rollups, originLocked(directory), nowMs)
+        if (!result.changed) return false
+
+        markDirtyLocked(directory)
+        if (result.rollups != rollups) writeRollupsLocked(directory, result.rollups)   // 1) tổng trước
+        writeTextAtomically(file, result.keptEntries.joinToString("\n", postfix = if (result.keptEntries.isEmpty()) "" else "\n") {
+            toStorageLine(it)
+        })                                                                               // 2) bỏ dòng thô sau
+        return true
     }
 
     fun readAll(): List<EarningEntry> =
@@ -156,14 +212,20 @@ object EarningsStore {
      * Merge a staged restore into the current file by stable UUID. Replaying the same
      * journal is idempotent, and earnings appended after staging are retained.
      */
-    fun mergeFromRestore(restoredEntries: List<EarningEntry>) {
+    fun mergeFromRestore(
+        restoredEntries: List<EarningEntry>,
+        restoredRollups: List<EarningRollup> = emptyList(),
+    ) {
         val directory = dir ?: error("EarningsStore has not been initialized")
         require(restoredEntries.size <= KEEP) { "Restore earnings exceed the retention bound" }
         require(restoredEntries.all {
             it.atMs >= 0L && it.kind.isNotBlank() && it.reward.isFinite() && it.reward >= 0.0 &&
                 sanitize(it.kind) == it.kind && sanitize(it.account) == it.account &&
-                runCatching { UUID.fromString(it.id).toString() == it.id }.getOrDefault(false)
+                runCatching { UUID.fromString(it.id).toString() == it.id }.getOrDefault(false) &&
+                (it.origin == null || runCatching { UUID.fromString(it.origin).toString() == it.origin }.getOrDefault(false))
         }) { "Restore contains invalid earning entries" }
+        require(restoredRollups.size <= EarningsRollupPolicy.MAX_ROLLUPS) { "Restore rollups exceed the bound" }
+        require(restoredRollups.all(::isValidRollup)) { "Restore contains invalid earning rollups" }
 
         synchronized(lock) {
             initializeDirtyMarkerLocked(directory)
@@ -181,17 +243,24 @@ object EarningsStore {
             } else {
                 emptyList()
             }
+            val currentRollups = readRollupsLocked(directory)
+            val mergedRollups = EarningsRollupPolicy.mergeRollups(currentRollups, restoredRollups)
             val merged = LinkedHashMap<String, EarningEntry>()
             (current + restoredEntries).forEach { entry ->
                 val previous = merged[entry.id]
-                if (previous != null && previous != entry) {
+                // Dòng cũ (v2) và bản v3 của cùng một id chỉ khác ở origin → không phải xung đột nội dung.
+                if (previous != null && previous.copy(origin = null) != entry.copy(origin = null)) {
                     throw IllegalStateException("Earning UUID content conflict: ${entry.id}")
                 }
-                merged[entry.id] = entry
+                merged[entry.id] = if (previous?.origin != null) previous else entry
             }
-            val retained = merged.values.sortedWith(compareBy({ it.atMs }, { it.id })).takeLast(KEEP)
+            // Dòng thô đã có dòng tổng của cùng (máy, ngày) phủ thì bỏ (chống đếm đôi).
+            val effective = EarningsRollupPolicy.dropCovered(merged.values.toList(), mergedRollups)
+            val retained = effective.sortedWith(compareBy({ it.atMs }, { it.id })).takeLast(KEEP)
             val normalizedCurrent = current.sortedWith(compareBy({ it.atMs }, { it.id })).takeLast(KEEP)
-            if (retained == normalizedCurrent) return
+            val rollupsChanged = mergedRollups != currentRollups.sortedWith(EarningsRollupPolicy.ORDER)
+            if (retained == normalizedCurrent && !rollupsChanged) return
+            if (rollupsChanged) writeRollupsLocked(directory, mergedRollups)   // tổng trước, thô sau (xem compactIfNeeded)
 
             // Dirty first: if the process stops during the atomic file replacement, the
             // journal remains and a replay can safely complete the same merge.
@@ -219,9 +288,11 @@ object EarningsStore {
         try {
             synchronized(lock) {
                 val file = File(directory, FILE)
-                if (file.exists() && file.length() > 0L) {
+                val rollupFile = File(directory, ROLLUP_FILE)
+                if ((file.exists() && file.length() > 0L) || rollupFile.exists()) {
                     markDirtyLocked(directory)
                     AtomicFile(file).delete()
+                    AtomicFile(rollupFile).delete()
                 }
             }
         } catch (_: Exception) {
@@ -231,6 +302,14 @@ object EarningsStore {
 
     internal fun parseLine(line: String): EarningEntry? {
         val fields = line.split('|')
+        if (fields.firstOrNull() == "v3") {
+            if (fields.size != 7) return null
+            val id = runCatching { UUID.fromString(fields[1]).toString() }.getOrNull() ?: return null
+            val at = fields[2].toLongOrNull() ?: return null
+            val reward = fields[4].toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0.0 } ?: return null
+            val origin = runCatching { UUID.fromString(fields[6]).toString() }.getOrNull() ?: return null
+            return EarningEntry(at, fields[3], reward, fields[5], id, origin)
+        }
         if (fields.firstOrNull() == "v2") {
             if (fields.size != 6) return null
             val id = runCatching { UUID.fromString(fields[1]).toString() }.getOrNull() ?: return null
@@ -251,7 +330,84 @@ object EarningsStore {
         value.replace('|', '_').replace('\n', ' ').replace('\r', ' ')
 
     private fun toStorageLine(entry: EarningEntry): String =
-        "v2|${entry.id}|${entry.atMs}|${sanitize(entry.kind)}|${entry.reward}|${sanitize(entry.account)}"
+        if (entry.origin != null) {
+            "v3|${entry.id}|${entry.atMs}|${sanitize(entry.kind)}|${entry.reward}|${sanitize(entry.account)}|${entry.origin}"
+        } else {
+            "v2|${entry.id}|${entry.atMs}|${sanitize(entry.kind)}|${entry.reward}|${sanitize(entry.account)}"
+        }
+
+    // ── v1.13.0: dòng tổng + mã máy ─────────────────────────────────────────────────────────────
+
+    /** Mã máy dùng làm chủ sở hữu dòng tổng; tạo một lần rồi giữ cố định (xoá dữ liệu app = máy mới). */
+    private fun originLocked(directory: File): String {
+        cachedOrigin?.let { return it }
+        val file = File(directory, ORIGIN_FILE)
+        runCatching {
+            val text = file.takeIf { it.exists() }?.readText(StandardCharsets.UTF_8)?.trim()
+            if (text != null) return UUID.fromString(text).toString().also { cachedOrigin = it }
+        }
+        val created = UUID.randomUUID().toString()
+        writeTextAtomically(file, created)
+        cachedOrigin = created
+        return created
+    }
+
+    internal fun isValidRollup(r: EarningRollup): Boolean =
+        runCatching {
+            UUID.fromString(r.id).toString() == r.id &&
+                UUID.fromString(r.origin).toString() == r.origin &&
+                r.id == EarningsRollupPolicy.rollupId(r.origin, r.epochDay, r.kind, r.account) &&
+                r.kind.isNotBlank() && sanitize(r.kind) == r.kind && sanitize(r.account) == r.account &&
+                r.coins.isFinite() && r.coins >= 0.0 && r.jobs > 0L
+        }.getOrDefault(false)
+
+    internal fun rollupLine(r: EarningRollup): String =
+        "r1|${r.id}|${r.origin}|${r.epochDay}|${sanitize(r.kind)}|${r.jobs}|${r.coins}|${sanitize(r.account)}"
+
+    internal fun parseRollupLine(line: String): EarningRollup? {
+        val f = line.split('|')
+        if (f.size != 8 || f[0] != "r1") return null
+        val rollup = EarningRollup(
+            id = f[1], origin = f[2],
+            epochDay = f[3].toLongOrNull() ?: return null,
+            kind = f[4],
+            account = f[7],
+            coins = f[6].toDoubleOrNull() ?: return null,
+            jobs = f[5].toLongOrNull() ?: return null,
+        )
+        return rollup.takeIf(::isValidRollup)
+    }
+
+    private fun readRollupsLocked(directory: File): List<EarningRollup> {
+        val file = File(directory, ROLLUP_FILE)
+        if (!file.exists()) return emptyList()
+        // Dòng tổng hỏng bị bỏ qua (không ném): đọc thu nhập không được làm hỏng màn hình thống kê.
+        return file.useLines(StandardCharsets.UTF_8) { lines -> lines.mapNotNull(::parseRollupLine).toList() }
+            .let { EarningsRollupPolicy.mergeRollups(it, emptyList()) }
+    }
+
+    private fun writeRollupsLocked(directory: File, rollups: List<EarningRollup>) {
+        val sorted = rollups.sortedWith(EarningsRollupPolicy.ORDER)
+        writeTextAtomically(
+            File(directory, ROLLUP_FILE),
+            sorted.joinToString("\n", postfix = if (sorted.isEmpty()) "" else "\n") { rollupLine(it) },
+        )
+    }
+
+    private fun writeTextAtomically(file: File, text: String) {
+        val atomic = AtomicFile(file)
+        var output: FileOutputStream? = null
+        try {
+            output = atomic.startWrite()
+            output.write(text.toByteArray(StandardCharsets.UTF_8))
+            output.flush()
+            output.fd.sync()
+            atomic.finishWrite(output)
+        } catch (error: Exception) {
+            output?.let { atomic.failWrite(it) }
+            throw error
+        }
+    }
 
     private fun initializeDirtyMarkerLocked(directory: File) {
         val marker = File(directory, DIRTY_FILE)
@@ -319,7 +475,7 @@ object EarningsStore {
 
         var changed = false
         val migrated = lines.map { line ->
-            if (line.startsWith("v2|")) {
+            if (line.startsWith("v2|") || line.startsWith("v3|")) {
                 line
             } else {
                 val fields = line.split('|')

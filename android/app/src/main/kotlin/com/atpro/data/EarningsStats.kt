@@ -49,6 +49,11 @@ fun summarizeEarnings(
     nowMs:     Long,
     rangeDays: Int?,
     tz:        TimeZone = TimeZone.getDefault(),
+    /**
+     * v1.13.0: dòng tổng của thu nhập đã nén (ngày cũ). Chỉ cộng vào TỔNG (xu, số việc, loại, theo tài khoản) và kỳ trước;
+     * biểu đồ theo ngày/giờ và "hôm nay" chỉ đọc dòng thô (≤ 60 ngày gần nhất). Dòng thô đã được phủ bị bỏ để không đếm đôi.
+     */
+    rollups:   List<EarningRollup> = emptyList(),
 ): EarningsSummary {
     val cal = Calendar.getInstance(tz)
     fun startOfDay(ms: Long): Long {
@@ -61,18 +66,23 @@ fun summarizeEarnings(
         cal.timeInMillis = ms; cal.add(Calendar.DAY_OF_YEAR, n); return cal.timeInMillis
     }
     val dayMs = 86_400_000.0
+    val raw = EarningsRollupPolicy.dropCovered(all, rollups)
 
     val todayStart = startOfDay(nowMs)
-    val firstMs = all.minOfOrNull { it.atMs }
+    val firstMs = raw.minOfOrNull { it.atMs }
     val spanDays = (rangeDays
         ?: if (firstMs == null) 1 else Math.round((todayStart - startOfDay(firstMs)) / dayMs).toInt() + 1
         ).coerceIn(1, 60)
     val windowStart = addDays(todayStart, -(spanDays - 1))
 
-    val inRange = if (rangeDays == null) all else all.filter { it.atMs >= windowStart }
+    val inRange = if (rangeDays == null) raw else raw.filter { it.atMs >= windowStart }
     val prevStart = addDays(windowStart, -spanDays)
+    // Dòng tổng (ngày UTC) chỉ góp vào "Tất cả" và kỳ liền trước; kỳ đang xem (≤ 60 ngày) luôn nằm trong dòng thô.
+    val rollupsInRange = if (rangeDays == null) rollups else emptyList()
+    val rollupMs = { r: EarningRollup -> r.epochDay * EarningsRollupPolicy.MS_PER_DAY }
     val prevCoins = if (rangeDays == null) 0.0
-        else all.filter { it.atMs in prevStart until windowStart }.sumOf { it.reward }
+        else raw.filter { it.atMs in prevStart until windowStart }.sumOf { it.reward } +
+            rollups.filter { rollupMs(it) in prevStart until windowStart }.sumOf { it.coins }
 
     // Cột theo ngày (chỉ tính các entry nằm trong cửa sổ biểu đồ)
     val coins  = DoubleArray(spanDays); val jobs = IntArray(spanDays)
@@ -95,6 +105,12 @@ fun summarizeEarnings(
         if (e.atMs >= todayStart) { todayCoins += e.reward; todayJobs++ }
     }
 
+    for (r in rollupsInRange) {
+        if (r.kind == "LIKE") { likeCoins += r.coins; likeJobs += r.jobs.toInt() }
+        else { followCoins += r.coins; followJobs += r.jobs.toInt() }
+        byAccount[r.account] = (byAccount[r.account] ?: 0.0) + r.coins
+    }
+
     val days = (0 until spanDays).map { i ->
         cal.timeInMillis = addDays(windowStart, i)
         val label = "%02d/%02d".format(cal.get(Calendar.DAY_OF_MONTH), cal.get(Calendar.MONTH) + 1)
@@ -102,8 +118,8 @@ fun summarizeEarnings(
     }
     var run = 0.0
     val cumulative = days.map { run += it.coins; run.toFloat() }
-    val totalCoins = inRange.sumOf { it.reward }
-    val totalJobs  = inRange.size
+    val totalCoins = inRange.sumOf { it.reward } + rollupsInRange.sumOf { it.coins }
+    val totalJobs  = inRange.size + rollupsInRange.sumOf { it.jobs }.toInt()
 
     return EarningsSummary(
         totalCoins  = totalCoins,

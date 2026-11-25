@@ -69,7 +69,7 @@ Logical envelope:
 
 ~~~json
 {
-  "formatVersion": 3,
+  "formatVersion": 4,
   "createdAt": 0,
   "appVersion": "1.12.0",
   "sourceInstallId": "uuid",
@@ -80,10 +80,13 @@ Logical envelope:
     "schedules": [],
     "earnings": [],
     "accountStatContributions": [],
-    "tombstones": []
+    "tombstones": [],
+    "earningRollups": []
   }
 }
 ~~~
+
+**Format versions (v1.13.0, ADR-0029).** The app always writes **v4**. It still reads v2 and v3 through their frozen wire models (`BackupSnapshotV2/V3`, `BackupEarningLegacy`) and upgrades them in memory (empty `earningRollups`, earnings without `origin`). v4 adds `earningRollups` (per-installation, per-UTC-day totals of compacted old earnings) and an optional `origin` on each earning. An app older than v1.13.0 rejects v4 (unsupported schema) until it is updated — update all devices together.
 
 Encoding contract:
 

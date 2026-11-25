@@ -330,4 +330,28 @@ class BackupSnapshotValidatorTest {
             )
         )
     }
+
+    @Test
+    fun validatesEarningRollupsAgainstTheirDeterministicId() {
+        val base = validSnapshot()
+        val origin = base.sourceInstallId
+        val id = com.atpro.data.EarningsRollupPolicy.rollupId(origin, 5L, "LIKE", "acc")
+        val ok = BackupEarningRollup(id, origin, 5L, "LIKE", "acc", 12.5, 3L)
+        BackupSnapshotValidator.validate(base.copy(datasets = base.datasets.copy(earningRollups = listOf(ok))))
+
+        // id không khớp công thức (máy, ngày, loại, tài khoản) → từ chối
+        assertRejected(base.copy(datasets = base.datasets.copy(earningRollups = listOf(ok.copy(epochDay = 6L)))))
+        // id trùng nhau
+        assertRejected(base.copy(datasets = base.datasets.copy(earningRollups = listOf(ok, ok))))
+        // giá trị không hợp lệ
+        assertRejected(base.copy(datasets = base.datasets.copy(earningRollups = listOf(ok.copy(jobs = 0L)))))
+        assertRejected(base.copy(datasets = base.datasets.copy(earningRollups = listOf(ok.copy(coins = -1.0)))))
+        assertRejected(base.copy(datasets = base.datasets.copy(earningRollups = listOf(ok.copy(coins = Double.NaN)))))
+        // origin của dòng thô phải là UUID chuẩn nếu có
+        assertRejected(
+            base.copy(datasets = base.datasets.copy(
+                earnings = listOf(base.datasets.earnings.single().copy(origin = "not-a-uuid"))
+            ))
+        )
+    }
 }

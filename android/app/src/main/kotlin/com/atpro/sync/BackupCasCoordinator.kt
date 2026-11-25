@@ -83,7 +83,7 @@ class BackupCasCoordinator(
                     }
                     BackupSnapshotValidator.validate(it.snapshot)
                     if (it.snapshot.formatVersion != BackupSnapshot.CURRENT_FORMAT_VERSION) {
-                        throw BackupSnapshotException("Local snapshot must use v3")
+                        throw BackupSnapshotException("Local snapshot must use the current format")
                     }
                 }
             } catch (cancelled: CancellationException) {
@@ -110,10 +110,7 @@ class BackupCasCoordinator(
             }
             if (remote != null && (
                     remote.revision < 0L ||
-                        remote.schemaVersion !in setOf(
-                            BackupSnapshot.LEGACY_FORMAT_VERSION,
-                            BackupSnapshot.CURRENT_FORMAT_VERSION,
-                        ) ||
+                        remote.schemaVersion !in BackupSnapshot.SUPPORTED_WIRE_VERSIONS ||
                         remote.payload.isBlank() ||
                         remote.payload.length % 4 != 0 ||
                         !BASE64_PATTERN.matches(remote.payload) ||

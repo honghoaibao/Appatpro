@@ -53,6 +53,7 @@ class BackupMergeEngineTest {
         earnings: List<BackupEarning> = emptyList(),
         tombstones: List<BackupTombstone> = emptyList(),
         createdAt: Long = 100L,
+        rollups: List<BackupEarningRollup> = emptyList(),
     ) = BackupSnapshot(
         formatVersion = BackupSnapshot.CURRENT_FORMAT_VERSION,
         createdAt = createdAt,
@@ -66,8 +67,15 @@ class BackupMergeEngineTest {
             earnings = earnings,
             accountStatContributions = contributions,
             tombstones = tombstones,
+            earningRollups = rollups,
         ),
     )
+
+    private fun rollup(origin: String, day: Long, jobs: Long, coins: Double, kind: String = "LIKE") =
+        BackupEarningRollup(
+            id = com.atpro.data.EarningsRollupPolicy.rollupId(origin, day, kind, accountKey),
+            origin = origin, epochDay = day, kind = kind, account = accountKey, coins = coins, jobs = jobs,
+        )
 
     private fun statusConflict(result: BackupMergeResult): BackupMergeConflict =
         (result as BackupMergeResult.Conflicted).conflicts.single()
@@ -443,5 +451,76 @@ class BackupMergeEngineTest {
             conflicts.sortedWith(compareBy({ it.dataset }, { it.entityKey }, { it.kind.name })),
             conflicts,
         )
+    }
+
+    // ── v1.13.0: dòng tổng thu nhập ─────────────────────────────────────────────────────────────
+
+    @Test
+    fun earningRollupsFromDifferentInstallationsAreBothKeptAndMergeIsOrderIndependent() {
+        val local = snapshot(installA, rollups = listOf(rollup(installA, 5L, jobs = 100L, coins = 500.0)))
+        val remote = snapshot(
+            installB,
+            contributions = listOf(contribution(installB)),
+            rollups = listOf(rollup(installB, 5L, jobs = 40L, coins = 100.0)),
+        )
+
+        val ab = (BackupMergeEngine.merge(local, remote) as BackupMergeResult.Merged).snapshot
+        val ba = (BackupMergeEngine.merge(remote, local) as BackupMergeResult.Merged).snapshot
+
+        assertEquals(2, ab.datasets.earningRollups.size)
+        assertEquals(600.0, ab.datasets.earningRollups.sumOf { it.coins }, 0.0)
+        assertEquals(ab.datasets.earningRollups, ba.datasets.earningRollups)
+        BackupSnapshotValidator.validate(ab)
+    }
+
+    @Test
+    fun sameRollupIdKeepsTheLargerOneInsteadOfDoubleCounting() {
+        val small = rollup(installA, 5L, jobs = 10L, coins = 50.0)
+        val large = rollup(installA, 5L, jobs = 12L, coins = 60.0)
+        val local = snapshot(installA, rollups = listOf(small))
+        val remote = snapshot(
+            installB, contributions = listOf(contribution(installB)), rollups = listOf(large),
+        )
+
+        val merged = (BackupMergeEngine.merge(local, remote) as BackupMergeResult.Merged).snapshot
+        assertEquals(listOf(large), merged.datasets.earningRollups)
+
+        // Gộp lặp lại với chính kết quả: không đổi (idempotent).
+        val again = (BackupMergeEngine.merge(merged, remote) as BackupMergeResult.Merged).snapshot
+        assertEquals(merged.datasets.earningRollups, again.datasets.earningRollups)
+    }
+
+    @Test
+    fun rawEarningsCoveredByARollupAreDroppedButLegacyAndOtherDaysAreKept() {
+        val dayMs = com.atpro.data.EarningsRollupPolicy.MS_PER_DAY
+        val covered = BackupEarning("11111111-1111-4111-8111-111111111111", 5 * dayMs + 1_000L, "LIKE", 1.0, accountKey, installB)
+        val legacy = BackupEarning("22222222-2222-4222-8222-222222222222", 5 * dayMs + 2_000L, "LIKE", 1.0, accountKey, null)
+        val otherDay = BackupEarning("33333333-3333-4333-8333-333333333333", 6 * dayMs + 1_000L, "LIKE", 1.0, accountKey, installB)
+        val otherOrigin = BackupEarning("44444444-4444-4444-8444-444444444444", 5 * dayMs + 3_000L, "LIKE", 1.0, accountKey, installA)
+
+        val local = snapshot(installA, earnings = listOf(covered, legacy, otherDay, otherOrigin))
+        val remote = snapshot(
+            installB,
+            contributions = listOf(contribution(installB)),
+            rollups = listOf(rollup(installB, 5L, jobs = 1L, coins = 1.0)),
+        )
+
+        val merged = (BackupMergeEngine.merge(local, remote) as BackupMergeResult.Merged).snapshot
+        assertEquals(
+            setOf(legacy.id, otherDay.id, otherOrigin.id),
+            merged.datasets.earnings.map { it.id }.toSet(),
+        )
+        BackupSnapshotValidator.validate(merged)
+    }
+
+    @Test
+    fun sameEarningWithAndWithoutOriginIsOneEventNotAConflict() {
+        val withOrigin = BackupEarning(earningId, 10L, "LIKE", 1.5, accountKey, installA)
+        val without = withOrigin.copy(origin = null)
+        val local = snapshot(installA, earnings = listOf(without))
+        val remote = snapshot(installB, contributions = listOf(contribution(installB)), earnings = listOf(withOrigin))
+
+        val merged = (BackupMergeEngine.merge(local, remote) as BackupMergeResult.Merged).snapshot
+        assertEquals(listOf(withOrigin), merged.datasets.earnings)
     }
 }

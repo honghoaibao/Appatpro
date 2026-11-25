@@ -235,8 +235,7 @@ class SupabaseBackupRemoteStore(
         const val TABLE_PATH = "/rest/v1/user_backups"
         const val RPC_PATH = "/rest/v1/rpc/save_user_backup"
         val BASE64_PATTERN = Regex("^[A-Za-z0-9+/]+={0,2}$")
-        val SUPPORTED_REMOTE_SCHEMA_VERSIONS =
-            setOf(BackupSnapshot.LEGACY_FORMAT_VERSION, BackupSnapshot.CURRENT_FORMAT_VERSION)
+        val SUPPORTED_REMOTE_SCHEMA_VERSIONS = BackupSnapshot.SUPPORTED_WIRE_VERSIONS
         val json = Json { isLenient = false; ignoreUnknownKeys = false }
     }
 }

@@ -278,6 +278,20 @@ class BackupSnapshotBuilder(context: Context) {
                     kind = it.kind,
                     reward = it.reward,
                     account = it.account,
+                    origin = it.origin,
+                )
+            }
+        val rollupModels = earningsSnapshot.rollups
+            .sortedWith(com.atpro.data.EarningsRollupPolicy.ORDER)
+            .map {
+                BackupEarningRollup(
+                    id = it.id,
+                    origin = it.origin,
+                    epochDay = it.epochDay,
+                    kind = it.kind,
+                    account = it.account,
+                    coins = it.coins,
+                    jobs = it.jobs,
                 )
             }
 
@@ -304,6 +318,7 @@ class BackupSnapshotBuilder(context: Context) {
                 safeConfigs = safeConfigs,
                 schedules = schedules,
                 earnings = earningModels,
+                earningRollups = rollupModels,
                 accountStatContributions = accountContributions,
                 tombstones = tombstoneModels,
             ),
