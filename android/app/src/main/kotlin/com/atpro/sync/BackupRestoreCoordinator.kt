@@ -207,8 +207,11 @@ class BackupRestoreCoordinator(context: Context) {
                         // createdAt is reconciled across installations by preserving
                         // the earliest timestamp. A newer local value may come from re-adding
                         // the same account after reinstall, not from a concurrent status edit.
-                        if (incoming.status != current.status ||
-                            incoming.checkpoint != current.checkpoint
+                        // v1.12.7: bản gộp có thể mang trạng thái MỚI HƠN từ đám mây (chính sách "mới nhất thắng"),
+                        // nên khác trạng thái là bình thường. Chỉ từ chối khi máy này vừa sửa SAU khi gộp
+                        // (dấu thời gian cục bộ mới hơn bản gộp) — lúc đó phải gộp lại.
+                        if ((incoming.status != current.status || incoming.checkpoint != current.checkpoint) &&
+                            current.statusUpdatedAt > incoming.statusUpdatedAt
                         ) {
                             throw BackupRestoreException(
                                 "Account changed locally after merge staging: ${current.username}"
@@ -339,7 +342,10 @@ class BackupRestoreCoordinator(context: Context) {
                             }
                         } else {
                             val incoming = incomingSafeConfigs[current.key]
-                            if (incoming != null && incoming.value != current.value) {
+                            // v1.12.7: giá trị khác là bình thường khi đám mây mới hơn; chỉ từ chối nếu máy này sửa sau khi gộp.
+                            if (incoming != null && incoming.value != current.value &&
+                                current.updatedAt > incoming.updatedAt
+                            ) {
                                 throw BackupRestoreException(
                                     "Configuration changed locally after merge staging: ${current.key}"
                                 )
@@ -377,15 +383,22 @@ class BackupRestoreCoordinator(context: Context) {
                                             "Existing schedule cannot be safely compared during restore: $scheduleId"
                                         )
                                     if (!sameScheduleDefinition(currentDefinition, incoming)) {
-                                        throw BackupRestoreException(
-                                            "Schedule changed locally after merge staging: $scheduleId"
+                                        if (current.updatedAt > incoming.updatedAt) {
+                                            throw BackupRestoreException(
+                                                "Schedule changed locally after merge staging: $scheduleId"
+                                            )
+                                        }
+                                        // v1.12.7: định nghĩa từ đám mây mới hơn thắng. Nhập ở trạng thái TẮT và huỷ báo thức
+                                        // cũ (giống lịch đến từ máy khác) — giờ chạy đã đổi nên báo thức cũ không còn đúng.
+                                        finalEligibleConfigs[current.key] = scheduleConfig(incoming)
+                                        scheduleIdsToCancel += scheduleId
+                                    } else {
+                                        // Keep the local enabled/disabled choice. A cloud restore must
+                                        // not turn off a schedule the user already enabled on this device.
+                                        finalEligibleConfigs[current.key] = current.copy(
+                                            updatedAt = maxOf(current.updatedAt, incoming.updatedAt)
                                         )
                                     }
-                                    // Keep the local enabled/disabled choice. A cloud restore must
-                                    // not turn off a schedule the user already enabled on this device.
-                                    finalEligibleConfigs[current.key] = current.copy(
-                                        updatedAt = maxOf(current.updatedAt, incoming.updatedAt)
-                                    )
                                 } else {
                                     // A local schedule created after snapshot capture is untouched.
                                     finalEligibleConfigs[current.key] = current

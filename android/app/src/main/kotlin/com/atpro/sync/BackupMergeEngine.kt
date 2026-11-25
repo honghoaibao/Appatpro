@@ -5,6 +5,7 @@ package com.atpro.sync
  * enough trustworthy information to choose one value automatically.
  */
 enum class BackupMergeConflictKind {
+    /** v1.12.7: [BackupMergeEngine] không còn tạo ACCOUNT_STATUS / CONFIG_VALUE / SCHEDULE_DEFINITION (giải bằng "mới nhất thắng"); giữ để đọc kết quả cũ. */
     ACCOUNT_STATUS,
     SESSION_CONTENT,
     CONFIG_VALUE,
@@ -41,7 +42,25 @@ object BackupMergeEngine {
     private data class Sourced<T>(
         val value: T,
         val sourceInstallId: String,
+        /** Thời điểm tạo snapshot chứa bản ghi — mốc chặn trên cho dấu thời gian của bản ghi (xem [newerWins]). */
+        val snapshotAt: Long,
     )
+
+    /**
+     * Chính sách giải xung đột (v1.12.7, chủ app xác nhận): bản có dấu thời gian MỚI HƠN thắng; bằng nhau thì
+     * ĐÁM MÂY ([remote]) thắng. Dấu thời gian của mỗi bản bị chặn ở [Sourced.snapshotAt] — một bản ghi không thể
+     * được sửa sau khi snapshot chứa nó đã tạo, nên đồng hồ máy lệch/giả (vd `Long.MAX_VALUE`) không thể thắng
+     * chỉ bằng cách khai mốc tương lai. Hàm thuần, kết quả không phụ thuộc thứ tự gọi ngoài vai local/remote.
+     */
+    private fun <T> newerWins(
+        local: Sourced<T>,
+        remote: Sourced<T>,
+        stampOf: (T) -> Long,
+    ): Sourced<T> {
+        val localStamp = minOf(stampOf(local.value), local.snapshotAt)
+        val remoteStamp = minOf(stampOf(remote.value), remote.snapshotAt)
+        return if (localStamp > remoteStamp) local else remote
+    }
 
     fun merge(local: BackupSnapshot, remote: BackupSnapshot): BackupMergeResult {
         // Defensive validation: malformed snapshots never enter the merge domain.
@@ -52,8 +71,8 @@ object BackupMergeEngine {
         val tombstones = mergeTombstones(local, remote, conflicts)
 
         val accountRecords = filterDeleted(
-            records = local.datasets.accounts.map { Sourced(it, local.sourceInstallId) } +
-                remote.datasets.accounts.map { Sourced(it, remote.sourceInstallId) },
+            records = local.datasets.accounts.map { Sourced(it, local.sourceInstallId, local.createdAt) } +
+                remote.datasets.accounts.map { Sourced(it, remote.sourceInstallId, remote.createdAt) },
             dataset = BackupTombstoneDataset.ACCOUNTS,
             keyOf = { normalizeAccountKey(it.username) },
             tombstones = tombstones,
@@ -62,8 +81,8 @@ object BackupMergeEngine {
         val mergedAccounts = mergeAccounts(accountRecords, conflicts)
 
         val safeConfigRecords = filterDeleted(
-            records = local.datasets.safeConfigs.map { Sourced(it, local.sourceInstallId) } +
-                remote.datasets.safeConfigs.map { Sourced(it, remote.sourceInstallId) },
+            records = local.datasets.safeConfigs.map { Sourced(it, local.sourceInstallId, local.createdAt) } +
+                remote.datasets.safeConfigs.map { Sourced(it, remote.sourceInstallId, remote.createdAt) },
             dataset = BackupTombstoneDataset.SAFE_CONFIGS,
             keyOf = { it.key },
             tombstones = tombstones,
@@ -72,8 +91,8 @@ object BackupMergeEngine {
         val mergedSafeConfigs = mergeSafeConfigs(safeConfigRecords, conflicts)
 
         val scheduleRecords = filterDeleted(
-            records = local.datasets.schedules.map { Sourced(it, local.sourceInstallId) } +
-                remote.datasets.schedules.map { Sourced(it, remote.sourceInstallId) },
+            records = local.datasets.schedules.map { Sourced(it, local.sourceInstallId, local.createdAt) } +
+                remote.datasets.schedules.map { Sourced(it, remote.sourceInstallId, remote.createdAt) },
             dataset = BackupTombstoneDataset.SCHEDULES,
             keyOf = { it.scheduleId },
             tombstones = tombstones,
@@ -264,11 +283,20 @@ object BackupMergeEngine {
                 val second = group.last().value
                 when {
                     first.status != second.status || first.checkpoint != second.checkpoint -> {
-                        conflicts += conflict(
-                            BackupTombstoneDataset.ACCOUNTS, key,
-                            BackupMergeConflictKind.ACCOUNT_STATUS,
+                        // Danh sách ghép theo thứ tự [local, remote] nên first = máy này, last = đám mây.
+                        // Máy cài mới nhập lại tài khoản mang trạng thái mặc định (statusUpdatedAt chưa vượt createdAt):
+                        // đó KHÔNG phải một lần sửa, nên không được ghi đè trạng thái thật trên đám mây.
+                        val localEdited = first.statusUpdatedAt > first.createdAt
+                        val remoteEdited = second.statusUpdatedAt > second.createdAt
+                        val winner = when {
+                            localEdited && !remoteEdited -> group.first()
+                            remoteEdited && !localEdited -> group.last()
+                            else -> newerWins(group.first(), group.last()) { it.statusUpdatedAt }
+                        }.value
+                        winner.copy(
+                            createdAt = minOf(first.createdAt, second.createdAt),
+                            statusUpdatedAt = maxOf(first.statusUpdatedAt, second.statusUpdatedAt),
                         )
-                        null
                     }
                     else -> first.copy(
                         // A fresh installation can re-add an account that already exists in
@@ -302,10 +330,8 @@ object BackupMergeEngine {
             } else {
                 val second = group.last().value
                 if (first.value != second.value) {
-                    conflicts += conflict(
-                        "safeConfigs", key, BackupMergeConflictKind.CONFIG_VALUE
-                    )
-                    null
+                    newerWins(group.first(), group.last()) { it.updatedAt }.value
+                        .copy(updatedAt = maxOf(first.updatedAt, second.updatedAt))
                 } else {
                     first.copy(updatedAt = maxOf(first.updatedAt, second.updatedAt))
                 }
@@ -331,10 +357,8 @@ object BackupMergeEngine {
             } else {
                 val second = group.last().value
                 if (!sameScheduleDefinition(first, second)) {
-                    conflicts += conflict(
-                        "schedules", key, BackupMergeConflictKind.SCHEDULE_DEFINITION
-                    )
-                    null
+                    newerWins(group.first(), group.last()) { it.updatedAt }.value
+                        .copy(updatedAt = maxOf(first.updatedAt, second.updatedAt))
                 } else {
                     first.copy(updatedAt = maxOf(first.updatedAt, second.updatedAt))
                 }

@@ -117,16 +117,63 @@ class BackupMergeEngineTest {
     }
 
     @Test
-    fun accountStatusConflictIgnoresDeviceTimestampOrdering() {
+    fun accountStatusNewerEditWins() {
         val local = snapshot(installA, accounts = listOf(account("active", false, statusUpdatedAt = 10L)))
+        val remote = snapshot(
+            installB,
+            accounts = listOf(account("banned", false, statusUpdatedAt = 50L)),
+            contributions = listOf(contribution(installB)),
+        )
+
+        val merged = (BackupMergeEngine.merge(local, remote) as BackupMergeResult.Merged).snapshot
+        assertEquals("banned", merged.datasets.accounts.single().status)
+        assertEquals(50L, merged.datasets.accounts.single().statusUpdatedAt)
+
+        val swapped = (BackupMergeEngine.merge(remote, local) as BackupMergeResult.Merged).snapshot
+        assertEquals("banned", swapped.datasets.accounts.single().status)
+    }
+
+    @Test
+    fun accountStatusTieGoesToCloud() {
+        val local = snapshot(installA, accounts = listOf(account("active", false, statusUpdatedAt = 10L)))
+        val remote = snapshot(
+            installB,
+            accounts = listOf(account("banned", false, statusUpdatedAt = 10L)),
+            contributions = listOf(contribution(installB)),
+        )
+        val merged = (BackupMergeEngine.merge(local, remote) as BackupMergeResult.Merged).snapshot
+        assertEquals("banned", merged.datasets.accounts.single().status)
+    }
+
+    @Test
+    fun accountStatusTimestampBeyondItsOwnSnapshotIsClamped() {
+        // Đồng hồ máy kia giả/lệch: khai statusUpdatedAt = MAX nhưng snapshot của nó tạo lúc 80 → chỉ tính 80 (< 90 của máy này).
+        val local = snapshot(installA, accounts = listOf(account("active", false, statusUpdatedAt = 90L)))
         val remote = snapshot(
             installB,
             accounts = listOf(account("banned", false, statusUpdatedAt = Long.MAX_VALUE)),
             contributions = listOf(contribution(installB)),
+            createdAt = 80L,
         )
+        val merged = (BackupMergeEngine.merge(local, remote) as BackupMergeResult.Merged).snapshot
+        assertEquals("active", merged.datasets.accounts.single().status)
+    }
 
-        val result = BackupMergeEngine.merge(local, remote)
-        assertEquals(BackupMergeConflictKind.ACCOUNT_STATUS, statusConflict(result).kind)
+    @Test
+    fun freshInstallDefaultStatusDoesNotOverrideCloudEdit() {
+        // Máy cài mới nhập lại tài khoản: statusUpdatedAt == createdAt (chưa từng sửa) dù mốc giờ MỚI hơn đám mây.
+        val local = snapshot(
+            installA,
+            accounts = listOf(account("active", false, createdAt = 60L, statusUpdatedAt = 60L)),
+        )
+        val remote = snapshot(
+            installB,
+            accounts = listOf(account("banned", false, createdAt = 1L, statusUpdatedAt = 20L)),
+            contributions = listOf(contribution(installB)),
+        )
+        val merged = (BackupMergeEngine.merge(local, remote) as BackupMergeResult.Merged).snapshot
+        assertEquals("banned", merged.datasets.accounts.single().status)
+        assertEquals(1L, merged.datasets.accounts.single().createdAt)
     }
 
     @Test
@@ -170,15 +217,29 @@ class BackupMergeEngineTest {
     }
 
     @Test
-    fun differingConfigValuesConflictEvenWhenOneTimestampLooksNewer() {
-        val local = snapshot(installA, configs = listOf(BackupSafeConfig("like_rate", "0.2", 10L)))
+    fun differingConfigValuesNewerWinsAndTieGoesToCloud() {
+        fun merged(localValue: String, localAt: Long, remoteValue: String, remoteAt: Long): BackupSafeConfig {
+            val local = snapshot(installA, configs = listOf(BackupSafeConfig("like_rate", localValue, localAt)))
+            val remote = snapshot(installB, configs = listOf(BackupSafeConfig("like_rate", remoteValue, remoteAt)))
+            return (BackupMergeEngine.merge(local, remote) as BackupMergeResult.Merged)
+                .snapshot.datasets.safeConfigs.single()
+        }
+        assertEquals(BackupSafeConfig("like_rate", "0.9", 20L), merged("0.2", 10L, "0.9", 20L))
+        assertEquals(BackupSafeConfig("like_rate", "0.2", 20L), merged("0.2", 20L, "0.9", 10L))
+        assertEquals(BackupSafeConfig("like_rate", "0.9", 10L), merged("0.2", 10L, "0.9", 10L))
+    }
+
+    @Test
+    fun configTimestampBeyondItsOwnSnapshotIsClamped() {
+        val local = snapshot(installA, configs = listOf(BackupSafeConfig("like_rate", "0.2", 90L)))
         val remote = snapshot(
-            installB, configs = listOf(BackupSafeConfig("like_rate", "0.9", Long.MAX_VALUE))
+            installB,
+            configs = listOf(BackupSafeConfig("like_rate", "0.9", Long.MAX_VALUE)),
+            createdAt = 80L,
         )
-        assertEquals(
-            BackupMergeConflictKind.CONFIG_VALUE,
-            statusConflict(BackupMergeEngine.merge(local, remote)).kind,
-        )
+        val merged = (BackupMergeEngine.merge(local, remote) as BackupMergeResult.Merged)
+            .snapshot.datasets.safeConfigs.single()
+        assertEquals("0.2", merged.value)
     }
 
     @Test
@@ -199,7 +260,7 @@ class BackupMergeEngineTest {
     }
 
     @Test
-    fun differentScheduleDefinitionsConflict() {
+    fun differentScheduleDefinitionsNewerWinsAndStaysDisabled() {
         val local = snapshot(
             installA,
             schedules = listOf(BackupSchedule("night", "Night", 21, 0, listOf(1), true,
@@ -210,10 +271,15 @@ class BackupMergeEngineTest {
             schedules = listOf(BackupSchedule("night", "Changed", 21, 0, listOf(1), true,
                 listOf(accountKey), "NORMAL", 20L))
         )
-        assertEquals(
-            BackupMergeConflictKind.SCHEDULE_DEFINITION,
-            statusConflict(BackupMergeEngine.merge(local, remote)).kind,
-        )
+        val remoteNewer = (BackupMergeEngine.merge(local, remote) as BackupMergeResult.Merged)
+            .snapshot.datasets.schedules.single()
+        assertEquals("Changed", remoteNewer.label)
+        assertEquals(20L, remoteNewer.updatedAt)
+        assertFalse(remoteNewer.enabledAtSource)
+
+        val localNewer = (BackupMergeEngine.merge(remote, local) as BackupMergeResult.Merged)
+            .snapshot.datasets.schedules.single()
+        assertEquals("Changed", localNewer.label)   // bên mới hơn (updatedAt=20) thắng bất kể vai local/remote
     }
 
     @Test

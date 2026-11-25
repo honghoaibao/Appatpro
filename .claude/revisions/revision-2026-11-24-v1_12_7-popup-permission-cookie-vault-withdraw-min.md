@@ -56,9 +56,19 @@ thật chưa xác định được vì chi tiết lỗi bị nuốt (chỉ xung 
   `F4fLoginDialog` tách file riêng, làm lại (huy hiệu, ô nhập có biểu tượng, ghi chú bảo mật, cuộn được khi bàn phím mở).
 - Test: `SyncFailureSummaryTest` (mới), `SyncStatusTest` (+4).
 
-**Chưa làm (cần quyết định chính sách)**: tự giải quyết xung đột cũ/mới. Merge hiện huỷ cả lần khi có xung đột và 5 guard trong
+**(Đã làm ở mục 8)**: tự giải quyết xung đột cũ/mới — bản đầu mục 7 ghi "chưa làm". Merge hiện huỷ cả lần khi có xung đột và 5 guard trong
 `BackupRestoreCoordinator` cũng từ chối giá trị tự giải — đổi phải sửa cả hai + nhiều test và đảo chính sách "không tin mốc giờ
 thiết bị". Cần: (a) văn bản trạng thái thật sau bản này, (b) chọn "mới nhất thắng" hay "đám mây thắng".
 
 **Rollback**: revert commit; không đổi schema Room/Supabase, không đổi định dạng snapshot.
 **Rủi ro**: chưa chạy được Gradle/test trong sandbox — cần CI; đồng bộ định kỳ tăng số lần gọi Supabase (≤ 2/giờ/máy khi không đổi).
+
+## 8. Sync: giải xung đột "mới nhất thắng" (ADR-0028)
+Chủ app xác nhận chính sách: thu nhập cộng dồn theo sự kiện (đã có sẵn), còn trạng thái tài khoản / cấu hình / lịch → bản mới hơn thắng, bằng nhau thì đám mây thắng.
+- `BackupMergeEngine`: `newerWins` (chặn dấu thời gian ở `createdAt` snapshot); không còn tạo ACCOUNT_STATUS / CONFIG_VALUE / SCHEDULE_DEFINITION;
+  tài khoản chưa từng sửa trạng thái không ghi đè bên đã sửa.
+- `BackupRestoreCoordinator`: 3 điểm kiểm tra chỉ từ chối khi dữ liệu cục bộ mới hơn bản gộp; lịch thắng từ đám mây nhập TẮT + huỷ báo thức.
+- Test: `BackupMergeEngineTest` — 3 test xung đột cũ thay bằng test chính sách mới (mới hơn thắng, hoà → đám mây, chặn mốc tương lai,
+  cài mới không ghi đè). **Chưa chạy được** (sandbox không có Gradle).
+- Ý tưởng chủ app (mỗi 0h một UUID mới cho thu nhập theo ngày): chưa làm — cần gộp thành tổng theo ngày/máy, đổi định dạng snapshot (format v4).
+**Rollback**: revert commit (không đổi schema). **Rủi ro**: lịch bị tắt sau đồng bộ nếu đám mây thắng; một lần sửa cũ hơn bị thua âm thầm.
