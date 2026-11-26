@@ -163,13 +163,28 @@ class BackupCasCoordinatorTest {
     @Test
     fun mergeConflictPreventsAnyRemoteWrite() = runBlocking {
         val codec = FakeCodec()
-        val remotePayload = codec.encode(snapshot(source = installB, status = "banned"))
+        // v1.12.7: trạng thái tài khoản lệch nay do "mới nhất thắng" xử lý; xung đột thật còn lại là tái dùng tombstone ID.
+        fun withTombstone(base: BackupSnapshot, entityKey: String) = base.copy(
+            datasets = base.datasets.copy(
+                tombstones = listOf(
+                    BackupTombstone(
+                        "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+                        BackupTombstoneDataset.ACCOUNTS,
+                        entityKey,
+                        base.sourceInstallId,
+                        10L,
+                    )
+                )
+            )
+        )
+        val remotePayload = codec.encode(withTombstone(snapshot(source = installB), "other_account"))
         val remote = FakeRemote().apply {
             reads += BackupRemoteReadResult.Found(
                 RemoteBackupRecord(1L, BackupSnapshot.CURRENT_FORMAT_VERSION, remotePayload.payload, remotePayload.checksum, null)
             )
         }
-        val result = BackupCasCoordinator(remote, BackupSnapshotProvider { buildResult() }, BackupOwnerBindingValidator { true }, codec)
+        val localSnapshot = withTombstone(snapshot(), "deleted_account")
+        val result = BackupCasCoordinator(remote, BackupSnapshotProvider { buildResult(localSnapshot) }, BackupOwnerBindingValidator { true }, codec)
             .run(authSession())
         assertTrue(result is BackupCasResult.Conflicted)
         assertTrue(remote.expectedRevisions.isEmpty())
