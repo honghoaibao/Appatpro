@@ -28,7 +28,7 @@ class BackupAcknowledgementCoordinatorTest {
         localRevision: Long = 2L,
     ): BackupSnapshotBuildResult {
         val snap = BackupSnapshot(
-            formatVersion = 3,
+            formatVersion = BackupSnapshot.CURRENT_FORMAT_VERSION,
             createdAt = 100L,
             appVersion = "1.12.0",
             sourceInstallId = install,

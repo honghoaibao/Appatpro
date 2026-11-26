@@ -43,7 +43,7 @@ class BackupCasCoordinatorTest {
         status: String = "active",
         createdAt: Long = 10L,
     ) = BackupSnapshot(
-        formatVersion = 3,
+        formatVersion = BackupSnapshot.CURRENT_FORMAT_VERSION,
         createdAt = createdAt,
         appVersion = "1.12.0",
         sourceInstallId = source,
@@ -66,10 +66,10 @@ class BackupCasCoordinatorTest {
         override fun encode(snapshot: BackupSnapshot): EncodedBackupPayload {
             val payload = Base64.getEncoder().encodeToString(("payload-" + ++nextId).toByteArray())
             snapshots[payload] = snapshot
-            return EncodedBackupPayload(3, payload, nextId.toString().padStart(64, '0'), 10, payload.length)
+            return EncodedBackupPayload(BackupSnapshot.CURRENT_FORMAT_VERSION, payload, nextId.toString().padStart(64, '0'), 10, payload.length)
         }
         override fun decode(payload: String, checksum: String, schemaVersion: Int): BackupSnapshot {
-            require(schemaVersion == 2 || schemaVersion == 3)
+            require(schemaVersion in BackupSnapshot.SUPPORTED_WIRE_VERSIONS)
             return snapshots[payload] ?: error("unknown fake payload")
         }
     }
@@ -94,7 +94,7 @@ class BackupCasCoordinatorTest {
     }
 
     @Test
-    fun missingRemoteRowCreatesRevisionOneFromLocalV3() = runBlocking {
+    fun missingRemoteRowCreatesRevisionOneFromLocalSnapshot() = runBlocking {
         val remote = FakeRemote().apply {
             reads += BackupRemoteReadResult.Missing
             commits += BackupRemoteCommitResult.Committed(1L)
@@ -121,10 +121,10 @@ class BackupCasCoordinatorTest {
         val latestRemotePayload = codec.encode(latestRemoteSnapshot)
         val remote = FakeRemote().apply {
             reads += BackupRemoteReadResult.Found(
-                RemoteBackupRecord(2L, 3, remotePayload.payload, remotePayload.checksum, null)
+                RemoteBackupRecord(2L, BackupSnapshot.CURRENT_FORMAT_VERSION, remotePayload.payload, remotePayload.checksum, null)
             )
             reads += BackupRemoteReadResult.Found(
-                RemoteBackupRecord(3L, 3, latestRemotePayload.payload, latestRemotePayload.checksum, null)
+                RemoteBackupRecord(3L, BackupSnapshot.CURRENT_FORMAT_VERSION, latestRemotePayload.payload, latestRemotePayload.checksum, null)
             )
             commits += BackupRemoteCommitResult.RevisionConflict
             commits += BackupRemoteCommitResult.Committed(4L)
@@ -166,7 +166,7 @@ class BackupCasCoordinatorTest {
         val remotePayload = codec.encode(snapshot(source = installB, status = "banned"))
         val remote = FakeRemote().apply {
             reads += BackupRemoteReadResult.Found(
-                RemoteBackupRecord(1L, 3, remotePayload.payload, remotePayload.checksum, null)
+                RemoteBackupRecord(1L, BackupSnapshot.CURRENT_FORMAT_VERSION, remotePayload.payload, remotePayload.checksum, null)
             )
         }
         val result = BackupCasCoordinator(remote, BackupSnapshotProvider { buildResult() }, BackupOwnerBindingValidator { true }, codec)
@@ -210,7 +210,7 @@ class BackupCasCoordinatorTest {
         val remotePayload = codec.encode(snapshot())
         val remote = FakeRemote().apply {
             reads += BackupRemoteReadResult.Found(
-                RemoteBackupRecord(2L, 3, remotePayload.payload, remotePayload.checksum, null)
+                RemoteBackupRecord(2L, BackupSnapshot.CURRENT_FORMAT_VERSION, remotePayload.payload, remotePayload.checksum, null)
             )
         }
         val result = BackupCasCoordinator(

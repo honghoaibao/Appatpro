@@ -434,19 +434,20 @@ class BackupMergeEngineTest {
 
     @Test
     fun conflictsAreSortedDeterministically() {
+        // v1.12.7: cấu hình/lịch xung đột nay do "mới nhất thắng" xử lý, nên dùng xung đột tombstone để thử thứ tự.
+        val otherId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        val firstA = BackupTombstone(tombstoneId, BackupTombstoneDataset.ACCOUNTS, "zeta", installA, 10L)
+        val firstB = BackupTombstone(otherId, BackupTombstoneDataset.ACCOUNTS, "beta", installA, 10L)
         val local = snapshot(
-            installA,
-            configs = listOf(BackupSafeConfig("like_rate", "0.2", 10L)),
-            schedules = listOf(BackupSchedule("night", "A", 21, 0, listOf(1), true,
-                listOf(accountKey), "NORMAL", 10L)),
+            installA, accounts = emptyList(), contributions = emptyList(),
+            tombstones = listOf(firstA, firstB),
         )
         val remote = snapshot(
-            installB,
-            configs = listOf(BackupSafeConfig("like_rate", "0.3", 10L)),
-            schedules = listOf(BackupSchedule("night", "B", 21, 0, listOf(1), true,
-                listOf(accountKey), "NORMAL", 10L)),
+            installB, accounts = emptyList(), contributions = emptyList(),
+            tombstones = listOf(firstA.copy(entityKey = "alpha"), firstB.copy(entityKey = "gamma")),
         )
         val conflicts = (BackupMergeEngine.merge(local, remote) as BackupMergeResult.Conflicted).conflicts
+        assertTrue(conflicts.size >= 2)
         assertEquals(
             conflicts.sortedWith(compareBy({ it.dataset }, { it.entityKey }, { it.kind.name })),
             conflicts,

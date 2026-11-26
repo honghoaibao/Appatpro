@@ -73,7 +73,7 @@ class SupabaseBackupRemoteStoreTest {
     @Test
     fun commitUsesOnlyCasArgumentsAndDoesNotSendOwnerId() = runBlocking {
         val fake = FakeTransport(SupabaseHttpResponse(200, """[{"revision":8}]"""))
-        val encoded = EncodedBackupPayload(3, "YWJj", "a".repeat(64), 3, 4)
+        val encoded = EncodedBackupPayload(BackupSnapshot.CURRENT_FORMAT_VERSION, "YWJj", "a".repeat(64), 3, 4)
         val result = store(fake).commit(7L, encoded, token)
         assertEquals(BackupRemoteCommitResult.Committed(8L), result)
         assertEquals("POST", fake.request?.method)
@@ -81,7 +81,7 @@ class SupabaseBackupRemoteStoreTest {
         assertEquals(token, fake.request?.accessToken)
         val body = Json.parseToJsonElement(fake.request!!.body!!).jsonObject
         assertEquals("7", body["p_expected_revision"].toString())
-        assertEquals("3", body["p_schema_version"].toString())
+        assertEquals(BackupSnapshot.CURRENT_FORMAT_VERSION.toString(), body["p_schema_version"].toString())
         assertFalse("owner_id" in body)
     }
 
@@ -90,7 +90,7 @@ class SupabaseBackupRemoteStoreTest {
         val fake = FakeTransport(
             SupabaseHttpResponse(400, """{"code":"P0001","message":"BACKUP_REVISION_CONFLICT"}""")
         )
-        val encoded = EncodedBackupPayload(3, "YWJj", "a".repeat(64), 3, 4)
+        val encoded = EncodedBackupPayload(BackupSnapshot.CURRENT_FORMAT_VERSION, "YWJj", "a".repeat(64), 3, 4)
         assertTrue(store(fake).commit(1L, encoded, token) is BackupRemoteCommitResult.RevisionConflict)
     }
 
@@ -107,7 +107,7 @@ class SupabaseBackupRemoteStoreTest {
         val fake = FakeTransport(SupabaseHttpResponse(200, "[]"))
         assertTrue(store(fake).read("not-a-uuid", token) is BackupRemoteReadResult.Failed)
         val size = BackupCodec.MAX_ENCODED_PAYLOAD_BYTES + 1
-        val oversized = EncodedBackupPayload(3, "A".repeat(size), "a".repeat(64), 1, size)
+        val oversized = EncodedBackupPayload(BackupSnapshot.CURRENT_FORMAT_VERSION, "A".repeat(size), "a".repeat(64), 1, size)
         assertTrue(store(fake).commit(0, oversized, token) is BackupRemoteCommitResult.Failed)
         assertEquals(null, fake.request)
     }
