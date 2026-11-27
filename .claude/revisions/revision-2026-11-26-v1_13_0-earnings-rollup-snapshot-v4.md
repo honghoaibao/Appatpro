@@ -21,4 +21,4 @@ App < v1.13.0 không đọc được snapshot v4 → cập nhật tất cả thi
 Revert nhánh. Snapshot v4 đã tải lên đám mây sẽ không đọc được bởi bản cũ; nếu cần quay lại hãy giữ bản v1.13.x trên mọi máy hoặc xoá bản sao lưu trên đám mây rồi để máy chủ lực đẩy lại.
 
 ## Rủi ro / việc sau
-Không bump `versionName`/`versionCode` (vẫn v1.12.6 trong build.gradle) — để chủ app quyết định khi phát hành. Dòng cũ không có `origin` không nén được. Cần nén theo tháng khi số dòng tổng lớn. Chưa có test cho `EarningsStore` (phụ thuộc Android `AtomicFile`) — nên thêm test thiết bị/Robolectric.
+`versionName` bump lên v1.13.0, `versionCode` 47 (trước đó build.gradle vẫn v1.12.6). Workflow `build.yml`: chạy tay để trống `version`/`build` thì lấy versionName từ build.gradle và build = run_number (trước đây mặc định cứng 1.3.3/35 nên mọi APK build tay đều hiện 1.3.3). Dòng cũ không có `origin` không nén được. Cần nén theo tháng khi số dòng tổng lớn. Chưa có test cho `EarningsStore` (phụ thuộc Android `AtomicFile`) — nên thêm test thiết bị/Robolectric.
